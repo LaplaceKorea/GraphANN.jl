@@ -104,18 +104,19 @@ function search(
     query,
 )
     empty!(algo)
-    pushcandidate!(algo, start_node)
 
     # Destructure argument
     graph = meta_graph.graph
     data = meta_graph.data
 
+    pushcandidate!(algo, Neighbor(start_node, distance(query, data[start_node])))
+
     while !done(algo)
-        p = getcandidate!(algo)
+        p = getid(getcandidate!(algo))
         visited!(algo, p)
-        for v in outneighbors(graph, p)
+        for v in LightGraphs.outneighbors(graph, p)
             # TODO: prefetch next vector
-            d = dist(query, @inbounds data[v])
+            d = distance(query, @inbounds data[v])
 
             # only bother to add if it's better than the worst currently tracked.
             if d < maximum(algo).distance
@@ -125,6 +126,12 @@ function search(
 
         # prune
         reduce!(algo)
+    end
+end
+
+function searchall(algo, meta_graph::MetaGraph, start_node, queries)
+    for query in queries
+        search(algo, meta_graph, start_node, query)
     end
 end
 

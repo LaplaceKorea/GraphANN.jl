@@ -13,4 +13,7 @@ include("algorithms.jl")
 # Data representation
 include("points/euclidean.jl")
 
+# Serialization and Deserialization
+include("io/io.jl")
+
 end #module

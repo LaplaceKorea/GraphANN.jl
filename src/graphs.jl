@@ -39,3 +39,23 @@ function random_graph(num_vertices, num_edges =  2 * ceil(Int, log(num_vertices)
     end
     return graph
 end
+
+# Find the medoid of a dataset
+function entry_point(data::Vector{T}) where {T}
+    # First, find the element wise sum
+    medioid = T(mapreduce(raw, (x,y) -> x .+ y, data) ./ length(data))
+    return first(nearest_neighbor(medioid, data))
+end
+
+function nearest_neighbor(query::T, data::Vector{T}) where {T}
+    min_ind = 0
+    min_dist = typemax(eltype(query))
+    for (i, x) in enumerate(data)
+        dist = distance(query, x)
+        if dist < min_dist
+            min_dist = dist
+            min_ind = i
+        end
+    end
+    return (min_ind, min_dist)
+end
