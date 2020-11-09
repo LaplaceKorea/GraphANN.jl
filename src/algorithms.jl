@@ -8,8 +8,9 @@ getid(x::Neighbor) = x.id
 
 idequal(a::Neighbor, b::Neighbor) = (getid(a) == getid(b))
 
-# TODO: These two definitions conflict ...
-Base.isless(a::Neighbor, b::Neighbor) = a.distance < b.distance
+function Base.isless(a::Neighbor, b::Neighbor)
+    return a.distance < b.distance || (a.distance == b.distance && a.id < b.id)
+end
 
 #####
 ##### GreedySearch
@@ -19,6 +20,7 @@ Base.isless(a::Neighbor, b::Neighbor) = a.distance < b.distance
 # used to control the greedy search.
 struct GreedySearch{H, T <: AbstractSet}
     search_list_size::Int
+
     # Pre-allocated buffer for the search list
     #
     # Strategy with the search list.
@@ -51,12 +53,17 @@ end
 
 Base.length(greedy::GreedySearch) = length(greedy.best)
 
+visited!(greedy::GreedySearch, vertex) = push!(greedy.visited, getid(vertex))
+
 # Get the closest non-visited vertex
 getcandidate!(greedy::GreedySearch) = popmin!(greedy.queue)
+
+isfull(greedy::GreedySearch) = length(greedy) >= greedy.search_list_size
 
 function pushcandidate!(greedy::GreedySearch, vertex)
     # If this has already been seen, don't do anything.
     in(getid(vertex), greedy.visited) && return nothing
+    visited!(greedy, vertex)
 
     # TODO: Distance check
 
@@ -91,7 +98,6 @@ function reduce!(greedy::GreedySearch)
     return nothing
 end
 
-visited!(greedy::GreedySearch, vertex) = push!(greedy.visited, vertex)
 
 #####
 ##### Greedy Search Implementation
@@ -110,16 +116,14 @@ function search(
     data = meta_graph.data
 
     pushcandidate!(algo, Neighbor(start_node, distance(query, data[start_node])))
-
     while !done(algo)
         p = getid(getcandidate!(algo))
-        visited!(algo, p)
         for v in LightGraphs.outneighbors(graph, p)
             # TODO: prefetch next vector
-            d = distance(query, @inbounds data[v])
+            @inbounds d = distance(query, data[v])
 
-            # only bother to add if it's better than the worst currently tracked.
-            if d < maximum(algo).distance
+            ## only bother to add if it's better than the worst currently tracked.
+            if !isfull(algo) || d < maximum(algo).distance
                 pushcandidate!(algo, Neighbor(v, d))
             end
         end
@@ -129,6 +133,7 @@ function search(
     end
 end
 
+# TODO: Thread local storage and multi-threading
 function searchall(algo, meta_graph::MetaGraph, start_node, queries)
     for query in queries
         search(algo, meta_graph, start_node, query)

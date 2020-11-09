@@ -16,7 +16,7 @@ function distance(a::E, b::E) where {N, T, E <: Euclidean{N,T}}
     s = zero(T)
     # Using @simd really helps out here with agressive loop unrolling.
     @simd for i in 1:N
-        @inbounds s += Distances.evaluate(Distances.Euclidean(), a[i], b[i])
+        @inbounds s += (a[i] - b[i]) ^ 2
     end
     return s
 end

@@ -27,6 +27,7 @@ function load_data(::Type{T}, loader::DiskANNLoader, io::IO) where {T}
 end
 
 @noinline function _load_data(::E, ::DiskANNLoader, io::IO, num_points) where {E}
+    @assert isbitstype(E)
     dest = Vector{E}(undef, num_points)
     read!(io, dest)
     return dest
@@ -63,7 +64,8 @@ function load_graph(::DiskANNLoader, io::IO, max_vertices; verbose = true)
 
         # Numbers in the buffer are the destination vertices.
         for u in buffer
-            LightGraphs.add_edge!(graph, u, v)
+            # Adjust for 0 vs 1 based indexing
+            LightGraphs.add_edge!(graph, v, u + 1)
         end
         v += 1
 
