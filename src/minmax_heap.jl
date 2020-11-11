@@ -151,7 +151,6 @@ heap where the minimum element is the root and the maximum
 element is a child of the root.
 """
 function is_minmax_heap(A::AbstractVector)
-
     for i in 1:length(A)
         if on_minlevel(i)
             # check that A[i] < children A[i]

@@ -1,17 +1,28 @@
 module GraphANN
 
 import DataStructures
-include("datastructures.jl")
 include("minmax_heap.jl")
 
+# Imports (avoid brining names into our namespace)
 import Distances
 import LightGraphs
+import SIMD
 
-include("graphs.jl")
-include("algorithms.jl")
+# Explicit imports
+import LightGraphs.SimpleGraphs: fadj
+
+# Import names
+using UnPack
+
+include("utils.jl")
 
 # Data representation
 include("points/euclidean.jl")
+
+include("graphs.jl")
+include("algorithms.jl")
+include("index/index.jl")
+
 
 # Serialization and Deserialization
 include("io/io.jl")

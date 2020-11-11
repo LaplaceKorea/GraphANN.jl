@@ -1,17 +1,3 @@
-struct Neighbor
-    id::Int
-    distance::Float64
-end
-
-getid(x::Int) = x
-getid(x::Neighbor) = x.id
-
-idequal(a::Neighbor, b::Neighbor) = (getid(a) == getid(b))
-
-function Base.isless(a::Neighbor, b::Neighbor)
-    return a.distance < b.distance || (a.distance == b.distance && a.id < b.id)
-end
-
 #####
 ##### GreedySearch
 #####
@@ -32,31 +18,32 @@ struct GreedySearch{H, T <: AbstractSet}
     # `search_list_size`, we will also need to pop items off `queue` IF there
     # is a match.
     best::H
-    queue::H
+    best_unvisited::H
     visited::T
 end
 
 # The default struct
 function GreedySearch(search_list_size)
     best = BinaryMinMaxHeap{Neighbor}()
-    queue = BinaryMinMaxHeap{Neighbor}()
+    best_unvisited = BinaryMinMaxHeap{Neighbor}()
     visited = RobinSet{Int}()
-    return GreedySearch(search_list_size, best, queue, visited)
+    return GreedySearch(search_list_size, best, best_unvisited, visited)
 end
 
 # Prepare for another run.
 function Base.empty!(greedy::GreedySearch)
     empty!(greedy.best)
-    empty!(greedy.queue)
+    empty!(greedy.best_unvisited)
     empty!(greedy.visited)
 end
 
 Base.length(greedy::GreedySearch) = length(greedy.best)
 
 visited!(greedy::GreedySearch, vertex) = push!(greedy.visited, getid(vertex))
+getvisited(greedy::GreedySearch) = greedy.visited
 
 # Get the closest non-visited vertex
-getcandidate!(greedy::GreedySearch) = popmin!(greedy.queue)
+getcandidate!(greedy::GreedySearch) = popmin!(greedy.best_unvisited)
 
 isfull(greedy::GreedySearch) = length(greedy) >= greedy.search_list_size
 
@@ -64,16 +51,16 @@ function pushcandidate!(greedy::GreedySearch, vertex)
     # If this has already been seen, don't do anything.
     in(getid(vertex), greedy.visited) && return nothing
     visited!(greedy, vertex)
+    # TODO: Distance check?
 
-    # TODO: Distance check
-
-    # Since we have not yet visited this vertex, we have to add it both to `best` and `queue`,
+    # Since we have not yet visited this vertex, we have to add it both to `best` and
+    # `best_unvisited`,
     push!(greedy.best, vertex)
-    push!(greedy.queue, vertex)
+    push!(greedy.best_unvisited, vertex)
     return nothing
 end
 
-done(greedy::GreedySearch) = isempty(greedy.queue)
+done(greedy::GreedySearch) = isempty(greedy.best_unvisited)
 
 Base.maximum(greedy::GreedySearch) = _unsafe_maximum(greedy.best)
 
@@ -82,17 +69,18 @@ Base.maximum(greedy::GreedySearch) = _unsafe_maximum(greedy.best)
 # The function `_unsafe_maximum` can return `nothing`, but Julia should be able to
 # handle that
 function reduce!(greedy::GreedySearch)
-    # Keep ahold of the maximum element in the queue
-    # Since `queue` is a subset of `best`, we know that this top element lives in `best`.
-    # If the element we pull of the top of `best` matches the top of `queue`, then we
+    # Keep ahold of the maximum element in the best_unvisited
+    # Since `best_unvisited` is a subset of `best`, we know that this top element lives
+    # in `best`.
+    # If the element we pull of the top of `best` matches the top of `best_unvisited`, then we
     # need to pop `queue` as well and maintain a new best.
-    queue_top = _unsafe_maximum(greedy.queue)
+    top = _unsafe_maximum(greedy.best_unvisited)
     while length(greedy.best) > greedy.search_list_size
         vertex = popmax!(greedy.best)
 
-        if queue_top !== nothing && idequal(vertex, queue_top)
-            popmax!(greedy.queue)
-            queue_top = _unsafe_maximum(greedy.queue)
+        if top !== nothing && idequal(vertex, top)
+            popmax!(greedy.best_unvisited)
+            top = _unsafe_maximum(greedy.best_unvisited)
         end
     end
     return nothing
