@@ -45,3 +45,24 @@
     GraphANN.prune!(isodd, pruner)
     @test collect(pruner) == 2:2:100
 end
+
+function to_euclidean(x::AbstractMatrix{T}) where {T}
+    dim = size(x,1)
+    x = reshape(x, :)
+    x = reinterpret(GraphANN.Euclidean{dim,T}, x)
+    return collect(x)
+end
+
+@testset "Testing Index" begin
+    datadir = joinpath(@__DIR__, "..", "data")
+    dataset_path = joinpath(datadir, "siftsmall_base.fvecs")
+
+    # Load the dataset into memory
+    dataset = GraphANN.load_vecs(dateaset_path)
+
+    # For now, we have to resort to a little dance to convert the in-memory representation
+    # to a collection of `euclidean` points.
+    #
+    # Eventually, we'll have support for directly loading into a vector of `points`.
+
+end

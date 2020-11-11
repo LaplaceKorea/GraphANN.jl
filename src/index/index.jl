@@ -27,15 +27,20 @@ end
 
 function initialize!(x::Pruner, itr)
     empty!(x)
+
+    # Add all items from the input iterator to the local item list.
     for i in itr
         push!(x.items, i)
     end
+
+    # Intially, mark all items as valid (i.e. not pruned)
     resize!(x.pruned, length(x))
     x.pruned .= false
     return nothing
 end
 
 # NB: Only call BEFORE performing any pruning
+# This WILL NOT maintain the pruned state correctly.
 Base.sort!(x::Pruner, args...; kw...) = sort!(x.items, args...; kw...)
 
 Base.length(x::Pruner) = length(x.items)
@@ -67,6 +72,10 @@ function prune!(f::F, x::Pruner, start = 1) where {F}
     end
 end
 
+#####
+##### Vemana Indexing
+#####
+
 """
 This function roughly implements the `RobustPrune` algorithm presented in the paper.
 One difference is that instead of directly mutating the graph, we populate a `nextlist`
@@ -90,15 +99,13 @@ function neighbor_updates!(
     parameters::GraphParameters,
     pruner::Pruner,
 )
-    # Destructure the metagraph
-    graph = meta.graph
-    data = meta.data
-    alpha = parameters.alpha
-    R = parameters.R
+    # Destructure some parameters
+    @unpack graph, data = meta
+    @unpack alpha, max_degree = parameters
 
     # Update the candidates set to contain the outneighbors of the current vertex
     # and remove the current vertex.
-    union!(candidates, LightGraph.outneighbors(graph, vertex))
+    union!(candidates, LightGraphs.outneighbors(graph, vertex))
     delete!(candidates, vertex)
 
     # Sort the candidates by ...
@@ -115,10 +122,10 @@ function neighbor_updates!(
     for i in pruner
         # TODO: Use the starting mechanism in `prune!` to reduce the number of
         # computations required.
-        push!(nextlist, id(i))
-        f = x -> (alpha * distance(i, x) <= getdistance(x))
+        push!(nextlist, getid(i))
+        f = x -> (alpha * distance(data[i], data[x]) <= getdistance(x))
         prune!(f, pruner)
-        length(nextlist) >= R && break
+        length(nextlist) >= max_degree && break
     end
 end
 
@@ -156,7 +163,7 @@ function commit!(
             nextlist,
             # Since we've already added the back edge, the source vertex that caused the
             # overflow is already in the adjacency list for `v`
-            LightGraphs.outneighbors(graph, v),
+            Set(LightGraphs.outneighbors(graph, v)),
             v,
             meta,
             parameters,
@@ -171,7 +178,6 @@ end
 
 basevertices(x::Dict) = keys(x)
 
-
 """
 Generate the Index for a dataset
 """
@@ -183,7 +189,14 @@ function generate_index(
     @unpack alpha, max_degree, window_size = parameters
 
     # Generate a random `max_degree` regular graph.
-    graph = LightGraphs.random_regular_digraph(length(data), max_degree)
+    pre_graph = LightGraphs.random_regular_digraph(length(data), max_degree)
+
+    # NOTE: This is a hack for now - need to write a generator for the UniDiGraph.
+    graph = UniDirectedGraph(LightGraphs.nv(pre_graph))
+    for e in LightGraphs.edges(pre_graph)
+        LightGraphs.add_edge!(graph, e)
+    end
+
     meta = MetaGraph(graph, data)
 
     # TODO: replace with shuffle
@@ -214,9 +227,11 @@ function generate_index(
         nextlists[i] = nextlist
         synccount += 1
         if synccount == sync_every
-            commit!(meta, nextlists)
+            println("Sync Count = $i")
+            commit!(meta, parameters, nextlists, pruner)
             synccount = 0
         end
     end
+    return graph
 end
 

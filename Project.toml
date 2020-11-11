@@ -7,6 +7,7 @@ version = "0.1.0"
 DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
 Distances = "b4f34e82-e78d-54a5-968a-f98e89d6e8f7"
 LightGraphs = "093fc24a-ae57-5d10-9952-331d41423f4d"
+ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
 SIMD = "fdea26ae-647d-5447-a871-4b548cad5224"
 UnPack = "3a884ed6-31ef-47d7-9d2a-63182c4928ed"
 

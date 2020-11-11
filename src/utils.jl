@@ -21,6 +21,9 @@ function Base.isless(a::Neighbor, b::Neighbor)
     return a.distance < b.distance || (a.distance == b.distance && a.id < b.id)
 end
 
+# Convenience for array indexing
+@inline Base.getindex(A::AbstractArray, i::Neighbor) = A[getid(i)]
+
 #####
 ##### Robin Set
 #####
@@ -40,6 +43,11 @@ Base.pop!(set::RobinSet) = first(pop!(set.dict))
 Base.in(k, set::RobinSet) = haskey(set.dict, k)
 Base.delete!(set::RobinSet, k) = delete!(set.dict, k)
 Base.empty!(set::RobinSet) = empty!(set.dict)
+Base.length(set::RobinSet) = length(set.dict)
+
+# Iterator interface
+Base.iterate(set::RobinSet) = iterate(keys(set.dict))
+Base.iterate(set::RobinSet, s) = iterate(keys(set.dict), s)
 
 #####
 ##### Medoid

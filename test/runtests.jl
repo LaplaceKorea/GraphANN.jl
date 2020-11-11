@@ -11,7 +11,11 @@ include("graphs.jl")
 include("test_minmax_heap.jl")
 include("greedy.jl")
 
+# Index building
 include("index/index.jl")
+
+# Loades
+include("io/vecs.jl")
 
 @testset "GraphANN.jl" begin
     # Write your tests here.

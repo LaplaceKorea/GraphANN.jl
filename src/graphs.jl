@@ -8,6 +8,19 @@ struct MetaGraph{G,D}
     data::D
 end
 
+#####
+##### UniDirectedGraph
+#####
+
+# This is similar to a regular LightGraphs.SimpleDiGraph but with a few minor changes:
+#
+# 1. Only the forward adjacency list is maintained. The SimpleDiGraph records both forward
+# and reverse adjacency lists. For our application, we only need one of those, reducing
+# our memory footprint by half.
+#
+# 2. We add some convenience methods for destroying and quickly modifying adjacency lists
+# that is helpful for some parts of the indexing algorithm.
+
 # Is this an AbstractSimpleGraph or just an AbstractGraph?
 struct UniDirectedGraph{T <: Integer} <: LightGraphs.AbstractSimpleGraph{T}
     # Only track forward adjacency lists
@@ -66,7 +79,7 @@ function LightGraphs.inneighbors(x::UniDirectedGraph{T}, v::Integer) where {T}
     return Iterators.filter(i -> _sorted_in(v, fadj(x, i)), LightGraphs.vertices(x))
 end
 
-# TODO: Does this just work?
+# This basically works because we implement `LightGraphs.SimpleGraphs.fadj`.
 LightGraphs.edges(x::UniDirectedGraph) = LightGraphs.SimpleGraphs.SimpleEdgeIter(x)
 
 function Base.eltype(
@@ -94,6 +107,10 @@ function LightGraphs.add_edge!(g::UniDirectedGraph, s, d)
     @inbounds (index <= length(list) && list[index] == d) && return length(list)
     insert!(list, index, d)
     return length(list)
+end
+
+function LightGraphs.add_edge!(g::UniDirectedGraph, e::LightGraphs.SimpleGraphs.SimpleEdge)
+    return LightGraphs.add_edge!(g, e.src, e.dst)
 end
 
 function LightGraphs.add_vertex!(g::UniDirectedGraph{T}) where {T}

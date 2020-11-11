@@ -6,6 +6,7 @@ include("minmax_heap.jl")
 # Imports (avoid brining names into our namespace)
 import Distances
 import LightGraphs
+import ProgressMeter
 import SIMD
 
 # Explicit imports
@@ -23,8 +24,7 @@ include("graphs.jl")
 include("algorithms.jl")
 include("index/index.jl")
 
-
-# Serialization and Deserialization
+# Data loaders for various formats.
 include("io/io.jl")
 
 function prepare()
@@ -47,6 +47,24 @@ function prepare()
         meta,
         start,
         queries,
+    )
+end
+
+function to_euclidean(x::AbstractMatrix{T}) where {T}
+    dim = size(x,1)
+    x = reshape(x, :)
+    x = reinterpret(GraphANN.Euclidean{dim,T}, x)
+    return collect(x)
+end
+
+function _prepare()
+    dataset = load_vecs(joinpath(@__DIR__, "..", "data", "siftsmall_base.fvecs"))
+    dataset = to_euclidean(dataset)
+
+    parameters = GraphParameters(1.2, 70, 50)
+    return (;
+        dataset,
+        parameters,
     )
 end
 
