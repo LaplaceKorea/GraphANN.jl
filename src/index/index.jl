@@ -77,6 +77,25 @@ end
 ##### Vemana Indexing
 #####
 
+# Some implementation details
+#
+# 1. The algorithms for sorting are manually set to `QuickSort`.
+#   This is because Julia defaults to `MergeSort`, which allocates temporary arrays.
+#   On its own, this isn't too much of a problem, but allocations quickly become
+#   troublesome when dealing with multi-threaded code.
+#
+#   `QuickSort`, on the other hand, does NOT allocate, so we use it.
+#   TODO: `InsertionSort` might be something to look at if our vectors to sort are
+#   pretty small ...
+#
+# 2. We try to make agressive resuse of existing allocations.
+#   Types like the `NextListBuffer` below are abstractions to help make this optimization
+#   a little easier to deal with in implementation code.
+
+#####
+##### NextListBuffer
+#####
+
 struct NextListBuffer{T}
     # Keep around previously allocated buffers
     buffers::Vector{Vector{T}}
@@ -109,11 +128,13 @@ function Base.empty!(x::NextListBuffer)
 end
 
 # Actuall empty everything.
-function deepempty!(x::NextListBuffer)
+function purge!(x::NextListBuffer)
     empty!(x.buffers)
     empty!(x.nextlists)
 end
 
+# Dispatch on behavior based on Sets vs Arrays.
+# Use a closure to avoid code that doesn't necessarily need to run.
 maybeunion!(f::F, candidates::AbstractSet) where {F} = union!(candidates, f())
 maybeunion!(f::F, candidates::AbstractArray) where {F} = nothing
 
@@ -131,6 +152,8 @@ This allows threads to work in parallel with periodic synchronous updates to the
 * `vertex` - The current vertex this is being applied to.
 * `meta` - Combination of Graph and Dataset.
 * `parameters` - Parameters governing graph construction.
+* `pruner` - Preallocated `Pruner` to help remove neighbors that fall outside the
+    distance threshold defined by `parameters.alpha`
 """
 function neighbor_updates!(
     nextlist::AbstractVector,
@@ -151,6 +174,7 @@ function neighbor_updates!(
     # likely comes from a graph and we do NOT want to mutate it.
     maybeunion!(() -> LightGraphs.outneighbors(graph, vertex), candidates)
 
+    # Use lazy functions to efficientaly initialize the Pruner object
     vertex_data = data[vertex]
     initialize!(
         u -> Neighbor(u, distance(vertex_data, @inbounds data[u])),
@@ -162,16 +186,25 @@ function neighbor_updates!(
 
     # As a precaution, make sure the list of updates for this node is empty.
     empty!(nextlist)
-    for i in pruner
-        # TODO: Use the starting mechanism in `prune!` to reduce the number of
-        # computations required.
+
+    # Manually lower the `for` loop to iteration so we can get the internal state of the
+    # pruner iterator.
+    #
+    # This lets us start at the current location in the iterator to reduce the number
+    # of comparisons.
+    next = iterate(pruner)
+    while next !== nothing
+        (i, state) = next
         push!(nextlist, getid(i))
 
         # Note: We're indexing `data` with `Neighbor` objects, but that's fine because
         # we've defined that behavior in `utils.jl`.
         f = x -> (alpha * distance(data[i], data[x]) <= getdistance(x))
-        prune!(f, pruner)
+        prune!(f, pruner; start = state)
         length(nextlist) >= max_degree && break
+
+        # Next step in the iteration interface
+        next = iterate(pruner, state)
     end
 end
 
@@ -219,6 +252,7 @@ function commit!(
             pruner,
         )
 
+        # Sort the neighbors by index and update the graph.
         sort!(nextlist; alg = Base.QuickSort)
         sorted_copy!(graph, v, nextlist)
     end
@@ -237,6 +271,8 @@ function generate_index(
 
     # Generate a random `max_degree` regular graph.
     # NOTE: This is a hack for now - need to write a generator for the UniDiGraph.
+    # TODO: Also, default the graph to UInt32's to save on space.
+    # Keep this as a parameter so we can promote to Int64's if needed.
     pre_graph = LightGraphs.random_regular_digraph(length(data), max_degree)
     graph = UniDirectedGraph(LightGraphs.nv(pre_graph))
     for e in LightGraphs.edges(pre_graph)
@@ -245,12 +281,13 @@ function generate_index(
 
     meta = MetaGraph(graph, data)
 
-    # TODO: replace with shuffle
     greedy = GreedySearch(window_size)
     pruner = Pruner{Neighbor}()
     nextlists = NextListBuffer{eltype(graph)}()
     synccount = 0
     misc_set = RobinSet{Int}()
+
+    # TODO: replace with shuffle
     for i in 1:length(data)
         # Perform a greedy search from this node.
         # The visited list will live inside the `greedy` object and will be extracted
@@ -268,8 +305,9 @@ function generate_index(
             i,
             meta,
             parameters,
-            pruner
+            pruner,
         )
+
         nextlists[i] = nextlist
         synccount += 1
         if synccount == sync_every
