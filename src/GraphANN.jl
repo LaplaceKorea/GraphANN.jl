@@ -76,7 +76,7 @@ function _prepare(path = siftsmall())
     dataset = load_vecs(path)
     dataset = to_euclidean(dataset)
 
-    parameters = GraphParameters(1.0, 70, 50)
+    parameters = GraphParameters(1.2, 70, 75)
     return (;
         dataset,
         parameters,

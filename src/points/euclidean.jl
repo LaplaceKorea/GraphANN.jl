@@ -21,43 +21,50 @@ function distance(a::E, b::E) where {N, T, E <: Euclidean{N,T}}
     return s
 end
 
+# What is the vector size for various sized primitives
+#
+# Use a full 512-bit cache line for Float32
+vecsize(::Type{Euclidean}, ::Type{Float32}) = 16
+
+# For UInt8, we need to expand individual UInt8's to Int16's.
+# Thus, size the vectors for UInt8 to be 32 (half the 512-bit AVX size so that when we
+# expand them to Int16's, the whole 512-bit cache line is occupied.
+vecsize(::Type{Euclidean}, ::Type{UInt8}) = 32
+
 #####
 ##### Specialize for UInt8
 #####
 
-# Strategy:
-#
-# Need to expand the UInt8 bytes to Int16 numbers.
-# Then we can safely to the subtraction and VNNI-based accumulation.
-function euclidean(
-    a::AbstractVector{SIMD.Vec{64,UInt8}},
-    b::AbstractVector{SIMD.Vec{64,UInt8}}
-)
-    # Do lane-wise accumulation and sum all at the end.
+# Turn a `Euclidean{N,UInt8}` into a tuple of `Vec{32,UInt8}`.
+# Ideally, the generated code for this should be a no-op
+@generated function deconstruct(x::Euclidean{N, UInt8}) where {N}
+    s = vecsize(Euclidean, UInt8)
+    @assert mod(N, s) == 0
+    num_tuples = div(N, s)
+    exprs = map(1:32:N) do i
+        inds = [:(x[$(i + j)]) for j in 0:(s-1)]
+        return :(SIMD.Vec{$s,UInt8}(($(inds...),)))
+    end
+    return :(($(exprs...),))
+end
+
+# ASSUMPTION: Assume N is a multiple of `vecsize(Euclidean, UInt8)`
+# If this is not the case, then `deconstruct` will fail.
+function distance(a::E, b::E) where {N, E <: Euclidean{N, UInt8}}
+    return _distance(deconstruct(a), deconstruct(b))
+end
+
+function _distance(a::T, b::T) where {N, T <: NTuple{N, SIMD.Vec{32, UInt8}}}
+    Base.@_inline_meta
     s = zero(SIMD.Vec{16,Int32})
-    for i in eachindex(a)
-        a1, a2 = @inbounds expand(a[i])
-        b1, b2 = @inbounds expand(b[i])
+    for i in 1:N
+        x = convert(SIMD.Vec{32, Int16}, a[i])
+        y = convert(SIMD.Vec{32, Int16}, b[i])
 
-        c1 = a1 - b1
-        c2 = a2 - b2
-
-        s = vnni_accumulate(s, c1, c1)
-        s = vnni_accumulate(s, c2, c2)
+        z = x - y
+        s = vnni_accumulate(s, z, z)
     end
     return sum(s)
-end
-
-@generated function mask(::Val{hi}) where {hi}
-    exprs = hi ? (32:63) : (0:31)
-    return :(Val(($(exprs...,))))
-end
-
-# Turn packed uint8's into two int16 vectors
-function expand(x::SIMD.Vec{64,UInt8})
-    a = convert(SIMD.Vec{32,Int16}, SIMD.shufflevector(x, mask(Val(false))))
-    b = convert(SIMD.Vec{32,Int16}, SIMD.shufflevector(x, mask(Val(true))))
-    return (a, b)
 end
 
 function vnni_accumulate(
