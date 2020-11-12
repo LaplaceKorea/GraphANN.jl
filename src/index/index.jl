@@ -311,11 +311,7 @@ function generate_index(
     # NOTE: This is a hack for now - need to write a generator for the UniDiGraph.
     # TODO: Also, default the graph to UInt32's to save on space.
     # Keep this as a parameter so we can promote to Int64's if needed.
-    pre_graph = LightGraphs.random_regular_digraph(length(data), max_degree)
-    graph = UniDirectedGraph{UInt32}(LightGraphs.nv(pre_graph))
-    for e in LightGraphs.edges(pre_graph)
-        LightGraphs.add_edge!(graph, e)
-    end
+    graph = random_regular(UInt32, length(data), max_degree)
 
     # Create a spin-lock for each vertex in the graph.
     # This will be used during the `commit!` function to synchronize access to the graph.
@@ -330,13 +326,13 @@ function generate_index(
         degree_violations = RobinSet{eltype(graph)}(),
     )
 
-    return _generate_index(
-        meta,
-        parameters,
-        tls,
-        locks,
-        batchsize
-    )
+    # First iteration - set alpha = 0
+    initial_parameters = GraphParameters(1.0, max_degree, window_size)
+    _generate_index(meta, initial_parameters, tls, locks, batchsize)
+
+    # Second iteration, alpha = user defined
+    _generate_index(meta, parameters, tls, locks, batchsize)
+    return meta
 end
 
 @noinline function _generate_index(
