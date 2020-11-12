@@ -15,6 +15,20 @@ import LightGraphs.SimpleGraphs: fadj
 # Import names
 using UnPack
 
+# Allow us to turn off threading so we can inspect routines a bit better.
+const ENABLE_THREADING = true
+
+@static if ENABLE_THREADING
+    macro threads(expr)
+        return :(Threads.@threads $(expr))
+    end
+else
+    macro threads(expr)
+        return :($(esc(expr)))
+    end
+end
+
+
 include("utils.jl")
 
 # Data representation

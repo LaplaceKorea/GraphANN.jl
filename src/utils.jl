@@ -3,8 +3,8 @@
 #####
 
 struct Neighbor
-    id::Int
-    distance::Float64
+    id::UInt32
+    distance::Float32
 end
 
 getid(x::Int) = x
@@ -85,12 +85,21 @@ end
 ##### Compute Recall
 #####
 
-function recall(groundtruth, results)
+function recall(groundtruth::AbstractVector, results::AbstractVector)
     count = 0
     for i in groundtruth
         in(i, results) && (count += 1)
     end
     return count / length(groundtruth)
+end
+
+function recall(groundtruth::AbstractMatrix, results::AbstractMatrix)
+    @assert size(groundtruth, 1) >= size(results, 1)
+    @assert size(groundtruth, 2) == size(results, 2)
+
+    # Slice the ground truth to match the size of the results.
+    vgt = view(groundtruth, 1:size(results, 1), :)
+    return [recall(_gt, _r) for (_gt, _r) in zip(eachcol(vgt), eachcol(results))]
 end
 
 #####
@@ -105,9 +114,14 @@ struct ThreadLocal{T}
     ThreadLocal{T}(values::Vector{T}) where {T} = new{T}(values)
 end
 
+# Convenience, wrap around a NamedTuple
+ThreadLocal(; kw...) = ThreadLocal((;kw...,))
+
 function ThreadLocal(values::T) where {T}
-    return ThreadLocal([deepcopy(values) for _ in 1:Threads.nthreads()])
+    return ThreadLocal{T}([deepcopy(values) for _ in 1:Threads.nthreads()])
 end
 
-Base.getindex(t::ThreadLocal) = @inbounds(t.values[Threads.threadid()])
+Base.getindex(t::ThreadLocal) = t.values[Threads.threadid()]
 getall(t::ThreadLocal) = t.values
+
+allthreads() = 1:Threads.nthreads()

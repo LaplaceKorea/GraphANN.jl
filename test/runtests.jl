@@ -1,6 +1,9 @@
 using GraphANN
 using Test
 
+# Extra stdlib imports
+using Statistics
+
 # Extra helpful imports
 using LightGraphs
 

@@ -11,7 +11,7 @@ end
 
 # This is an auxiliary data structure that aids in the pruning process.
 # See tests for basic functionality.
-struct Pruner{T}
+mutable struct Pruner{T}
     # Items to prune
     items::T
     # Boolean vector to determine if an index has been pruned.
@@ -26,11 +26,22 @@ function Base.empty!(x::Pruner)
 end
 
 # Mark as `inline` to avoid an allocation caused by creating closures.
-@inline function initialize!(by::B, filt::F, x::Pruner, itr) where {B, F}
+#
+# NOTE: It's kind of gross to have the `by` and `filter` arguments as normal arguments
+# instead of keyword arguments, but when they are keyword arguments, the function closures
+# still allocate.
+#
+# This MAY get fixed in Julia 1.6, which will const-propagate keyword arguments.
+@inline function initialize!(
+    by::B,
+    filter::F,
+    x::Pruner,
+    itr;
+) where {B, F}
     empty!(x)
 
     # Add all items from the input iterator to the local item list.
-    for i in Iterators.filter(filt, itr)
+    for i in Iterators.filter(filter, itr)
         push!(x.items, by(i))
     end
 
@@ -39,6 +50,7 @@ end
     x.pruned .= false
     return nothing
 end
+initialize!(x::Pruner, itr) = initialize!(identity, x -> true, x, itr)
 
 # NB: Only call BEFORE performing any pruning
 # This WILL NOT maintain the pruned state correctly.
@@ -63,7 +75,7 @@ function Base.iterate(x::Pruner, i = 1)
 end
 
 # Mark entries as pruned according to some function `F`.
-function prune!(f::F, x::Pruner, start = 1) where {F}
+function prune!(f::F, x::Pruner; start = 1) where {F}
     for i in start:length(x)
         @inbounds begin
             if !ispruned(x, i) && f(x.items[i])
@@ -96,7 +108,7 @@ end
 ##### NextListBuffer
 #####
 
-struct NextListBuffer{T}
+mutable struct NextListBuffer{T}
     # Keep around previously allocated buffers
     buffers::Vector{Vector{T}}
     nextlists::Dict{Int, Vector{T}}
@@ -112,6 +124,7 @@ end
 # If we have a previously allocated vector, return that.
 # Otherwise, allocate a new buffer.
 get!(x::NextListBuffer{T}) where {T} = isempty(x.buffers) ? T[] : pop!(x.buffers)
+return!(x::NextListBuffer{T}, v::Vector{T}) where {T} = push!(x.buffers, v)
 
 Base.getindex(x::NextListBuffer, i) = x.nextlists[i]
 Base.setindex!(x::NextListBuffer{T}, v::Vector{T}, i) where {T} = x.nextlists[i] = v
@@ -208,39 +221,63 @@ function neighbor_updates!(
     end
 end
 
+#function apply_nextlists!(graph, locks, tls::ThreadLocal)
+function apply_nextlists!(graph, locks, tls)
+    # First step - copy over the next lists
+    Threads.@threads for _ in allthreads()
+        # Get local storage for this thread.
+        storage = tls[]
+        for (u, neighbors) in pairs(storage.nextlists)
+            Base.@lock locks[u] sorted_copy!(graph, u, neighbors)
+        end
+    end
+end
+
+function backedges!(graph, locks, tls, max_degree)
+    Threads.@threads for _ in allthreads()
+        storage = tls[]
+        degree_violations = storage.degree_violations
+        empty!(degree_violations)
+
+        for (u, neighbors) in pairs(storage.nextlists)
+            for v in neighbors
+                n = Base.@lock locks[v] LightGraphs.add_edge!(graph, v, u)
+                n > max_degree && push!(degree_violations, v)
+            end
+        end
+        empty!(storage.nextlists)
+    end
+end
+
 # Commit all the pending updates to the graph.
 # Then, cycle util no nodes violate the degree requirement
 function commit!(
     meta::MetaGraph,
     parameters::GraphParameters,
-    nextlists,
-    pruner,
-    misc_set::AbstractSet,
+    locks::AbstractVector,
+    tls::ThreadLocal
 )
     @unpack graph, data = meta
     @unpack max_degree = parameters
 
-    # Replace the out neighbors
-    T = eltype(graph)
+    # Step 1 - update all the next lists
+    apply_nextlists!(graph, locks, tls)
 
-    degree_violations = misc_set
-    empty!(degree_violations)
-    for (u, neighbors) in pairs(nextlists)
-        sort!(neighbors; alg = Base.QuickSort)
-        sorted_copy!(graph, u, neighbors)
+    # Step 2 - Add back edges
+    backedges!(graph, locks, tls, max_degree)
 
-        # Now, add back edges, tracking which vertices have degree violations
-        for v in neighbors
-            n = LightGraphs.add_edge!(graph, v, u)
-            n > max_degree && push!(degree_violations, v)
-        end
-    end
-    empty!(nextlists)
+    # Step 3 - process all over subscribed vertices
+    degree_violations = mapreduce(
+        x -> x.degree_violations,
+        union!,
+        getall(tls);
+        init = RobinSet{eltype(graph)}()
+    ) |> collect
 
-    # Clean up all degree violations
-    nextlist = get!(nextlists)
-    for v in degree_violations
-        # Copy over the out neighbors to a buffer so we can also add the source vertex.
+    Threads.@threads for v in degree_violations
+        storage = tls[]
+        nextlist = get!(storage.nextlists)
+
         neighbor_updates!(
             nextlist,
             # Since we've already added the back edge, the source vertex that caused the
@@ -249,13 +286,14 @@ function commit!(
             v,
             meta,
             parameters,
-            pruner,
+            storage.pruner,
         )
-
-        # Sort the neighbors by index and update the graph.
         sort!(nextlist; alg = Base.QuickSort)
-        sorted_copy!(graph, v, nextlist)
+        storage.nextlists[v] = nextlist
     end
+
+    # Step 4 - update nextlists for all over subscribed vertices
+    apply_nextlists!(graph, locks, tls)
     return nothing
 end
 
@@ -265,7 +303,7 @@ Generate the Index for a dataset
 function generate_index(
     data,
     parameters::GraphParameters;
-    sync_every = 1000
+    batchsize = 1000,
 )
     @unpack alpha, max_degree, window_size = parameters
 
@@ -274,51 +312,82 @@ function generate_index(
     # TODO: Also, default the graph to UInt32's to save on space.
     # Keep this as a parameter so we can promote to Int64's if needed.
     pre_graph = LightGraphs.random_regular_digraph(length(data), max_degree)
-    graph = UniDirectedGraph(LightGraphs.nv(pre_graph))
+    graph = UniDirectedGraph{UInt32}(LightGraphs.nv(pre_graph))
     for e in LightGraphs.edges(pre_graph)
         LightGraphs.add_edge!(graph, e)
     end
 
+    # Create a spin-lock for each vertex in the graph.
+    # This will be used during the `commit!` function to synchronize access to the graph.
+    locks = [Base.Threads.SpinLock() for _ in 1:LightGraphs.nv(graph)]
     meta = MetaGraph(graph, data)
 
-    greedy = GreedySearch(window_size)
-    pruner = Pruner{Neighbor}()
-    nextlists = NextListBuffer{eltype(graph)}()
-    synccount = 0
-    misc_set = RobinSet{Int}()
+    # Allocate thread local storage
+    tls = ThreadLocal(;
+        greedy = GreedySearch(window_size),
+        pruner = Pruner{Neighbor}(),
+        nextlists = NextListBuffer{eltype(graph)}(),
+        degree_violations = RobinSet{eltype(graph)}(),
+    )
+
+    return _generate_index(
+        meta,
+        parameters,
+        tls,
+        locks,
+        batchsize
+    )
+end
+
+@noinline function _generate_index(
+    meta::MetaGraph,
+    parameters::GraphParameters,
+    tls::ThreadLocal,
+    locks::AbstractVector,
+    batchsize::Integer,
+)
+    @unpack graph, data = meta
 
     # TODO: replace with shuffle
-    for i in 1:length(data)
-        # Perform a greedy search from this node.
-        # The visited list will live inside the `greedy` object and will be extracted
-        # using the `getvisited` function.
-        search(greedy, meta, i, data[i])
-        candidates = getvisited(greedy)
+    num_batches = ceil(Int, length(data) / batchsize)
+    for batch_number in 1:num_batches
+        start = ((batch_number - 1) * batchsize) + 1
+        stop = min(batch_number * batchsize, length(data))
+        r = start:stop
 
-        # Run the `RobustPrune` algorithm on the graph starting at this point.
-        # Array `nextlist` will contain the updated neighbors for this vertex.
-        # We delay actually implementing the updates to facilitate parallelization.
-        nextlist = get!(nextlists)
-        neighbor_updates!(
-            nextlist,
-            candidates,
-            i,
-            meta,
-            parameters,
-            pruner,
-        )
+        # Thread across the batch
+        nexttime = @elapsed Threads.@threads for i in r
+            # Get thread local storage
+            storage = tls[]
 
-        nextlists[i] = nextlist
-        synccount += 1
-        if synccount == sync_every
-            println("Sync Count = $i")
-            commit!(meta, parameters, nextlists, pruner, misc_set)
+            # Perform a greedy search from this node.
+            # The visited list will live inside the `greedy` object and will be extracted
+            # using the `getvisited` function.
+            search(storage.greedy, meta, i, data[i])
+            candidates = getvisited(storage.greedy)
 
-            # Reset data structures
-            synccount = 0
-            empty!(nextlists)
+            # Run the `RobustPrune` algorithm on the graph starting at this point.
+            # Array `nextlist` will contain the updated neighbors for this vertex.
+            # We delay actually implementing the updates to facilitate parallelization.
+            nextlist = get!(storage.nextlists)
+            neighbor_updates!(
+                nextlist,
+                candidates,
+                i,
+                meta,
+                parameters,
+                storage.pruner,
+            )
+
+            sort!(nextlist; alg = Base.QuickSort)
+            storage.nextlists[i] = nextlist
         end
+
+        # Synchronize across threads.
+        committime = @elapsed commit!(meta, parameters, locks, tls)
+        println("Batch $batch_number of $num_batches. Inter Time: $nexttime. Sync Time: $committime")
     end
+
     return graph
 end
 

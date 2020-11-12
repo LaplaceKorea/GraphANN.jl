@@ -4,7 +4,7 @@
 
 # Use the `GreedySearch` type to hold parameters and intermediate datastructures
 # used to control the greedy search.
-struct GreedySearch{H, T <: AbstractSet}
+mutable struct GreedySearch{H, T <: AbstractSet}
     search_list_size::Int
 
     # Pre-allocated buffer for the search list
@@ -26,7 +26,7 @@ end
 function GreedySearch(search_list_size)
     best = BinaryMinMaxHeap{Neighbor}()
     best_unvisited = BinaryMinMaxHeap{Neighbor}()
-    visited = RobinSet{Int}()
+    visited = RobinSet{UInt32}()
     return GreedySearch(search_list_size, best, best_unvisited, visited)
 end
 
@@ -130,7 +130,7 @@ function searchall(
     num_neighbors = 10
 )
     num_queries = length(queries)
-    dest = Array{Int,2}(undef, num_neighbors, num_queries)
+    dest = Array{eltype(meta_graph.graph),2}(undef, num_neighbors, num_queries)
 
     for (col, query) in enumerate(queries)
         search(algo, meta_graph, start_node, query)

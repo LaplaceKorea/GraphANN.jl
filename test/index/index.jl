@@ -56,6 +56,8 @@ end
 @testset "Testing Index" begin
     datadir = joinpath(dirname(@__DIR__), "..", "data")
     dataset_path = joinpath(datadir, "siftsmall_base.fvecs")
+    query_path = joinpath(datadir, "siftsmall_query.fvecs")
+    groundtruth_path = joinpath(datadir, "siftsmall_groundtruth.ivecs")
 
     # Load the dataset into memory
     # For now, we have to resort to a little dance to convert the in-memory representation
@@ -74,4 +76,19 @@ end
     # Is the maximum degree of the generated graph within the set limit?
     @test maximum(outdegree(g)) <= max_degree
     @test is_connected(g)
+
+    # Lets try a search
+    queries = to_euclidean(GraphANN.load_vecs(query_path))
+
+    # Need to adjust ground-truth from index-0 to index-1
+    ground_truth = GraphANN.load_vecs(groundtruth_path) .+ UInt32(1)
+
+    @test eltype(ground_truth) == UInt32
+    algo = GraphANN.GreedySearch(100)
+    meta = GraphANN.MetaGraph(g, dataset)
+    start = GraphANN.medioid(dataset)
+
+    ids = GraphANN.searchall(algo, meta, start, queries; num_neighbors = 100)
+    recalls = GraphANN.recall(ground_truth, ids)
+    @test mean(recalls) >= 0.99
 end
