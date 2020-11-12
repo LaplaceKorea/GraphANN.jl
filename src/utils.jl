@@ -36,7 +36,10 @@ struct RobinSet{T} <: AbstractSet{T}
 
     # Inner Constructors
     RobinSet{T}() where {T} = new(Dict{T,Nothing}())
+    RobinSet(dict::DataStructures.RobinDict{T,Nothing}) where {T} = new{T}(dict)
 end
+
+RobinSet(itr) = RobinSet(DataStructures.RobinDict(i => nothing for i in itr))
 
 Base.push!(set::RobinSet, k) = (set.dict[k] = nothing)
 Base.pop!(set::RobinSet) = first(pop!(set.dict))
@@ -48,6 +51,7 @@ Base.length(set::RobinSet) = length(set.dict)
 # Iterator interface
 Base.iterate(set::RobinSet) = iterate(keys(set.dict))
 Base.iterate(set::RobinSet, s) = iterate(keys(set.dict), s)
+
 
 #####
 ##### Medoid
@@ -77,3 +81,33 @@ function nearest_neighbor(query::T, data::Vector{T}) where {T}
     return (min_ind, min_dist)
 end
 
+#####
+##### Compute Recall
+#####
+
+function recall(groundtruth, results)
+    count = 0
+    for i in groundtruth
+        in(i, results) && (count += 1)
+    end
+    return count / length(groundtruth)
+end
+
+#####
+##### Thread Local
+#####
+
+# Thread local storage.
+struct ThreadLocal{T}
+    values::Vector{T}
+
+    # Inner constructor to resolve ambiguities
+    ThreadLocal{T}(values::Vector{T}) where {T} = new{T}(values)
+end
+
+function ThreadLocal(values::T) where {T}
+    return ThreadLocal([deepcopy(values) for _ in 1:Threads.nthreads()])
+end
+
+Base.getindex(t::ThreadLocal) = @inbounds(t.values[Threads.threadid()])
+getall(t::ThreadLocal) = t.values

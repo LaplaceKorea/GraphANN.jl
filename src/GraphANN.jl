@@ -57,8 +57,9 @@ function to_euclidean(x::AbstractMatrix{T}) where {T}
     return collect(x)
 end
 
-function _prepare()
-    dataset = load_vecs(joinpath(@__DIR__, "..", "data", "siftsmall_base.fvecs"))
+siftsmall() = joinpath(dirname(@__DIR__), "data", "siftsmall_base.fvecs")
+function _prepare(path = siftsmall())
+    dataset = load_vecs(path)
     dataset = to_euclidean(dataset)
 
     parameters = GraphParameters(1.2, 70, 50)

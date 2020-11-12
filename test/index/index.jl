@@ -54,15 +54,24 @@ function to_euclidean(x::AbstractMatrix{T}) where {T}
 end
 
 @testset "Testing Index" begin
-    datadir = joinpath(@__DIR__, "..", "data")
+    datadir = joinpath(dirname(@__DIR__), "..", "data")
     dataset_path = joinpath(datadir, "siftsmall_base.fvecs")
 
     # Load the dataset into memory
-    dataset = GraphANN.load_vecs(dateaset_path)
-
     # For now, we have to resort to a little dance to convert the in-memory representation
     # to a collection of `euclidean` points.
     #
     # Eventually, we'll have support for directly loading into a vector of `points`.
+    dataset = to_euclidean(GraphANN.load_vecs(dataset_path))
 
+    alpha = 1.2
+    max_degree = 70
+    window_size = 50
+    parameters = GraphANN.GraphParameters(alpha, max_degree, window_size)
+
+    g = GraphANN.generate_index(dataset, parameters)
+
+    # Is the maximum degree of the generated graph within the set limit?
+    @test maximum(outdegree(g)) <= max_degree
+    @test is_connected(g)
 end

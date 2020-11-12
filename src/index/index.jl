@@ -25,12 +25,13 @@ function Base.empty!(x::Pruner)
     empty!(x.pruned)
 end
 
-function initialize!(x::Pruner, itr)
+# Mark as `inline` to avoid an allocation caused by creating closures.
+@inline function initialize!(by::B, filt::F, x::Pruner, itr) where {B, F}
     empty!(x)
 
     # Add all items from the input iterator to the local item list.
-    for i in itr
-        push!(x.items, i)
+    for i in Iterators.filter(filt, itr)
+        push!(x.items, by(i))
     end
 
     # Intially, mark all items as valid (i.e. not pruned)
@@ -76,6 +77,46 @@ end
 ##### Vemana Indexing
 #####
 
+struct NextListBuffer{T}
+    # Keep around previously allocated buffers
+    buffers::Vector{Vector{T}}
+    nextlists::Dict{Int, Vector{T}}
+end
+
+# Constructor
+function NextListBuffer{T}() where {T}
+    buffers = Vector{T}[]
+    nextlists = Dict{Int, Vector{T}}()
+    return NextListBuffer{T}(buffers, nextlists)
+end
+
+# If we have a previously allocated vector, return that.
+# Otherwise, allocate a new buffer.
+get!(x::NextListBuffer{T}) where {T} = isempty(x.buffers) ? T[] : pop!(x.buffers)
+
+Base.getindex(x::NextListBuffer, i) = x.nextlists[i]
+Base.setindex!(x::NextListBuffer{T}, v::Vector{T}, i) where {T} = x.nextlists[i] = v
+
+Base.pairs(x::NextListBuffer) = pairs(x.nextlists)
+
+# Remove previous mappings but save the allocated vectors for the next iteration.
+function Base.empty!(x::NextListBuffer)
+    for v in values(x.nextlists)
+        empty!(v)
+        push!(x.buffers, v)
+    end
+    empty!(x.nextlists)
+end
+
+# Actuall empty everything.
+function deepempty!(x::NextListBuffer)
+    empty!(x.buffers)
+    empty!(x.nextlists)
+end
+
+maybeunion!(f::F, candidates::AbstractSet) where {F} = union!(candidates, f())
+maybeunion!(f::F, candidates::AbstractArray) where {F} = nothing
+
 """
 This function roughly implements the `RobustPrune` algorithm presented in the paper.
 One difference is that instead of directly mutating the graph, we populate a `nextlist`
@@ -103,19 +144,21 @@ function neighbor_updates!(
     @unpack graph, data = meta
     @unpack alpha, max_degree = parameters
 
-    # Update the candidates set to contain the outneighbors of the current vertex
-    # and remove the current vertex.
-    union!(candidates, LightGraphs.outneighbors(graph, vertex))
-    delete!(candidates, vertex)
+    # If the passed `candidates` is a Set, then append the current out neighbors
+    # of the query vertex to the set.
+    #
+    # However, if `candidates` is an Array, than don't do anything because that array
+    # likely comes from a graph and we do NOT want to mutate it.
+    maybeunion!(() -> LightGraphs.outneighbors(graph, vertex), candidates)
 
-    # Sort the candidates by ...
-    # TODO: Remove this array allocation
     vertex_data = data[vertex]
     initialize!(
+        u -> Neighbor(u, distance(vertex_data, @inbounds data[u])),
+        !isequal(vertex),
         pruner,
-        (Neighbor(u, distance(vertex_data, @inbounds data[u])) for u in candidates)
+        candidates,
     )
-    sort!(pruner)
+    sort!(pruner; alg = Base.QuickSort)
 
     # As a precaution, make sure the list of updates for this node is empty.
     empty!(nextlist)
@@ -123,6 +166,9 @@ function neighbor_updates!(
         # TODO: Use the starting mechanism in `prune!` to reduce the number of
         # computations required.
         push!(nextlist, getid(i))
+
+        # Note: We're indexing `data` with `Neighbor` objects, but that's fine because
+        # we've defined that behavior in `utils.jl`.
         f = x -> (alpha * distance(data[i], data[x]) <= getdistance(x))
         prune!(f, pruner)
         length(nextlist) >= max_degree && break
@@ -136,16 +182,18 @@ function commit!(
     parameters::GraphParameters,
     nextlists,
     pruner,
+    misc_set::AbstractSet,
 )
     @unpack graph, data = meta
     @unpack max_degree = parameters
 
-
     # Replace the out neighbors
     T = eltype(graph)
-    degree_violations = Set{T}()
+
+    degree_violations = misc_set
+    empty!(degree_violations)
     for (u, neighbors) in pairs(nextlists)
-        sort!(neighbors)
+        sort!(neighbors; alg = Base.QuickSort)
         sorted_copy!(graph, u, neighbors)
 
         # Now, add back edges, tracking which vertices have degree violations
@@ -154,29 +202,28 @@ function commit!(
             n > max_degree && push!(degree_violations, v)
         end
     end
+    empty!(nextlists)
 
     # Clean up all degree violations
-    nextlist = Vector{eltype(graph)}()
+    nextlist = get!(nextlists)
     for v in degree_violations
         # Copy over the out neighbors to a buffer so we can also add the source vertex.
         neighbor_updates!(
             nextlist,
             # Since we've already added the back edge, the source vertex that caused the
             # overflow is already in the adjacency list for `v`
-            Set(LightGraphs.outneighbors(graph, v)),
+            LightGraphs.outneighbors(graph, v),
             v,
             meta,
             parameters,
             pruner,
         )
 
-        sort!(nextlist)
+        sort!(nextlist; alg = Base.QuickSort)
         sorted_copy!(graph, v, nextlist)
     end
     return nothing
 end
-
-basevertices(x::Dict) = keys(x)
 
 """
 Generate the Index for a dataset
@@ -184,14 +231,13 @@ Generate the Index for a dataset
 function generate_index(
     data,
     parameters::GraphParameters;
-    sync_every = 100
+    sync_every = 1000
 )
     @unpack alpha, max_degree, window_size = parameters
 
     # Generate a random `max_degree` regular graph.
-    pre_graph = LightGraphs.random_regular_digraph(length(data), max_degree)
-
     # NOTE: This is a hack for now - need to write a generator for the UniDiGraph.
+    pre_graph = LightGraphs.random_regular_digraph(length(data), max_degree)
     graph = UniDirectedGraph(LightGraphs.nv(pre_graph))
     for e in LightGraphs.edges(pre_graph)
         LightGraphs.add_edge!(graph, e)
@@ -202,8 +248,9 @@ function generate_index(
     # TODO: replace with shuffle
     greedy = GreedySearch(window_size)
     pruner = Pruner{Neighbor}()
-    nextlists = Dict{Int,Vector{Int}}()
+    nextlists = NextListBuffer{eltype(graph)}()
     synccount = 0
+    misc_set = RobinSet{Int}()
     for i in 1:length(data)
         # Perform a greedy search from this node.
         # The visited list will live inside the `greedy` object and will be extracted
@@ -211,11 +258,10 @@ function generate_index(
         search(greedy, meta, i, data[i])
         candidates = getvisited(greedy)
 
-        # TODO: Make this ... actually good ...
         # Run the `RobustPrune` algorithm on the graph starting at this point.
         # Array `nextlist` will contain the updated neighbors for this vertex.
         # We delay actually implementing the updates to facilitate parallelization.
-        nextlist = Int[]
+        nextlist = get!(nextlists)
         neighbor_updates!(
             nextlist,
             candidates,
@@ -228,8 +274,11 @@ function generate_index(
         synccount += 1
         if synccount == sync_every
             println("Sync Count = $i")
-            commit!(meta, parameters, nextlists, pruner)
+            commit!(meta, parameters, nextlists, pruner, misc_set)
+
+            # Reset data structures
             synccount = 0
+            empty!(nextlists)
         end
     end
     return graph

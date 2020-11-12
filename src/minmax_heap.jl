@@ -11,7 +11,7 @@
 #
 ################################################
 
-mutable struct BinaryMinMaxHeap{T} <: DataStructures.AbstractMinMaxHeap{T}
+struct BinaryMinMaxHeap{T} <: DataStructures.AbstractMinMaxHeap{T}
     valtree::Vector{T}
 
     BinaryMinMaxHeap{T}() where {T} = new{T}(Vector{T}())
@@ -23,6 +23,11 @@ mutable struct BinaryMinMaxHeap{T} <: DataStructures.AbstractMinMaxHeap{T}
 end
 
 BinaryMinMaxHeap(xs::AbstractVector{T}) where T = BinaryMinMaxHeap{T}(xs)
+
+function destructive_extract!(heap::BinaryMinMaxHeap)
+    sort!(heap.valtree; alg = Base.QuickSort)
+    return heap.valtree
+end
 
 ################################################
 #

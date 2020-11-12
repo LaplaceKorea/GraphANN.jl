@@ -68,7 +68,7 @@ function save_vecs(file::AbstractString, A::AbstractMatrix{T}) where {T}
 
     # Drop down to an overloaded function that operates directly on a IO type object.
     open(file; write = true) do io
-        generate_vecs(io, A)
+        save_vecs(io, A)
     end
 end
 

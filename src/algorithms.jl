@@ -122,9 +122,26 @@ function search(
 end
 
 # TODO: Thread local storage and multi-threading
-function searchall(algo, meta_graph::MetaGraph, start_node, queries)
-    for query in queries
+function searchall(
+    algo,
+    meta_graph::MetaGraph,
+    start_node,
+    queries::AbstractVector;
+    num_neighbors = 10
+)
+    num_queries = length(queries)
+    dest = Array{Int,2}(undef, num_neighbors, num_queries)
+
+    for (col, query) in enumerate(queries)
         search(algo, meta_graph, start_node, query)
+
+        # Copy over the results to the destination
+        results = destructive_extract!(algo.best)
+        dest_view = view(dest, :, col)
+        result_view = view(results, 1:num_neighbors)
+
+        dest_view .= getid.(result_view)
     end
+    return dest
 end
 
