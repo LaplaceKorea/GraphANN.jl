@@ -10,7 +10,8 @@ using LightGraphs
 import GraphANN: Neighbor
 
 include("utils.jl")
-include("graphs.jl")
+include("graphs/adjacency.jl")
+include("graphs/graphs.jl")
 include("test_minmax_heap.jl")
 include("greedy.jl")
 

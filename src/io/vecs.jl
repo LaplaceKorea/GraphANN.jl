@@ -33,6 +33,11 @@ function load_vecs(file; kw...)
     return load_vecs(typemap[datatype_char], file; kw...)
 end
 
+# Overload points for customizing loading.
+vecs_read_type(::Type{T}) where {T} = T
+vecs_convert(::Type, buf) = buf
+vecs_reshape(::Type, v, dim) = reshape(v, convert(Int, dim), :)
+
 function load_vecs(::Type{T}, file; maxlines = nothing) where {T}
     v = T[]
     sizehint!(v, div(filesize(file), sizeof(T)))
@@ -42,12 +47,12 @@ function load_vecs(::Type{T}, file; maxlines = nothing) where {T}
         # First, read the dimensionality of the vectors in this file.
         # Make sure it is the same for all vectors.
         dim = read(io, Int32)
-        buf = Vector{T}(undef, dim)
+        buf = Vector{vecs_read_type(T)}(undef, dim)
 
         # Now, start parsing!
         while true
             read!(io, buf)
-            append!(v, buf)
+            append!(v, vecs_convert(T, buf))
 
             linecount += 1
             (ismaxed(linecount, maxlines) || eof(io)) && break
@@ -58,7 +63,7 @@ function load_vecs(::Type{T}, file; maxlines = nothing) where {T}
         end
         return dim
     end
-    return reshape(v, convert(Int, dim), :)
+    return vecs_reshape(T, v, dim)
 end
 
 function save_vecs(file::AbstractString, A::AbstractMatrix{T}) where {T}

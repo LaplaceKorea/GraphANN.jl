@@ -1,13 +1,3 @@
-"""
-    MetaGraph{G,D}
-
-Grouping of a graph of type `G` and corresponding vertex data points of type `D`.
-"""
-struct MetaGraph{G,D}
-    graph::G
-    data::D
-end
-
 #####
 ##### UniDirectedGraph
 #####
@@ -22,15 +12,22 @@ end
 # that is helpful for some parts of the indexing algorithm.
 
 # Is this an AbstractSimpleGraph or just an AbstractGraph?
-struct UniDirectedGraph{T <: Integer} <: LightGraphs.AbstractSimpleGraph{T}
+struct UniDirectedGraph{
+    T <: Integer,
+    A <: AbstractAdjacencyList{T}
+} <: LightGraphs.AbstractSimpleGraph{T}
+
     # Only track forward adjacency lists
-    fadj::Vector{Vector{T}}
+    fadj::A
 
     # -- Inner constructor to help with ambiguities
-    UniDirectedGraph{T}(adj::Vector{Vector{T}}) where {T} = new{T}(adj)
+    UniDirectedGraph{T}(adj::A) where {T, A <: AbstractAdjacencyList{T}} = new{T,A}(adj)
 end
 
-UniDirectedGraph{T}(n::Integer = 0) where {T} = UniDirectedGraph{T}([T[] for _ in 1:n])
+function UniDirectedGraph{T}(n::Integer = 0) where {T}
+    fadj = DefaultAdjacencyList([T[] for _ in 1:n])
+    return UniDirectedGraph{T}(fadj)
+end
 UniDirectedGraph(n::Integer = 0) = UniDirectedGraph{Int}(n)
 
 LightGraphs.SimpleGraphs.fadj(x::UniDirectedGraph) = x.fadj
@@ -57,7 +54,6 @@ LightGraphs.vertices(x::UniDirectedGraph) = Base.OneTo(LightGraphs.nv(x))
 Base.eltype(::UniDirectedGraph{T}) where {T} = T
 
 LightGraphs.edgetype(x::UniDirectedGraph) = LightGraphs.SimpleEdge{eltype(x)}
-# TODO: Maybe binary search?
 function LightGraphs.has_edge(x::UniDirectedGraph, s::Integer, d::Integer)
     return _sorted_in(d, fadj(x, s))
 end
@@ -83,7 +79,7 @@ end
 LightGraphs.edges(x::UniDirectedGraph) = LightGraphs.SimpleGraphs.SimpleEdgeIter(x)
 
 function Base.eltype(
-    ::Type{LightGraphs.SimpleGraphs.SimpleEdgeIter{UniDirectedGraph{T}}}
+    ::Type{<:LightGraphs.SimpleGraphs.SimpleEdgeIter{<:UniDirectedGraph{T}}}
 ) where {T}
     return LightGraphs.SimpleDiGraphEdge{T}
 end
@@ -97,16 +93,20 @@ end
 # During index creation, this lets us easily track which vertices exceed the maximum degree
 # requirement.
 function LightGraphs.add_edge!(g::UniDirectedGraph, s, d)
+    adj = fadj(g)
+    # If this adjacency list is already full, abort early.
+    caninsert(adj, s) || return length(adj, s)
+
     verts = LightGraphs.vertices(g)
     # Check if vertices are in bounds
     (in(s, verts) && in(d, verts)) || return 0
-    @inbounds list = fadj(g, s)
+    @inbounds list = adj[s]
     index = searchsortedfirst(list, d)
 
     # Is the edge already in the graph?
     @inbounds (index <= length(list) && list[index] == d) && return length(list)
-    insert!(list, index, d)
-    return length(list)
+    unsafe_insert!(adj, s, index, d)
+    return length(adj, s)
 end
 
 function LightGraphs.add_edge!(g::UniDirectedGraph, e::LightGraphs.SimpleGraphs.SimpleEdge)
@@ -119,25 +119,20 @@ function LightGraphs.add_vertex!(g::UniDirectedGraph{T}) where {T}
 end
 
 # Remove ALL out neighbors of a vertex.
-Base.empty!(g::UniDirectedGraph, v) = empty!(fadj(g, v))
+Base.empty!(g::UniDirectedGraph, v) = empty!(fadj(g), v)
 
 # Copy over an adjacency list, destroying the current adjacency list in the process
-function sorted_copy!(g::UniDirectedGraph, v, A::AbstractArray)
-    list = fadj(g, v)
-    resize!(list, length(A))
-    copyto!(list, A)
-    return nothing
-end
+sorted_copy!(g::UniDirectedGraph, v, A::AbstractArray) = sorted_copy!(fadj(g), v, A)
 
-# Fallback definition for an arbitrary iterable
-function sorted_copy!(g::UniDirectedGraph, v, itr)
-    list = fadj(g, v)
-    empty!(list)
-    for i in itr
-        push!(list, i)
-    end
-    return nothing
-end
+# # Fallback definition for an arbitrary iterable
+# function sorted_copy!(g::UniDirectedGraph, v, itr)
+#     list = fadj(g, v)
+#     empty!(list)
+#     for i in itr
+#         push!(list, i)
+#     end
+#     return nothing
+# end
 
 #####
 ##### Generators
@@ -155,7 +150,7 @@ function random_regular(::Type{T}, nv, ne) where {T <: Integer}
     Threads.@threads for i in 1:nv
         _populate!(adj[i], one(T):T(nv), ne; exclude = i)
     end
-    return UniDirectedGraph{T}(adj)
+    return UniDirectedGraph{T}(DefaultAdjacencyList(adj))
 end
 
 # Only call this if `ne << length(r)`
@@ -169,3 +164,4 @@ function _populate!(x::AbstractVector, r::AbstractRange, ne::Integer; exclude = 
     end
     sort!(x)
 end
+

@@ -34,7 +34,7 @@ include("utils.jl")
 # Data representation
 include("points/euclidean.jl")
 
-include("graphs.jl")
+include("graphs/graphs.jl")
 include("algorithms.jl")
 include("index/index.jl")
 
@@ -74,10 +74,10 @@ end
 
 siftsmall() = joinpath(dirname(@__DIR__), "data", "siftsmall_base.fvecs")
 function _prepare(path = siftsmall())
-    dataset = load_vecs(path)
-    dataset = to_euclidean(UInt8, dataset)
+    dataset = load_vecs(Euclidean{128,UInt8}, path)
+    #dataset = to_euclidean(UInt8, dataset)
 
-    parameters = GraphParameters(1.2, 128, 50, 0.75)
+    parameters = GraphParameters(1.2, 32, 20, 0.75)
     return (;
         dataset,
         parameters,

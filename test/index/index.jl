@@ -46,13 +46,6 @@
     @test collect(pruner) == 2:2:100
 end
 
-function to_euclidean(x::AbstractMatrix{T}) where {T}
-    dim = size(x,1)
-    x = reshape(x, :)
-    x = reinterpret(GraphANN.Euclidean{dim,T}, x)
-    return collect(x)
-end
-
 @testset "Testing Index" begin
     datadir = joinpath(dirname(@__DIR__), "..", "data")
     dataset_path = joinpath(datadir, "siftsmall_base.fvecs")
@@ -64,21 +57,22 @@ end
     # to a collection of `euclidean` points.
     #
     # Eventually, we'll have support for directly loading into a vector of `points`.
-    dataset = to_euclidean(GraphANN.load_vecs(dataset_path))
+    dataset = GraphANN.load_vecs(GraphANN.Euclidean{128,Float32}, dataset_path)
 
     alpha = 1.2
     max_degree = 70
     window_size = 50
-    parameters = GraphANN.GraphParameters(alpha, max_degree, window_size)
+    parameters = GraphANN.GraphParameters(alpha, max_degree, window_size, 0.8)
 
-    g = GraphANN.generate_index(dataset, parameters)
+    meta = GraphANN.generate_index(dataset, parameters)
+    g = meta.graph
 
     # Is the maximum degree of the generated graph within the set limit?
     @test maximum(outdegree(g)) <= max_degree
     @test is_connected(g)
 
     # Lets try a search
-    queries = to_euclidean(GraphANN.load_vecs(query_path))
+    queries = GraphANN.load_vecs(GraphANN.Euclidean{128,Float32}, query_path)
 
     # Need to adjust ground-truth from index-0 to index-1
     ground_truth = GraphANN.load_vecs(groundtruth_path) .+ UInt32(1)

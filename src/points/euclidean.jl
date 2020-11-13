@@ -41,6 +41,17 @@ vecsize(::Type{Euclidean}, ::Type{Float32}) = 16
 # expand them to Int16's, the whole 512-bit cache line is occupied.
 vecsize(::Type{Euclidean}, ::Type{UInt8}) = 32
 
+# Overload vecs loading functions
+vecs_read_type(::Type{Euclidean{N,T}}) where {N,T} = T
+
+function vecs_convert(::Type{Euclidean{N,T}}, buf::Vector{T}) where {N,T}
+    @assert mod(N, vecsize(Euclidean, T)) == 0
+    @assert length(buf) == N
+    return (first(reinterpret(Euclidean{N,T}, buf)),)
+end
+
+vecs_reshape(::Type{<:Euclidean}, v, dim) = v
+
 #####
 ##### Specialize for UInt8
 #####
