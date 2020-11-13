@@ -40,6 +40,7 @@ include("index/index.jl")
 
 # Data loaders for various formats.
 include("io/io.jl")
+include("trackmax.jl")
 
 function prepare()
     data_path = "/home/stg/projects/diskann-experiments/experiments/DiskANN/data/processed/sift1m/sift_base"
@@ -75,9 +76,11 @@ end
 siftsmall() = joinpath(dirname(@__DIR__), "data", "siftsmall_base.fvecs")
 function _prepare(path = siftsmall())
     dataset = load_vecs(Euclidean{128,UInt8}, path)
-    #dataset = to_euclidean(UInt8, dataset)
+    #dataset = load_vecs(Euclidean{128,Float32}, path)
 
-    parameters = GraphParameters(1.2, 32, 20, 0.75)
+    parameters = GraphParameters(1.2, 30, 20, 0.75)
+    #parameters = GraphParameters(1.2, 128, 50, 0.75)
+    #parameters = GraphParameters(1.2, 70, 50, 0.75)
     return (;
         dataset,
         parameters,

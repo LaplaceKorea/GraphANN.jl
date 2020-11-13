@@ -30,14 +30,18 @@ end
 
 # This is an auxiliary data structure that aids in the pruning process.
 # See tests for basic functionality.
-mutable struct Pruner{T}
+struct Pruner{T}
     # Items to prune
-    items::T
+    items::Vector{T}
     # Boolean vector to determine if an index has been pruned.
     pruned::Vector{Bool}
 end
 
-Pruner{T}() where {T} = Pruner(T[], Bool[])
+function Pruner{T}(sizehint) where {T}
+    x = Pruner(T[], Bool[])
+    sizehint!(x, sizehint)
+    return x
+end
 
 function Base.empty!(x::Pruner)
     empty!(x.items)
@@ -69,7 +73,7 @@ end
     x.pruned .= false
     return nothing
 end
-initialize!(x::Pruner, itr) = initialize!(identity, x -> true, x, itr)
+initialize!(x::Pruner, itr) = initialize!(identity, _ -> true, x, itr)
 
 # NB: Only call BEFORE performing any pruning
 # This WILL NOT maintain the pruned state correctly.
@@ -104,6 +108,11 @@ function prune!(f::F, x::Pruner; start = 1) where {F}
     end
 end
 
+function Base.sizehint!(x::Pruner, sz)
+    sizehint!(x.items, sz)
+    sizehint!(x.pruned, sz)
+end
+
 #####
 ##### Vemana Indexing
 #####
@@ -127,23 +136,28 @@ end
 ##### NextListBuffer
 #####
 
-mutable struct NextListBuffer{T}
+struct NextListBuffer{T}
     # Keep around previously allocated buffers
     buffers::Vector{Vector{T}}
     nextlists::Dict{Int, Vector{T}}
 end
 
 # Constructor
-function NextListBuffer{T}() where {T}
-    buffers = Vector{T}[]
+function NextListBuffer{T}(sizehint::Integer, buffer_lengths::Integer) where {T}
+    buffers = map(1:sizehint) do _
+        v = T[]
+        sizehint!(v, buffer_lengths)
+        return v
+    end
+
     nextlists = Dict{Int, Vector{T}}()
+    sizehint!(nextlists, sizehint)
     return NextListBuffer{T}(buffers, nextlists)
 end
 
 # If we have a previously allocated vector, return that.
 # Otherwise, allocate a new buffer.
-get!(x::NextListBuffer{T}) where {T} = isempty(x.buffers) ? T[] : pop!(x.buffers)
-return!(x::NextListBuffer{T}, v::Vector{T}) where {T} = push!(x.buffers, v)
+Base.get!(x::NextListBuffer{T}) where {T} = isempty(x.buffers) ? T[] : pop!(x.buffers)
 
 Base.getindex(x::NextListBuffer, i) = x.nextlists[i]
 Base.setindex!(x::NextListBuffer{T}, v::Vector{T}, i) where {T} = x.nextlists[i] = v
@@ -246,22 +260,19 @@ function apply_nextlists!(graph, locks, tls::ThreadLocal)
         # Get local storage for this thread.
         storage = tls[]
         for (u, neighbors) in pairs(storage.nextlists)
-            Base.@lock locks[u] sorted_copy!(graph, u, neighbors)
+            Base.@lock locks[u] copyto!(graph, u, neighbors)
         end
     end
 end
 
-function backedges!(graph, locks, tls, max_degree)
+function backedges!(graph, locks, tls, needs_reducing, max_degree)
     # Merge all edges to add together
     Threads.@threads for _ in allthreads()
         storage = tls[]
-        degree_violations = storage.degree_violations
-        empty!(degree_violations)
-
         for (u, neighbors) in pairs(storage.nextlists)
             for v in neighbors
                 n = Base.@lock locks[v] LightGraphs.add_edge!(graph, v, u)
-                n > max_degree && push!(degree_violations, v)
+                n > max_degree && (needs_reducing[v] = true)
             end
         end
         empty!(storage.nextlists)
@@ -274,6 +285,7 @@ function commit!(
     meta::MetaGraph,
     parameters::GraphParameters,
     locks::AbstractVector,
+    needs_reducing::Vector{Bool},
     tls::ThreadLocal
 )
     @unpack graph, data = meta
@@ -283,18 +295,13 @@ function commit!(
     apply_nextlists!(graph, locks, tls)
 
     # Step 2 - Add back edges
-    backedges!(graph, locks, tls, max_degree)
+    backedges!(graph, locks, tls, needs_reducing, max_degree)
 
     # Step 3 - process all over subscribed vertices
-    degree_violations = mapreduce(
-        x -> x.degree_violations,
-        union!,
-        getall(tls);
-        init = RobinSet{eltype(graph)}()
-    ) |> collect
-
     _parameters = applyslack(parameters)
-    Threads.@threads for v in degree_violations
+    Threads.@threads for v in eachindex(needs_reducing)
+        needs_reducing[v] || continue
+
         storage = tls[]
         nextlist = get!(storage.nextlists)
 
@@ -308,8 +315,8 @@ function commit!(
             _parameters,
             storage.pruner,
         )
-        sort!(nextlist; alg = Base.QuickSort)
         storage.nextlists[v] = nextlist
+        needs_reducing[v] = false
     end
 
     # Step 4 - update nextlists for all over subscribed vertices
@@ -336,22 +343,29 @@ function generate_index(
     # Create a spin-lock for each vertex in the graph.
     # This will be used during the `commit!` function to synchronize access to the graph.
     locks = [Base.Threads.SpinLock() for _ in 1:LightGraphs.nv(graph)]
+    needs_reducing = [false for _ in 1:LightGraphs.nv(graph)]
+
     meta = MetaGraph(graph, data)
 
     # Allocate thread local storage
+    # tls = ThreadLocal(TrackMax((
+    #     greedy = GreedySearch(window_size),
+    #     pruner = TrackMax(Pruner{Neighbor}(500)),
+    #     nextlists = TrackMax(NextListBuffer{eltype(graph)}(12000, 150)),
+    # )))
+
     tls = ThreadLocal(;
         greedy = GreedySearch(window_size),
-        pruner = Pruner{Neighbor}(),
-        nextlists = NextListBuffer{eltype(graph)}(),
-        degree_violations = RobinSet{eltype(graph)}(),
+        pruner = Pruner{Neighbor}(1000),
+        nextlists = NextListBuffer{eltype(graph)}(12000, 150),
     )
 
     # First iteration - set alpha = 1.0
-    _generate_index(meta, onealpha(parameters), tls, locks, batchsize)
+    _generate_index(meta, onealpha(parameters), tls, locks, needs_reducing, batchsize)
 
     # Second iteration, alpha = user defined
-    _generate_index(meta, parameters, tls, locks, batchsize)
-    return meta
+    _generate_index(meta, parameters, tls, locks, needs_reducing, batchsize)
+    return meta, tls
 end
 
 @noinline function _generate_index(
@@ -359,6 +373,7 @@ end
     parameters::GraphParameters,
     tls::ThreadLocal,
     locks::AbstractVector,
+    needs_reducing::Vector{Bool},
     batchsize::Integer,
 )
     @unpack graph, data = meta
@@ -393,13 +408,11 @@ end
                 parameters,
                 storage.pruner,
             )
-
-            sort!(nextlist; alg = Base.QuickSort)
             storage.nextlists[i] = nextlist
         end
 
         # Synchronize across threads.
-        committime = @elapsed commit!(meta, parameters, locks, tls)
+        committime = @elapsed commit!(meta, parameters, locks, needs_reducing, tls)
         println("Batch $batch_number of $num_batches. Inter Time: $nexttime. Sync Time: $committime")
     end
 

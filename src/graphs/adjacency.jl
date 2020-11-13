@@ -51,10 +51,11 @@ Base.empty!(x::DefaultAdjacencyList, i) = empty!(x[i])
 Base.iterate(x::DefaultAdjacencyList) = iterate(x.fadj)
 Base.iterate(x::DefaultAdjacencyList, s) = iterate(x.fadj, s)
 
-function sorted_copy!(x::DefaultAdjacencyList, v, A::AbstractArray)
+function Base.copyto!(x::DefaultAdjacencyList, v, A::AbstractArray)
     list = x[v]
     resize!(list, length(A))
     copyto!(list, A)
+    sort!(list; alg = Base.QuickSort)
 end
 
 #####
@@ -65,6 +66,17 @@ struct FlatAdjacencyList{T} <: AbstractAdjacencyList{T}
     adj::Matrix{T}
     # Store how many neighbors each vertex actually has.
     lengths::Vector{T}
+
+    # -- Inner constructor to avoid ambiguity
+    function FlatAdjacencyList{T}(adj::Matrix{T}, lengths::Vector{T}) where {T}
+        return new{T}(adj, lengths)
+    end
+end
+
+function FlatAdjacencyList{T}(nv::Integer, max_degree::Integer) where {T}
+    adj = zeros(T, max_degree, nv)
+    lengths = zeros(T, nv)
+    return FlatAdjacencyList{T}(adj, lengths)
 end
 
 _max_degree(x::FlatAdjacencyList) = size(x.adj, 1)
@@ -102,15 +114,18 @@ function Base.iterate(x::FlatAdjacencyList, s = 1)
     return @inbounds (x[s], s + 1)
 end
 
-function sorted_copy!(x::FlatAdjacencyList, v, A::AbstractArray)
+function Base.copyto!(x::FlatAdjacencyList, v, A::AbstractArray)
     # Resize - make sure we don't copy too many things
     len = min(length(A), _max_degree(x))
     x.lengths[v] = len
 
     # Copy over.
-    dst = pointer(x[v])
+    list = x[v]
+    dst = pointer(list)
     src = pointer(A)
     unsafe_copyto!(dst, src, len)
+    sort!(list; alg = Base.QuickSort)
+
     return nothing
 end
 

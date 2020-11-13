@@ -78,9 +78,8 @@ end
 # This basically works because we implement `LightGraphs.SimpleGraphs.fadj`.
 LightGraphs.edges(x::UniDirectedGraph) = LightGraphs.SimpleGraphs.SimpleEdgeIter(x)
 
-function Base.eltype(
-    ::Type{<:LightGraphs.SimpleGraphs.SimpleEdgeIter{<:UniDirectedGraph{T}}}
-) where {T}
+const SimpleEdgeIter = LightGraphs.SimpleGraphs.SimpleEdgeIter
+function Base.eltype(::Type{<:SimpleEdgeIter{<:UniDirectedGraph{T}}}) where {T}
     return LightGraphs.SimpleDiGraphEdge{T}
 end
 
@@ -94,11 +93,12 @@ end
 # requirement.
 function LightGraphs.add_edge!(g::UniDirectedGraph, s, d)
     adj = fadj(g)
+
     # If this adjacency list is already full, abort early.
     caninsert(adj, s) || return length(adj, s)
 
-    verts = LightGraphs.vertices(g)
     # Check if vertices are in bounds
+    verts = LightGraphs.vertices(g)
     (in(s, verts) && in(d, verts)) || return 0
     @inbounds list = adj[s]
     index = searchsortedfirst(list, d)
@@ -106,6 +106,7 @@ function LightGraphs.add_edge!(g::UniDirectedGraph, s, d)
     # Is the edge already in the graph?
     @inbounds (index <= length(list) && list[index] == d) && return length(list)
     unsafe_insert!(adj, s, index, d)
+
     return length(adj, s)
 end
 
@@ -122,46 +123,79 @@ end
 Base.empty!(g::UniDirectedGraph, v) = empty!(fadj(g), v)
 
 # Copy over an adjacency list, destroying the current adjacency list in the process
-sorted_copy!(g::UniDirectedGraph, v, A::AbstractArray) = sorted_copy!(fadj(g), v, A)
-
-# # Fallback definition for an arbitrary iterable
-# function sorted_copy!(g::UniDirectedGraph, v, itr)
-#     list = fadj(g, v)
-#     empty!(list)
-#     for i in itr
-#         push!(list, i)
-#     end
-#     return nothing
-# end
+# NOTE: We don't expect `A` to be sorted.
+# In fact, it should probably NOT be sorted in order to ensure that the nearest-distance
+# neighbors actually occur in the resulting adjacency list.
+Base.copyto!(g::UniDirectedGraph, v, A::AbstractArray) = copyto!(fadj(g), v, A)
 
 #####
 ##### Generators
 #####
 
+# function random_regular(::Type{T}, nv, ne) where {T <: Integer}
+#     # Allocate destination space
+#     adj = map(1:nv) do _
+#         list = T[]
+#         sizehint!(list, ne)
+#         return list
+#     end
+#
+#     # Populate
+#     Threads.@threads for i in 1:nv
+#         _populate!(adj[i], one(T):T(nv), ne; exclude = i)
+#     end
+#     return UniDirectedGraph{T}(DefaultAdjacencyList(adj))
+# end
+#
+# # Only call this if `ne << length(r)`
+# function _populate!(x::AbstractVector, r::AbstractRange, ne::Integer; exclude = ())
+#     empty!(x)
+#     while length(x) < ne
+#         i = rand(r)
+#         if !in(i, exclude) && !in(i, x)
+#             push!(x, i)
+#         end
+#     end
+#     sort!(x)
+# end
+
 function random_regular(::Type{T}, nv, ne) where {T <: Integer}
     # Allocate destination space
-    adj = map(1:nv) do _
-        list = T[]
-        sizehint!(list, ne)
-        return list
-    end
+    adj = zeros(T, round(Int, 1.5 * ne), nv)
 
-    # Populate
-    Threads.@threads for i in 1:nv
-        _populate!(adj[i], one(T):T(nv), ne; exclude = i)
+    _populate!(adj, ne)
+    lengths = fill(T(ne), nv)
+
+    return UniDirectedGraph{T}(FlatAdjacencyList{T}(adj, lengths))
+end
+
+function _populate!(A::Matrix{T}, ne) where {T}
+    tls = ThreadLocal(T[])
+    nv = size(A, 2)
+
+    Threads.@threads for col in 1:nv
+        storage = tls[]
+        empty!(storage)
+
+        while length(storage) < ne
+            i = rand(1:nv)
+            if (i != col) && !in(i, storage)
+                push!(storage, i)
+            end
+        end
+        sort!(storage)
+        @views A[1:ne, col] .= storage
     end
-    return UniDirectedGraph{T}(DefaultAdjacencyList(adj))
 end
 
 # Only call this if `ne << length(r)`
-function _populate!(x::AbstractVector, r::AbstractRange, ne::Integer; exclude = ())
-    empty!(x)
-    while length(x) < ne
-        i = rand(r)
-        if !in(i, exclude) && !in(i, x)
-            push!(x, i)
-        end
-    end
-    sort!(x)
-end
-
+#function _populate!(x::AbstractVector, r::AbstractRange, ne::Integer; exclude = ())
+#    empty!(x)
+#    while length(x) < ne
+#        i = rand(r)
+#        if !in(i, exclude) && !in(i, x)
+#            push!(x, i)
+#        end
+#    end
+#    sort!(x)
+#end

@@ -50,9 +50,7 @@ end
 #####
 
 @testset "Testing Flat Adjacency" begin
-    adj = zeros(UInt32, 3, 3)
-    lengths = zeros(UInt32, 3)
-    x = GraphANN.FlatAdjacencyList(adj, lengths)
+    x = GraphANN.FlatAdjacencyList{UInt32}(3, 3)
 
     # initial lengths
     @test GraphANN._max_degree(x) == 3
@@ -114,11 +112,11 @@ end
     # Here, make sure that we don't copy too many items.
     # If it DID overflow, then the trailing `4` would leak into `x[2]`.
     A = UInt32.([1,2,3,4])
-    GraphANN.sorted_copy!(x, 1, A)
+    copyto!(x, 1, A)
     @test x[1] == [1,2,3]
     @test x[2] == [1,2,3]
 
     B = UInt32.([1,2])
-    GraphANN.sorted_copy!(x, 3, B)
+    copyto!(x, 3, B)
     @test collect(x) == [[1,2,3], [1,2,3], [1,2]]
 end

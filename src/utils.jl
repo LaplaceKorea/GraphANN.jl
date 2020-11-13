@@ -121,7 +121,9 @@ function ThreadLocal(values::T) where {T}
     return ThreadLocal{T}([deepcopy(values) for _ in 1:Threads.nthreads()])
 end
 
-Base.getindex(t::ThreadLocal) = t.values[Threads.threadid()]
+tlshook(x) = x
+Base.getindex(t::ThreadLocal) = tlshook(t.values[Threads.threadid()])
 getall(t::ThreadLocal) = t.values
 
 allthreads() = 1:Threads.nthreads()
+
