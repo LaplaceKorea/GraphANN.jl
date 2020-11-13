@@ -21,6 +21,16 @@ function distance(a::E, b::E) where {N, T, E <: Euclidean{N,T}}
     return s
 end
 
+# TODO: Think of a better way to express this.
+function distance(a::A, b::B) where {N, TA, TB, A <: Euclidean{N, TA}, B <: Euclidean{N, TB}}
+    T = promote_type(TA, TB)
+    s = zero(T)
+    @simd for i in 1:N
+        @inbounds s += (convert(T, a[i]) - convert(T, b[i])) ^ 2
+    end
+    return s
+end
+
 # What is the vector size for various sized primitives
 #
 # Use a full 512-bit cache line for Float32

@@ -3,6 +3,25 @@ struct GraphParameters
     alpha::Float64
     max_degree::Int
     window_size::Int
+    slack::Float64
+end
+
+function applyslack(x::GraphParameters)
+    return GraphParameters(
+        x.alpha,
+        round(Int, x.slack * x.max_degree),
+        x.window_size,
+        x.slack
+    )
+end
+
+function onealpha(x::GraphParameters)
+    return GraphParameters(
+        1.0,
+        x.max_degree,
+        x.window_size,
+        x.slack
+    )
 end
 
 #####
@@ -221,8 +240,7 @@ function neighbor_updates!(
     end
 end
 
-#function apply_nextlists!(graph, locks, tls::ThreadLocal)
-function apply_nextlists!(graph, locks, tls)
+function apply_nextlists!(graph, locks, tls::ThreadLocal)
     # First step - copy over the next lists
     Threads.@threads for _ in allthreads()
         # Get local storage for this thread.
@@ -234,6 +252,7 @@ function apply_nextlists!(graph, locks, tls)
 end
 
 function backedges!(graph, locks, tls, max_degree)
+    # Merge all edges to add together
     Threads.@threads for _ in allthreads()
         storage = tls[]
         degree_violations = storage.degree_violations
@@ -274,6 +293,7 @@ function commit!(
         init = RobinSet{eltype(graph)}()
     ) |> collect
 
+    _parameters = applyslack(parameters)
     Threads.@threads for v in degree_violations
         storage = tls[]
         nextlist = get!(storage.nextlists)
@@ -285,7 +305,7 @@ function commit!(
             LightGraphs.outneighbors(graph, v),
             v,
             meta,
-            parameters,
+            _parameters,
             storage.pruner,
         )
         sort!(nextlist; alg = Base.QuickSort)
@@ -326,9 +346,8 @@ function generate_index(
         degree_violations = RobinSet{eltype(graph)}(),
     )
 
-    # First iteration - set alpha = 0
-    initial_parameters = GraphParameters(1.0, max_degree, window_size)
-    _generate_index(meta, initial_parameters, tls, locks, batchsize)
+    # First iteration - set alpha = 1.0
+    _generate_index(meta, onealpha(parameters), tls, locks, batchsize)
 
     # Second iteration, alpha = user defined
     _generate_index(meta, parameters, tls, locks, batchsize)

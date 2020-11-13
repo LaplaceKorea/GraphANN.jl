@@ -60,7 +60,7 @@ Base.iterate(set::RobinSet, s) = iterate(keys(set.dict), s)
 # Find the medioid of a dataset
 function medioid(data::Vector{T}) where {T}
     # First, find the element wise sum
-    medioid = T(mapreduce(raw, (x,y) -> x .+ y, data) ./ length(data))
+    medioid = Euclidean(mapreduce(raw, (x,y) -> x .+ y, data) ./ length(data))
     return first(nearest_neighbor(medioid, data))
 end
 
@@ -68,7 +68,7 @@ end
 ##### nearest_neighbor
 #####
 
-function nearest_neighbor(query::T, data::Vector{T}) where {T}
+function nearest_neighbor(query::T, data::AbstractVector) where {T}
     min_ind = 0
     min_dist = typemax(eltype(query))
     for (i, x) in enumerate(data)

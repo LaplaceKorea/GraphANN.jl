@@ -64,19 +64,20 @@ function prepare()
     )
 end
 
-function to_euclidean(x::AbstractMatrix{T}) where {T}
+to_euclidean(x::AbstractMatrix{T}) where {T} = to_euclidean(T, x)
+function to_euclidean(::Type{T}, x::AbstractMatrix) where {T}
     dim = size(x,1)
     x = reshape(x, :)
-    x = reinterpret(GraphANN.Euclidean{dim,T}, x)
+    x = reinterpret(GraphANN.Euclidean{dim,T}, T.(x))
     return collect(x)
 end
 
 siftsmall() = joinpath(dirname(@__DIR__), "data", "siftsmall_base.fvecs")
 function _prepare(path = siftsmall())
     dataset = load_vecs(path)
-    dataset = to_euclidean(dataset)
+    dataset = to_euclidean(UInt8, dataset)
 
-    parameters = GraphParameters(1.2, 70, 75)
+    parameters = GraphParameters(1.2, 128, 50, 0.75)
     return (;
         dataset,
         parameters,
