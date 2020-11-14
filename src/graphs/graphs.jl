@@ -10,4 +10,5 @@ end
 
 include("adjacency.jl")
 include("unidirected.jl")
+include("io.jl")
 

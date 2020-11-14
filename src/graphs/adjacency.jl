@@ -39,6 +39,8 @@ struct DefaultAdjacencyList{T} <: AbstractAdjacencyList{T}
     fadj::Vector{Vector{T}}
 end
 
+DefaultAdjacencyList{T}() where {T} = DefaultAdjacencyList{T}(Vector{T}[])
+
 Base.push!(x::DefaultAdjacencyList{T}, v::Vector{T}) where {T} = push!(x.fadj, v)
 Base.getindex(x::DefaultAdjacencyList, i) = x.fadj[i]
 caninsert(x::DefaultAdjacencyList, i) = true

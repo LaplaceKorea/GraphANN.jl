@@ -75,11 +75,11 @@ end
 
 siftsmall() = joinpath(dirname(@__DIR__), "data", "siftsmall_base.fvecs")
 function _prepare(path = siftsmall())
-    dataset = load_vecs(Euclidean{128,UInt8}, path)
-    #dataset = load_vecs(Euclidean{128,Float32}, path)
+    #dataset = load_vecs(Euclidean{128,UInt8}, path)
+    dataset = load_vecs(Euclidean{128,Float32}, path)
 
-    parameters = GraphParameters(1.2, 30, 20, 0.75)
-    #parameters = GraphParameters(1.2, 128, 50, 0.75)
+    #parameters = GraphParameters(1.2, 30, 20, 0.75)
+    parameters = GraphParameters(1.2, 128, 50, 0.75)
     #parameters = GraphParameters(1.2, 70, 50, 0.75)
     return (;
         dataset,
