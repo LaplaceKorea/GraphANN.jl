@@ -247,16 +247,24 @@ function neighbor_updates!(
     end
 end
 
-function apply_nextlists!(graph, locks, tls::ThreadLocal)
+function apply_nextlists!(graph, locks, tls::ThreadLocal; empty = false)
     # First step - copy over the next lists
     Threads.@threads for _ in allthreads()
         # Get local storage for this thread.
         # No need to lock because work partitioning is done such that the roote
         # nodes are unique for each thread.
+        #
+        # ... however, sneaky bugs can sometimes occur if this invariante,
+        # so lock just to be on the safe side.
+        #
+        # Fortunately, the chance of collision is pretty low, so it shouldn't take very
+        # long to get the locks.
         storage = tls[]
         for (u, neighbors) in pairs(storage.nextlists)
-            copyto!(graph, u, neighbors)
+            Base.@lock locks[v] copyto!(graph, u, neighbors)
         end
+
+        empty && empty!(storage.nextlists)
     end
 end
 
@@ -316,7 +324,7 @@ function commit!(
     end
 
     # Step 4 - update nextlists for all over subscribed vertices
-    apply_nextlists!(graph, locks, tls)
+    apply_nextlists!(graph, locks, tls; empty = true)
     return nothing
 end
 

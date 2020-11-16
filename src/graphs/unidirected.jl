@@ -132,33 +132,6 @@ Base.copyto!(g::UniDirectedGraph, v, A::AbstractArray) = copyto!(fadj(g), v, A)
 ##### Generators
 #####
 
-# function random_regular(::Type{T}, nv, ne) where {T <: Integer}
-#     # Allocate destination space
-#     adj = map(1:nv) do _
-#         list = T[]
-#         sizehint!(list, ne)
-#         return list
-#     end
-#
-#     # Populate
-#     Threads.@threads for i in 1:nv
-#         _populate!(adj[i], one(T):T(nv), ne; exclude = i)
-#     end
-#     return UniDirectedGraph{T}(DefaultAdjacencyList(adj))
-# end
-#
-# # Only call this if `ne << length(r)`
-# function _populate!(x::AbstractVector, r::AbstractRange, ne::Integer; exclude = ())
-#     empty!(x)
-#     while length(x) < ne
-#         i = rand(r)
-#         if !in(i, exclude) && !in(i, x)
-#             push!(x, i)
-#         end
-#     end
-#     sort!(x)
-# end
-
 # function random_regular(
 #     ::Type{T},
 #     nv,
