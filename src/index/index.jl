@@ -261,7 +261,7 @@ function apply_nextlists!(graph, locks, tls::ThreadLocal; empty = false)
         # long to get the locks.
         storage = tls[]
         for (u, neighbors) in pairs(storage.nextlists)
-            Base.@lock locks[v] copyto!(graph, u, neighbors)
+            Base.@lock locks[u] copyto!(graph, u, neighbors)
         end
 
         empty && empty!(storage.nextlists)
@@ -302,8 +302,9 @@ function commit!(
     backedges!(graph, locks, tls, needs_pruning, prune_threshold_degree)
 
     # Step 3 - process all over subscribed vertices
-    Threads.@threads for v in eachindex(needs_pruning)
-        needs_pruning[v] || continue
+    #Threads.@threads for v in eachindex(needs_pruning)
+    dynamic_thread(eachindex(needs_pruning), 128) do v
+        needs_pruning[v] || return nothing
 
         storage = tls[]
         nextlist = get!(storage.nextlists)
@@ -321,6 +322,7 @@ function commit!(
         )
         storage.nextlists[v] = nextlist
         needs_pruning[v] = false
+        return nothing
     end
 
     # Step 4 - update nextlists for all over subscribed vertices
@@ -337,7 +339,7 @@ function generate_index(
     batchsize = 1000,
     tls_monitor = _ -> nothing
 )
-    @unpack alpha, window_size, target_degree, prune_threshold_degree, prune_to_degree = parameters
+    @unpack window_size, target_degree, prune_threshold_degree = parameters
 
     # Generate a random `max_degree` regular graph.
     # NOTE: This is a hack for now - need to write a generator for the UniDiGraph.
@@ -367,6 +369,7 @@ function generate_index(
     )
 
     # First iteration - set alpha = 1.0
+    # Second iteration - decrease pruning threshold to `target_degree`
     for i in 1:2
         _parameters = (i == 2) ? change_threshold(parameters) : onealpha(parameters)
 
@@ -405,8 +408,8 @@ end
         stop = min(batch_number * batchsize, length(data))
         r = start:stop
 
-        # Thread across the batch
-        itertime = @elapsed Threads.@threads for i in r
+        # Use dynamic load balancing.
+        itertime = @elapsed dynamic_thread(r, 128) do i
             # Get thread local storage
             storage = tls[]
 

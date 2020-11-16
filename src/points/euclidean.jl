@@ -130,13 +130,3 @@ function vnni_accumulate(
     return SIMD.Vec(x)
 end
 
-# Reference implementation
-function euclidean(A::AbstractVector{UInt8}, B::AbstractVector{UInt8})
-    s = zero(Float32)
-    for (a,b) in zip(A,B)
-        c = Float32(a) - Float32(b)
-        s += c^2
-    end
-    return s
-end
-

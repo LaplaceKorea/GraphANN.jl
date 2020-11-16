@@ -1,3 +1,4 @@
+# get rid of that pesky "can't reduce over empty collection" error.
 safe_maximum(f::F, itr, default = 0) where {F} = isempty(itr) ? default : maximum(f, itr)
 
 #####
@@ -102,30 +103,6 @@ function recall(groundtruth::AbstractMatrix, results::AbstractMatrix)
     vgt = view(groundtruth, 1:size(results, 1), :)
     return [recall(_gt, _r) for (_gt, _r) in zip(eachcol(vgt), eachcol(results))]
 end
-
-#####
-##### Thread Local
-#####
-
-# Thread local storage.
-struct ThreadLocal{T}
-    values::Vector{T}
-
-    # Inner constructor to resolve ambiguities
-    ThreadLocal{T}(values::Vector{T}) where {T} = new{T}(values)
-end
-
-# Convenience, wrap around a NamedTuple
-ThreadLocal(; kw...) = ThreadLocal((;kw...,))
-
-function ThreadLocal(values::T) where {T}
-    return ThreadLocal{T}([deepcopy(values) for _ in 1:Threads.nthreads()])
-end
-
-Base.getindex(t::ThreadLocal) = t.values[Threads.threadid()]
-getall(t::ThreadLocal) = t.values
-
-allthreads() = 1:Threads.nthreads()
 
 #####
 ##### Lowest Level Prefetch
