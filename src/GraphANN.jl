@@ -47,12 +47,20 @@ function _prepare(path = siftsmall())
     dataset = load_vecs(Euclidean{128,UInt8}, path)
     #dataset = load_vecs(Euclidean{128,Float32}, path)
 
+    # parameters = GraphParameters(
+    #     alpha = 1.2,
+    #     window_size = 50,
+    #     target_degree = 128,
+    #     prune_threshold_degree = 150,
+    #     prune_to_degree = 100,
+    # )
+
     parameters = GraphParameters(
         alpha = 1.2,
         window_size = 50,
-        target_degree = 128,
-        prune_threshold_degree = 150,
-        prune_to_degree = 100,
+        target_degree = 50,
+        prune_threshold_degree = 70,
+        prune_to_degree = 30,
     )
 
     return (;

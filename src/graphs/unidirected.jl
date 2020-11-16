@@ -159,21 +159,36 @@ Base.copyto!(g::UniDirectedGraph, v, A::AbstractArray) = copyto!(fadj(g), v, A)
 #     sort!(x)
 # end
 
+# function random_regular(
+#     ::Type{T},
+#     nv,
+#     ne;
+#     max_edges = ne,
+#     slack = 1.05
+# ) where {T <: Integer}
+#
+#     # Allocate destination space
+#     adj = zeros(T, ceil(Int, slack * max_edges), nv)
+#
+#     _populate!(adj, ne)
+#     lengths = fill(T(ne), nv)
+#
+#     return UniDirectedGraph{T}(FlatAdjacencyList{T}(adj, lengths))
+# end
+
 function random_regular(
     ::Type{T},
     nv,
     ne;
     max_edges = ne,
-    slack = 1.05
+    slack = 1.05,
 ) where {T <: Integer}
 
-    # Allocate destination space
-    adj = zeros(T, ceil(Int, slack * max_edges), nv)
+    adj = Vector{Vector{T}}(undef, nv)
+    _populate!(adj, ne, ceil(Int, slack * max_edges))
+    @assert all(i -> isassigned(adj, i), 1:nv)
 
-    _populate!(adj, ne)
-    lengths = fill(T(ne), nv)
-
-    return UniDirectedGraph{T}(FlatAdjacencyList{T}(adj, lengths))
+    return UniDirectedGraph{T}(DefaultAdjacencyList{T}(adj))
 end
 
 function _populate!(A::Matrix{T}, ne) where {T}
@@ -194,6 +209,25 @@ function _populate!(A::Matrix{T}, ne) where {T}
         @views A[1:ne, col] .= storage
     end
 end
+
+function _populate!(A::AbstractVector{<:AbstractVector{T}}, ne, max_edges) where {T}
+    nv = length(A)
+
+    Threads.@threads for col in 1:nv
+        list = T[]
+        sizehint!(list, max_edges)
+        while length(list) < ne
+            i = rand(1:nv)
+            if (i != col) && !in(i, list)
+                push!(list, i)
+            end
+        end
+        sort!(list)
+        A[col] = list
+    end
+    return A
+end
+
 
 # Only call this if `ne << length(r)`
 #function _populate!(x::AbstractVector, r::AbstractRange, ne::Integer; exclude = ())
