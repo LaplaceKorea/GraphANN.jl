@@ -86,7 +86,6 @@ function reduce!(greedy::GreedySearch)
     return nothing
 end
 
-
 #####
 ##### Greedy Search Implementation
 #####
@@ -106,7 +105,12 @@ function search(
     pushcandidate!(algo, Neighbor(start_node, distance(query, data[start_node])))
     while !done(algo)
         p = getid(getcandidate!(algo))
-        for v in LightGraphs.outneighbors(graph, p)
+        neighbors = LightGraphs.outneighbors(graph, p)
+        ln = length(neighbors)
+        for i in eachindex(neighbors)
+            @inbounds v = neighbors[i]
+            i < ln && prefetch(data, @inbounds neighbors[i+1])
+
             # TODO: prefetch next vector
             @inbounds d = distance(query, data[v])
 

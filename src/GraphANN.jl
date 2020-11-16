@@ -7,6 +7,7 @@ include("minmax_heap.jl")
 import Distances
 import LightGraphs
 import ProgressMeter
+import Setfield
 import SIMD
 
 # Explicit imports
@@ -40,7 +41,6 @@ include("index/index.jl")
 
 # Data loaders for various formats.
 include("io/io.jl")
-include("trackmax.jl")
 
 function prepare()
     data_path = "/home/stg/projects/diskann-experiments/experiments/DiskANN/data/processed/sift1m/sift_base"
@@ -65,22 +65,14 @@ function prepare()
     )
 end
 
-to_euclidean(x::AbstractMatrix{T}) where {T} = to_euclidean(T, x)
-function to_euclidean(::Type{T}, x::AbstractMatrix) where {T}
-    dim = size(x,1)
-    x = reshape(x, :)
-    x = reinterpret(GraphANN.Euclidean{dim,T}, T.(x))
-    return collect(x)
-end
-
 siftsmall() = joinpath(dirname(@__DIR__), "data", "siftsmall_base.fvecs")
 function _prepare(path = siftsmall())
-    #dataset = load_vecs(Euclidean{128,UInt8}, path)
-    dataset = load_vecs(Euclidean{128,Float32}, path)
+    dataset = load_vecs(Euclidean{128,UInt8}, path)
+    #dataset = load_vecs(Euclidean{128,Float32}, path)
 
     #parameters = GraphParameters(1.2, 30, 20, 0.75)
-    parameters = GraphParameters(1.2, 128, 50, 0.75)
-    #parameters = GraphParameters(1.2, 70, 50, 0.75)
+    #parameters = GraphParameters(1.2, 128, 50, 0.75)
+    parameters = GraphParameters(1.2, 128, 50, 0.8, 1.2)
     return (;
         dataset,
         parameters,

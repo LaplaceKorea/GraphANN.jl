@@ -44,7 +44,22 @@ DefaultAdjacencyList{T}() where {T} = DefaultAdjacencyList{T}(Vector{T}[])
 Base.push!(x::DefaultAdjacencyList{T}, v::Vector{T}) where {T} = push!(x.fadj, v)
 Base.getindex(x::DefaultAdjacencyList, i) = x.fadj[i]
 caninsert(x::DefaultAdjacencyList, i) = true
-unsafe_insert!(x::DefaultAdjacencyList, v, index, value) = insert!(x[v], index, value)
+function unsafe_insert!(x::DefaultAdjacencyList, v, index, value)
+    # Do not use `Base.insert!` because this can shift either at the front or the back.
+    # To keep vectors from walking too much, we always want to shift back.
+    list = x[v]
+    if index > length(list)
+        push!(list, value)
+        return nothing
+    end
+
+    # Move everything back
+    resize(list, length(list) + 1)
+    num_to_move = length(list) - index
+    unsafe_copyto!(list, index, list, index + 1, num_to_move)
+    @inbounds list[index] = value
+    return nothing
+end
 
 Base.length(x::DefaultAdjacencyList) = length(x.fadj)
 Base.length(x::DefaultAdjacencyList, i) = length(x[i])
@@ -121,12 +136,10 @@ function Base.copyto!(x::FlatAdjacencyList, v, A::AbstractArray)
     len = min(length(A), _max_degree(x))
     x.lengths[v] = len
 
-    # Copy over.
-    list = x[v]
-    dst = pointer(list)
+    sort!(A; alg = Base.QuickSort)
+    dst = pointer(x.adj, v)
     src = pointer(A)
     unsafe_copyto!(dst, src, len)
-    sort!(list; alg = Base.QuickSort)
 
     return nothing
 end

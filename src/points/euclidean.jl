@@ -21,14 +21,29 @@ function distance(a::E, b::E) where {N, T, E <: Euclidean{N,T}}
     return s
 end
 
-# TODO: Think of a better way to express this.
 function distance(a::A, b::B) where {N, TA, TB, A <: Euclidean{N, TA}, B <: Euclidean{N, TB}}
     T = promote_type(TA, TB)
     s = zero(T)
     @simd for i in 1:N
-        @inbounds s += (convert(T, a[i]) - convert(T, b[i])) ^ 2
+        _a = @inbounds convert(T, a[i])
+        _b = @inbounds convert(T, b[i])
+        @inbounds s += (_a - _b) ^ 2
     end
     return s
+end
+
+# Prefetching
+function prefetch(A::AbstractVector{Euclidean{N,T}}, i) where {N,T}
+    # Need to prefetch the entire vector
+    # Compute how many cache lines are needed.
+    # Divide the number of bytes by 64 to get cache lines.
+    cache_lines = (N * sizeof(T)) >> 6
+
+    ptr = pointer(A, i)
+    for i in 1:cache_lines
+        prefetch(ptr + 64 * (i-1))
+    end
+    return nothing
 end
 
 # What is the vector size for various sized primitives

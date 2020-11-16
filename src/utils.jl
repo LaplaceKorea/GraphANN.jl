@@ -1,3 +1,5 @@
+safe_maximum(f::F, itr, default = 0) where {F} = isempty(itr) ? default : maximum(f, itr)
+
 #####
 ##### Neighbor
 #####
@@ -52,7 +54,6 @@ Base.length(set::RobinSet) = length(set.dict)
 Base.iterate(set::RobinSet) = iterate(keys(set.dict))
 Base.iterate(set::RobinSet, s) = iterate(keys(set.dict), s)
 
-
 #####
 ##### Medoid
 #####
@@ -60,7 +61,7 @@ Base.iterate(set::RobinSet, s) = iterate(keys(set.dict), s)
 # Find the medioid of a dataset
 function medioid(data::Vector{T}) where {T}
     # First, find the element wise sum
-    medioid = Euclidean(mapreduce(raw, (x,y) -> x .+ y, data) ./ length(data))
+    medioid = Euclidean(mapreduce(raw, (x,y) -> Float32.(x) .+ Float32.(y), data) ./ length(data))
     return first(nearest_neighbor(medioid, data))
 end
 
@@ -121,9 +122,25 @@ function ThreadLocal(values::T) where {T}
     return ThreadLocal{T}([deepcopy(values) for _ in 1:Threads.nthreads()])
 end
 
-tlshook(x) = x
-Base.getindex(t::ThreadLocal) = tlshook(t.values[Threads.threadid()])
+Base.getindex(t::ThreadLocal) = t.values[Threads.threadid()]
 getall(t::ThreadLocal) = t.values
 
 allthreads() = 1:Threads.nthreads()
+
+#####
+##### Lowest Level Prefetch
+#####
+
+function prefetch(ptr::Ptr)
+    Base.@_inline_meta
+    Base.llvmcall(raw"""
+        %val = inttoptr i64 %0 to i8*
+        call void asm sideeffect "prefetch $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
+        ret void
+        """,
+        Cvoid,
+        Tuple{Ptr{Cvoid}},
+        Ptr{Cvoid}(ptr),
+    )
+end
 

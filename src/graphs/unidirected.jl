@@ -159,9 +159,16 @@ Base.copyto!(g::UniDirectedGraph, v, A::AbstractArray) = copyto!(fadj(g), v, A)
 #     sort!(x)
 # end
 
-function random_regular(::Type{T}, nv, ne) where {T <: Integer}
+function random_regular(
+    ::Type{T},
+    nv,
+    ne;
+    max_edges = ne,
+    slack = 1.05
+) where {T <: Integer}
+
     # Allocate destination space
-    adj = zeros(T, round(Int, 1.5 * ne), nv)
+    adj = zeros(T, ceil(Int, slack * max_edges), nv)
 
     _populate!(adj, ne)
     lengths = fill(T(ne), nv)

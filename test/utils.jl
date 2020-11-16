@@ -20,3 +20,37 @@
     @test Neighbor(1, 1.0) < Neighbor(2, 1.0)
     @test Neighbor(2, 1.0) > Neighbor(1, 1.0)
 end
+
+@testset "Testing RobinSet" begin
+    x = GraphANN.RobinSet{Int}()
+    @test length(x) == 0
+    push!(x, 10)
+    @test length(x) == 1
+    push!(x, 20)
+    @test length(x) == 2
+
+    @test in(10, x) == true
+    @test in(30, x) == false
+    @test in(20, x) == true
+    @test in(0, x) == false
+
+    # iterator
+    @test sort(collect(x)) == [10, 20]
+
+    # deletion
+    delete!(x, 10)
+    @test length(x) == 1
+    @test in(20, x) == true
+    @test in(10, x) == true
+
+    i = pop!(x)
+    @test length(x) == 0
+
+    push!(x, 1)
+    push!(x, 2)
+    @test length(x) == 2
+    empty!(x)
+    @test length(x) == 0
+    @test in(1, x) == false
+    @test in(2, x) == false
+end

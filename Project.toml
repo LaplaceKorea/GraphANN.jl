@@ -9,6 +9,7 @@ Distances = "b4f34e82-e78d-54a5-968a-f98e89d6e8f7"
 LightGraphs = "093fc24a-ae57-5d10-9952-331d41423f4d"
 ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
 SIMD = "fdea26ae-647d-5447-a871-4b548cad5224"
+Setfield = "efcf1570-3423-57d1-acb7-fd33fddbac46"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 UnPack = "3a884ed6-31ef-47d7-9d2a-63182c4928ed"
 

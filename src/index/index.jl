@@ -3,26 +3,25 @@ struct GraphParameters
     alpha::Float64
     max_degree::Int
     window_size::Int
-    slack::Float64
+    # When reducing vertices that have been over subscribed, this sets how many new
+    # neighbors to set.
+    #
+    # This should be less than 1
+    down_slack::Float64
+
+    # One problem that occurs at the beginning of index building is massive over
+    # subscription in the graph.
+    #
+    # This increases the threshold that requires reindexing a vertex.
+    up_slack::Float64
 end
 
-function applyslack(x::GraphParameters)
-    return GraphParameters(
-        x.alpha,
-        round(Int, x.slack * x.max_degree),
-        x.window_size,
-        x.slack
-    )
+function downslack(x::GraphParameters)
+    new_degree = round(Int, x.down_slack * x.max_degree)
+    return Setfield.@set x.max_degree = new_degree
 end
 
-function onealpha(x::GraphParameters)
-    return GraphParameters(
-        1.0,
-        x.max_degree,
-        x.window_size,
-        x.slack
-    )
-end
+onealpha(x::GraphParameters) = Setfield.@set x.alpha = 1.0
 
 #####
 ##### Pruner
@@ -37,11 +36,7 @@ struct Pruner{T}
     pruned::Vector{Bool}
 end
 
-function Pruner{T}(sizehint) where {T}
-    x = Pruner(T[], Bool[])
-    sizehint!(x, sizehint)
-    return x
-end
+Pruner{T}() where {T} = Pruner(T[], Bool[])
 
 function Base.empty!(x::Pruner)
     empty!(x.items)
@@ -140,24 +135,30 @@ struct NextListBuffer{T}
     # Keep around previously allocated buffers
     buffers::Vector{Vector{T}}
     nextlists::Dict{Int, Vector{T}}
+    sizehint::Int
 end
 
 # Constructor
-function NextListBuffer{T}(sizehint::Integer, buffer_lengths::Integer) where {T}
-    buffers = map(1:sizehint) do _
+function NextListBuffer{T}(sizehint::Integer, num_buffers::Integer = 1) where {T}
+    buffers = map(1:num_buffers) do _
         v = T[]
-        sizehint!(v, buffer_lengths)
+        sizehint!(v, sizehint)
         return v
     end
 
     nextlists = Dict{Int, Vector{T}}()
-    sizehint!(nextlists, sizehint)
-    return NextListBuffer{T}(buffers, nextlists)
+    sizehint!(nextlists, num_buffers)
+    return NextListBuffer{T}(buffers, nextlists, sizehint)
 end
 
 # If we have a previously allocated vector, return that.
 # Otherwise, allocate a new buffer.
-Base.get!(x::NextListBuffer{T}) where {T} = isempty(x.buffers) ? T[] : pop!(x.buffers)
+function Base.get!(x::NextListBuffer{T}) where {T}
+    !isempty(x.buffers) && return pop!(x.buffers)
+    new = T[]
+    sizehint!(new, x.sizehint)
+    return new
+end
 
 Base.getindex(x::NextListBuffer, i) = x.nextlists[i]
 Base.setindex!(x::NextListBuffer{T}, v::Vector{T}, i) where {T} = x.nextlists[i] = v
@@ -258,9 +259,11 @@ function apply_nextlists!(graph, locks, tls::ThreadLocal)
     # First step - copy over the next lists
     Threads.@threads for _ in allthreads()
         # Get local storage for this thread.
+        # No need to lock because work partitioning is done such that the roote
+        # nodes are unique for each thread.
         storage = tls[]
         for (u, neighbors) in pairs(storage.nextlists)
-            Base.@lock locks[u] copyto!(graph, u, neighbors)
+            copyto!(graph, u, neighbors)
         end
     end
 end
@@ -286,19 +289,22 @@ function commit!(
     parameters::GraphParameters,
     locks::AbstractVector,
     needs_reducing::Vector{Bool},
-    tls::ThreadLocal
+    tls::ThreadLocal;
+    relaxed = false
 )
     @unpack graph, data = meta
-    @unpack max_degree = parameters
+    @unpack max_degree, up_slack = parameters
 
     # Step 1 - update all the next lists
     apply_nextlists!(graph, locks, tls)
 
     # Step 2 - Add back edges
-    backedges!(graph, locks, tls, needs_reducing, max_degree)
+    # If this pass is relaxed, then increase the degree at which we require reducing.
+    relaxed_degree = relaxed ? round(Int, up_slack * max_degree) : max_degree
+    backedges!(graph, locks, tls, needs_reducing, relaxed_degree)
 
     # Step 3 - process all over subscribed vertices
-    _parameters = applyslack(parameters)
+    _parameters = downslack(parameters)
     Threads.@threads for v in eachindex(needs_reducing)
         needs_reducing[v] || continue
 
@@ -331,14 +337,15 @@ function generate_index(
     data,
     parameters::GraphParameters;
     batchsize = 1000,
+    tls_monitor = _ -> nothing
 )
-    @unpack alpha, max_degree, window_size = parameters
+    @unpack alpha, max_degree, window_size, up_slack = parameters
 
     # Generate a random `max_degree` regular graph.
     # NOTE: This is a hack for now - need to write a generator for the UniDiGraph.
     # TODO: Also, default the graph to UInt32's to save on space.
     # Keep this as a parameter so we can promote to Int64's if needed.
-    graph = random_regular(UInt32, length(data), max_degree)
+    graph = random_regular(UInt32, length(data), max_degree; slack = up_slack)
 
     # Create a spin-lock for each vertex in the graph.
     # This will be used during the `commit!` function to synchronize access to the graph.
@@ -347,25 +354,38 @@ function generate_index(
 
     meta = MetaGraph(graph, data)
 
-    # Allocate thread local storage
-    # tls = ThreadLocal(TrackMax((
-    #     greedy = GreedySearch(window_size),
-    #     pruner = TrackMax(Pruner{Neighbor}(500)),
-    #     nextlists = TrackMax(NextListBuffer{eltype(graph)}(12000, 150)),
-    # )))
-
     tls = ThreadLocal(;
         greedy = GreedySearch(window_size),
-        pruner = Pruner{Neighbor}(1000),
-        nextlists = NextListBuffer{eltype(graph)}(12000, 150),
+        pruner = Pruner{Neighbor}(),
+        nextlists = NextListBuffer{eltype(graph)}(
+            max_degree,
+            2 * ceil(Int, batchsize / Threads.nthreads()),
+        ),
     )
 
     # First iteration - set alpha = 1.0
-    _generate_index(meta, onealpha(parameters), tls, locks, needs_reducing, batchsize)
+    for i in 1:2
+        if i == 1
+            these_parameters = onealpha(parameters)
+            relaxed = true
+        else
+            these_parameters = parameters
+            relaxed = false
+        end
 
-    # Second iteration, alpha = user defined
-    _generate_index(meta, parameters, tls, locks, needs_reducing, batchsize)
-    return meta, tls
+        _generate_index(
+            meta,
+            these_parameters,
+            tls,
+            locks,
+            needs_reducing,
+            batchsize;
+            tls_monitor = tls_monitor,
+            relaxed = relaxed,
+        )
+    end
+
+    return meta
 end
 
 @noinline function _generate_index(
@@ -374,7 +394,10 @@ end
     tls::ThreadLocal,
     locks::AbstractVector,
     needs_reducing::Vector{Bool},
-    batchsize::Integer,
+    batchsize::Integer;
+    # Optional monitors on thread local storage
+    tls_monitor = _ -> nothing,
+    relaxed = false,
 )
     @unpack graph, data = meta
 
@@ -411,11 +434,65 @@ end
             storage.nextlists[i] = nextlist
         end
 
-        # Synchronize across threads.
-        committime = @elapsed commit!(meta, parameters, locks, needs_reducing, tls)
+        # Update the graph.
+        # We also have the option of recording metrics about the state of the thread local
+        # storage to help appropriately size preallocation.
+        tls_monitor(tls)
+        committime = @elapsed commit!(
+            meta,
+            parameters,
+            locks,
+            needs_reducing,
+            tls;
+            relaxed = relaxed,
+        )
+        tls_monitor(tls)
         println("Batch $batch_number of $num_batches. Inter Time: $nexttime. Sync Time: $committime")
     end
 
     return graph
+end
+
+#####
+##### Get the size of TLS structures
+#####
+
+struct TLSMonitor
+    record::Dict{Symbol,Int}
+    samplerate::Float64
+end
+
+function TLSMonitor(samplerate = 0.01)
+    record = Dict(
+        :pruner_length => 0,
+        :nextlist_length => 0,
+        :max_buffer_size => 0,
+    )
+    return TLSMonitor(record, samplerate)
+end
+
+function (monitor::TLSMonitor)(tls::ThreadLocal)
+    # Only kick in rarely.
+    rand() > monitor.samplerate && return nothing
+    record = monitor.record
+
+    @unpack pruner_length, nextlist_length, max_buffer_size = record
+
+    for storage in getall(tls)
+        pruner_length = max(pruner_length, length(storage.pruner))
+
+        nextlists = storage.nextlists
+        nextlist_length = max(
+            nextlist_length,
+            length(nextlists.buffers) + length(nextlists.nextlists)
+        )
+
+        a = safe_maximum(length, nextlists.buffers)
+        b = safe_maximum(length, values(nextlists.nextlists))
+        max_buffer_size = max(max_buffer_size, a, b)
+    end
+
+    @pack! record = pruner_length, nextlist_length, max_buffer_size
+    return nothing
 end
 
