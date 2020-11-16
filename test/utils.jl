@@ -41,7 +41,7 @@ end
     delete!(x, 10)
     @test length(x) == 1
     @test in(20, x) == true
-    @test in(10, x) == true
+    @test in(10, x) == false
 
     i = pop!(x)
     @test length(x) == 0

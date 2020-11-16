@@ -62,7 +62,13 @@ end
     alpha = 1.2
     max_degree = 70
     window_size = 50
-    parameters = GraphANN.GraphParameters(alpha, max_degree, window_size, 0.8)
+    parameters = GraphANN.GraphParameters(;
+        alpha = alpha,
+        window_size = window_size,
+        target_degree = max_degree,
+        prune_threshold_degree = 90,
+        prune_to_degree = 65,
+    )
 
     meta = GraphANN.generate_index(dataset, parameters)
     g = meta.graph

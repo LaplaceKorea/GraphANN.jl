@@ -1,24 +1,16 @@
 # Simple container for passing around graph parameters.
-struct GraphParameters
+Base.@kwdef struct GraphParameters
     alpha::Float64
-    max_degree::Int
     window_size::Int
-    # When reducing vertices that have been over subscribed, this sets how many new
-    # neighbors to set.
-    #
-    # This should be less than 1
-    down_slack::Float64
 
-    # One problem that occurs at the beginning of index building is massive over
-    # subscription in the graph.
-    #
-    # This increases the threshold that requires reindexing a vertex.
-    up_slack::Float64
+    # Three parameters describing graph construction
+    target_degree::Int
+    prune_threshold_degree::Int
+    prune_to_degree::Int
 end
 
-function downslack(x::GraphParameters)
-    new_degree = round(Int, x.down_slack * x.max_degree)
-    return Setfield.@set x.max_degree = new_degree
+function change_threshold(x::GraphParameters, threshold = x.target_degree)
+    return Setfield.@set x.prune_threshold_degree = threshold
 end
 
 onealpha(x::GraphParameters) = Setfield.@set x.alpha = 1.0
@@ -207,12 +199,12 @@ function neighbor_updates!(
     candidates,
     vertex,
     meta::MetaGraph,
-    parameters::GraphParameters,
     pruner::Pruner,
+    alpha::AbstractFloat,
+    target_degree::Integer
 )
     # Destructure some parameters
     @unpack graph, data = meta
-    @unpack alpha, max_degree = parameters
 
     # If the passed `candidates` is a Set, then append the current out neighbors
     # of the query vertex to the set.
@@ -248,7 +240,7 @@ function neighbor_updates!(
         # we've defined that behavior in `utils.jl`.
         f = x -> (alpha * distance(data[i], data[x]) <= getdistance(x))
         prune!(f, pruner; start = state)
-        length(nextlist) >= max_degree && break
+        length(nextlist) >= target_degree && break
 
         # Next step in the iteration interface
         next = iterate(pruner, state)
@@ -268,14 +260,14 @@ function apply_nextlists!(graph, locks, tls::ThreadLocal)
     end
 end
 
-function backedges!(graph, locks, tls, needs_reducing, max_degree)
+function backedges!(graph, locks, tls, needs_pruning, prune_threshold)
     # Merge all edges to add together
     Threads.@threads for _ in allthreads()
         storage = tls[]
         for (u, neighbors) in pairs(storage.nextlists)
             for v in neighbors
                 n = Base.@lock locks[v] LightGraphs.add_edge!(graph, v, u)
-                n > max_degree && (needs_reducing[v] = true)
+                n > prune_threshold && (needs_pruning[v] = true)
             end
         end
         empty!(storage.nextlists)
@@ -288,25 +280,22 @@ function commit!(
     meta::MetaGraph,
     parameters::GraphParameters,
     locks::AbstractVector,
-    needs_reducing::Vector{Bool},
-    tls::ThreadLocal;
-    relaxed = false
+    needs_pruning::Vector{Bool},
+    tls::ThreadLocal,
 )
     @unpack graph, data = meta
-    @unpack max_degree, up_slack = parameters
+    @unpack prune_threshold_degree, prune_to_degree, alpha = parameters
 
     # Step 1 - update all the next lists
     apply_nextlists!(graph, locks, tls)
 
     # Step 2 - Add back edges
     # If this pass is relaxed, then increase the degree at which we require reducing.
-    relaxed_degree = relaxed ? round(Int, up_slack * max_degree) : max_degree
-    backedges!(graph, locks, tls, needs_reducing, relaxed_degree)
+    backedges!(graph, locks, tls, needs_pruning, prune_threshold_degree)
 
     # Step 3 - process all over subscribed vertices
-    _parameters = downslack(parameters)
-    Threads.@threads for v in eachindex(needs_reducing)
-        needs_reducing[v] || continue
+    Threads.@threads for v in eachindex(needs_pruning)
+        needs_pruning[v] || continue
 
         storage = tls[]
         nextlist = get!(storage.nextlists)
@@ -318,11 +307,12 @@ function commit!(
             LightGraphs.outneighbors(graph, v),
             v,
             meta,
-            _parameters,
             storage.pruner,
+            alpha,
+            prune_to_degree,
         )
         storage.nextlists[v] = nextlist
-        needs_reducing[v] = false
+        needs_pruning[v] = false
     end
 
     # Step 4 - update nextlists for all over subscribed vertices
@@ -339,18 +329,23 @@ function generate_index(
     batchsize = 1000,
     tls_monitor = _ -> nothing
 )
-    @unpack alpha, max_degree, window_size, up_slack = parameters
+    @unpack alpha, window_size, target_degree, prune_threshold_degree, prune_to_degree = parameters
 
     # Generate a random `max_degree` regular graph.
     # NOTE: This is a hack for now - need to write a generator for the UniDiGraph.
     # TODO: Also, default the graph to UInt32's to save on space.
     # Keep this as a parameter so we can promote to Int64's if needed.
-    graph = random_regular(UInt32, length(data), max_degree; slack = up_slack)
+    graph = random_regular(
+        UInt32,
+        length(data),
+        target_degree;
+        max_edges = prune_threshold_degree,
+    )
 
     # Create a spin-lock for each vertex in the graph.
     # This will be used during the `commit!` function to synchronize access to the graph.
     locks = [Base.Threads.SpinLock() for _ in 1:LightGraphs.nv(graph)]
-    needs_reducing = [false for _ in 1:LightGraphs.nv(graph)]
+    needs_pruning = [false for _ in 1:LightGraphs.nv(graph)]
 
     meta = MetaGraph(graph, data)
 
@@ -358,30 +353,23 @@ function generate_index(
         greedy = GreedySearch(window_size),
         pruner = Pruner{Neighbor}(),
         nextlists = NextListBuffer{eltype(graph)}(
-            max_degree,
+            target_degree,
             2 * ceil(Int, batchsize / Threads.nthreads()),
         ),
     )
 
     # First iteration - set alpha = 1.0
     for i in 1:2
-        if i == 1
-            these_parameters = onealpha(parameters)
-            relaxed = true
-        else
-            these_parameters = parameters
-            relaxed = false
-        end
+        _parameters = (i == 2) ? change_threshold(parameters) : onealpha(parameters)
 
         _generate_index(
             meta,
-            these_parameters,
+            _parameters,
             tls,
             locks,
-            needs_reducing,
+            needs_pruning,
             batchsize;
             tls_monitor = tls_monitor,
-            relaxed = relaxed,
         )
     end
 
@@ -393,23 +381,24 @@ end
     parameters::GraphParameters,
     tls::ThreadLocal,
     locks::AbstractVector,
-    needs_reducing::Vector{Bool},
+    needs_pruning::Vector{Bool},
     batchsize::Integer;
     # Optional monitors on thread local storage
     tls_monitor = _ -> nothing,
-    relaxed = false,
 )
     @unpack graph, data = meta
+    @unpack alpha, target_degree = parameters
 
     # TODO: replace with shuffle
     num_batches = ceil(Int, length(data) / batchsize)
+    progress_meter = ProgressMeter.Progress(num_batches, 1, "Computing Index...")
     for batch_number in 1:num_batches
         start = ((batch_number - 1) * batchsize) + 1
         stop = min(batch_number * batchsize, length(data))
         r = start:stop
 
         # Thread across the batch
-        nexttime = @elapsed Threads.@threads for i in r
+        itertime = @elapsed Threads.@threads for i in r
             # Get thread local storage
             storage = tls[]
 
@@ -428,8 +417,9 @@ end
                 candidates,
                 i,
                 meta,
-                parameters,
                 storage.pruner,
+                alpha,
+                target_degree,
             )
             storage.nextlists[i] = nextlist
         end
@@ -438,18 +428,20 @@ end
         # We also have the option of recording metrics about the state of the thread local
         # storage to help appropriately size preallocation.
         tls_monitor(tls)
-        committime = @elapsed commit!(
+        synctime = @elapsed commit!(
             meta,
             parameters,
             locks,
-            needs_reducing,
-            tls;
-            relaxed = relaxed,
+            needs_pruning,
+            tls,
         )
-        tls_monitor(tls)
-        println("Batch $batch_number of $num_batches. Inter Time: $nexttime. Sync Time: $committime")
-    end
 
+        tls_monitor(tls)
+        ProgressMeter.next!(
+            progress_meter;
+            showvalues = ((:iter_time, itertime), (:sync_time, synctime)),
+        )
+    end
     return graph
 end
 

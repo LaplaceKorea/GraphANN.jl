@@ -54,9 +54,10 @@ function unsafe_insert!(x::DefaultAdjacencyList, v, index, value)
     end
 
     # Move everything back
-    resize(list, length(list) + 1)
+    resize!(list, length(list) + 1)
     num_to_move = length(list) - index
-    unsafe_copyto!(list, index, list, index + 1, num_to_move)
+
+    unsafe_copyto!(list, index + 1, list, index, num_to_move)
     @inbounds list[index] = value
     return nothing
 end
@@ -133,14 +134,17 @@ end
 
 function Base.copyto!(x::FlatAdjacencyList, v, A::AbstractArray)
     # Resize - make sure we don't copy too many things
+    md = _max_degree(x)
     len = min(length(A), _max_degree(x))
     x.lengths[v] = len
 
     sort!(A; alg = Base.QuickSort)
-    dst = pointer(x.adj, v)
+
+    # Start index for `dst` pointer: Compute linear offset based on the length of each
+    # column.
+    dst = pointer(x.adj, (md * (v - 1)) + 1)
     src = pointer(A)
     unsafe_copyto!(dst, src, len)
-
     return nothing
 end
 
