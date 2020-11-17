@@ -268,7 +268,7 @@ function apply_nextlists!(graph, locks, tls::ThreadLocal; empty = false)
     end
 end
 
-function backedges!(graph, locks, tls, needs_pruning, prune_threshold)
+function add_backedges!(graph, locks, tls, needs_pruning, prune_threshold)
     # Merge all edges to add together
     Threads.@threads for _ in allthreads()
         storage = tls[]
@@ -282,27 +282,15 @@ function backedges!(graph, locks, tls, needs_pruning, prune_threshold)
     end
 end
 
-# Commit all the pending updates to the graph.
-# Then, cycle util no nodes violate the degree requirement
-function commit!(
+function prune!(
     meta::MetaGraph,
     parameters::GraphParameters,
-    locks::AbstractVector,
-    needs_pruning::Vector{Bool},
     tls::ThreadLocal,
+    needs_pruning::Vector{Bool},
 )
-    @unpack graph, data = meta
-    @unpack prune_threshold_degree, prune_to_degree, alpha = parameters
+    @unpack graph = meta
+    @unpack prune_to_degree, alpha = parameters
 
-    # Step 1 - update all the next lists
-    apply_nextlists!(graph, locks, tls)
-
-    # Step 2 - Add back edges
-    # If this pass is relaxed, then increase the degree at which we require reducing.
-    backedges!(graph, locks, tls, needs_pruning, prune_threshold_degree)
-
-    # Step 3 - process all over subscribed vertices
-    #Threads.@threads for v in eachindex(needs_pruning)
     dynamic_thread(eachindex(needs_pruning), INDEX_BALANCE_FACTOR) do v
         needs_pruning[v] || return nothing
 
@@ -324,6 +312,28 @@ function commit!(
         needs_pruning[v] = false
         return nothing
     end
+end
+
+# Commit all the pending updates to the graph.
+# Then, cycle util no nodes violate the degree requirement
+function commit!(
+    meta::MetaGraph,
+    parameters::GraphParameters,
+    locks::AbstractVector,
+    needs_pruning::Vector{Bool},
+    tls::ThreadLocal,
+)
+    @unpack graph = meta
+    @unpack prune_threshold_degree = parameters
+
+    # Step 1 - update all the next lists
+    apply_nextlists!(graph, locks, tls)
+
+    # Step 2 - Add back edges
+    add_backedges!(graph, locks, tls, needs_pruning, prune_threshold_degree)
+
+    # Step 3 - process all over subscribed vertices
+    prune!(meta, parameters, tls, needs_pruning)
 
     # Step 4 - update nextlists for all over subscribed vertices
     apply_nextlists!(graph, locks, tls; empty = true)

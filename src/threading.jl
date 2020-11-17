@@ -57,5 +57,5 @@ allthreads() = 1:Threads.nthreads()
     end
 else
     dynamic_thread(f::F, domain, x...) where {F} = map(f, domain)
-end
+end # @static if
 

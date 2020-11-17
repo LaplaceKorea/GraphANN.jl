@@ -135,8 +135,9 @@ function searchall(
 )
     num_queries = length(queries)
     dest = Array{eltype(meta_graph.graph),2}(undef, num_neighbors, num_queries)
-
+    times = Vector{Int}(undef, length(queries))
     for (col, query) in enumerate(queries)
+        start = time_ns()
         search(algo, meta_graph, start_node, query)
 
         # Copy over the results to the destination
@@ -145,7 +146,8 @@ function searchall(
         result_view = view(results, 1:num_neighbors)
 
         dest_view .= getid.(result_view)
+        times[col] = time_ns() - start
     end
-    return dest
+    return dest, times
 end
 

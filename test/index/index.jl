@@ -1,3 +1,4 @@
+
 @testset "Testing Pruner" begin
     # Make this definition for convenience
     Pruner = GraphANN.Pruner
@@ -91,4 +92,36 @@ end
     ids = GraphANN.searchall(algo, meta, start, queries; num_neighbors = 100)
     recalls = GraphANN.recall(ground_truth, ids)
     @test mean(recalls) >= 0.99
+
+    #####
+    ##### Graph IO
+    #####
+
+    # Now that we have a functioning graph, make sure the various serialization and
+    # deserialization methods work.
+
+    mktempdir(@__DIR__) do dir
+        function graphs_equal(a, b)
+            @test vertices(a) == vertices(b)
+            @test collect(edges(a)) == collect(edges(b))
+        end
+
+        original_save = joinpath(dir, "original")
+
+        graphs_equal(meta.graph, meta.graph)
+        GraphANN.save(original_save, meta.graph)
+
+        # Try deserializing the original graph
+        default = GraphANN.load(GraphANN.DefaultAdjacencyList{UInt32}, original_save)
+        graphs_equal(default, meta.graph)
+
+        flat = GraphANN.load(GraphANN.FlatAdjacencyList{UInt32}, original_save)
+        graphs_equal(flat, meta.graph)
+        graphs_equal(flat, default)
+
+        dense = GraphANN.load(GraphANN.DenseAdjacencyList{UInt32}, original_save)
+        graphs_equal(dense, meta.graph)
+        graphs_equal(dense, default)
+        graphs_equal(dense, flat)
+    end
 end

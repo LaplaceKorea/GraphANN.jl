@@ -90,14 +90,19 @@ function load(::Type{DefaultAdjacencyList{T}}, io::IO) where {T}
     return UniDirectedGraph{T}(adj)
 end
 
-function load(::Type{DenseAdjacencyList{T}}, io::IO) where {T}
+asvector(::Type{T}, sz) where {T} = Vector{T}(undef, sz)
+function load(
+    ::Type{DenseAdjacencyList{T}},
+    io::IO;
+    allocator = asvector,
+) where {T}
     # Read the header
     @unpack elsize, nv, ne, max_degree = read_header(io)
     @assert elsize == sizeof(T)
 
     # Preallocate the storage array and the Spans that are going to store the
     # lengths and neighbors
-    A = Vector{T}(undef, ne)
+    A = asvector(T, ne)
     spans = Vector{Span{T}}()
     sizehint!(spans, nv)
 
