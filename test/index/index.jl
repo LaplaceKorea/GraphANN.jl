@@ -124,4 +124,22 @@ end
         graphs_equal(dense, default)
         graphs_equal(dense, flat)
     end
+
+    #####
+    ##### Try again, but with a FlatAdjacencyList
+    #####
+
+    meta = GraphANN.generate_index(
+        dataset,
+        parameters;
+        graph_type = GraphANN.FlatAdjacencyList{UInt32}
+    )
+    g = meta.graph
+
+    @test maximum(outdegree(g)) <= max_degree
+    @test is_connected(g)
+
+    ids = GraphANN.searchall(algo, meta, start, queries; num_neighbors = 100)
+    recalls = GraphANN.recall(ground_truth, ids)
+    @test mean(recalls) >= 0.99
 end

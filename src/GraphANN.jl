@@ -23,6 +23,7 @@ include("utils.jl")
 include("threading.jl")
 include("spans.jl"); import .Spans: Span
 include("pm.jl"); import .PM: pmmap
+include("bruteforce.jl")
 
 # Data representation
 include("points/euclidean.jl")
@@ -34,13 +35,19 @@ include("index/index.jl")
 # Data loaders for various formats.
 include("io/io.jl")
 
+stdallocator(::Type{T}, dims...) where {T} = Array{T}(undef, dims...)
+function pmallocator(::Type{T}, path::AbstractString, dims::Integer...) where {T}
+    return pmmap(T, path, dims...)
+end
+pmallocator(path::AbstractString) = (type, dims...) -> pmallocator(type, path, dims...)
+
 #####
 ##### Misc development functions
 #####
 
 siftsmall() = joinpath(dirname(@__DIR__), "data", "siftsmall_base.fvecs")
-function _prepare(path = siftsmall())
-    dataset = load_vecs(Euclidean{128,UInt8}, path)
+function _prepare(path = siftsmall(); allocator = stdallocator)
+    dataset = load_vecs(Euclidean{128,UInt8}, path; allocator = allocator)
 
     parameters = GraphParameters(
         alpha = 1.2,
@@ -67,6 +74,7 @@ function sweep(
     all_ids = []
 
     for window_size in buf_range
+        @show window_size
         algo = GreedySearch(window_size)
 
         # One warm up run to allocate data structures.

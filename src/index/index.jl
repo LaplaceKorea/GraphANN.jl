@@ -347,7 +347,9 @@ function generate_index(
     data,
     parameters::GraphParameters;
     batchsize = 1000,
-    tls_monitor = _ -> nothing
+    tls_monitor = _ -> nothing,
+    allocator = stdallocator,
+    graph_type = DefaultAdjacencyList{UInt32},
 )
     @unpack window_size, target_degree, prune_threshold_degree = parameters
 
@@ -356,10 +358,11 @@ function generate_index(
     # TODO: Also, default the graph to UInt32's to save on space.
     # Keep this as a parameter so we can promote to Int64's if needed.
     graph = random_regular(
-        UInt32,
+        graph_type,
         length(data),
         target_degree;
         max_edges = prune_threshold_degree,
+        allocator = allocator,
     )
 
     # Create a spin-lock for each vertex in the graph.

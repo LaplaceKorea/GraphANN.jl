@@ -27,7 +27,7 @@ function distance(a::A, b::B) where {N, TA, TB, A <: Euclidean{N, TA}, B <: Eucl
     @simd for i in 1:N
         _a = @inbounds convert(T, a[i])
         _b = @inbounds convert(T, b[i])
-        @inbounds s += (_a - _b) ^ 2
+        s += (_a - _b) ^ 2
     end
     return s
 end
@@ -62,7 +62,7 @@ vecs_read_type(::Type{Euclidean{N,T}}) where {N,T} = T
 function vecs_convert(::Type{Euclidean{N,T}}, buf::Vector{T}) where {N,T}
     @assert mod(N, vecsize(Euclidean, T)) == 0
     @assert length(buf) == N
-    return (first(reinterpret(Euclidean{N,T}, buf)),)
+    return first(reinterpret(Euclidean{N,T}, buf))
 end
 
 vecs_reshape(::Type{<:Euclidean}, v, dim) = v

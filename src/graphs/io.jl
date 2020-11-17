@@ -30,8 +30,8 @@ function read_header(io::IO)
     return NamedTuple{(:elsize, :nv, :ne, :max_degree)}(tup)
 end
 
-load(file::AbstractString) = load(DefaultAdjacencyList{UInt32}, file)
-load(::Type{T}, file::AbstractString) where {T} = open(io -> load(T, io), file)
+load(file::AbstractString; kw...) = load(DefaultAdjacencyList{UInt32}, file; kw...)
+load(::Type{T}, file::AbstractString; kw...) where {T} = open(io -> load(T, io; kw...), file)
 
 function load(::Type{FlatAdjacencyList{T}}, io::IO) where {T}
     @unpack elsize, nv, max_degree = read_header(io)
@@ -90,11 +90,10 @@ function load(::Type{DefaultAdjacencyList{T}}, io::IO) where {T}
     return UniDirectedGraph{T}(adj)
 end
 
-asvector(::Type{T}, sz) where {T} = Vector{T}(undef, sz)
 function load(
     ::Type{DenseAdjacencyList{T}},
     io::IO;
-    allocator = asvector,
+    allocator = stdallocator,
 ) where {T}
     # Read the header
     @unpack elsize, nv, ne, max_degree = read_header(io)
@@ -102,7 +101,7 @@ function load(
 
     # Preallocate the storage array and the Spans that are going to store the
     # lengths and neighbors
-    A = asvector(T, ne)
+    A = allocator(T, ne)
     spans = Vector{Span{T}}()
     sizehint!(spans, nv)
 

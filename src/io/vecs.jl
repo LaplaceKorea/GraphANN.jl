@@ -38,21 +38,41 @@ vecs_read_type(::Type{T}) where {T} = T
 vecs_convert(::Type, buf) = buf
 vecs_reshape(::Type, v, dim) = reshape(v, convert(Int, dim), :)
 
-function load_vecs(::Type{T}, file; maxlines = nothing) where {T}
-    v = T[]
-    sizehint!(v, div(filesize(file), sizeof(T)))
+function addto!(x::AbstractVector{T}, i, v::AbstractVector{T}) where {T}
+    copyto!(x, i, v, 1, length(v))
+    return length(v)
+end
 
+function addto!(x::AbstractVector{T}, i, v::T) where {T}
+    x[i] = v
+    return 1
+end
+
+function load_vecs(::Type{T}, file; maxlines = nothing, allocator = stdallocator) where {T}
     linecount = 0
-    dim = open(file) do io
+    index = 1
+    v, dim = open(file) do io
         # First, read the dimensionality of the vectors in this file.
         # Make sure it is the same for all vectors.
         dim = read(io, Int32)
+
+        # Figure out how big we need to make the buffer
+        linesize = sizeof(Int32) + dim * sizeof(vecs_read_type(T))
+        num_lines, rem = divrem(filesize(file), linesize)
+        @assert rem == 0
+        if (maxlines !== nothing)
+            num_lines = min(num_lines, maxlines)
+        end
+
+        vector_len = div(num_lines * dim * sizeof(vecs_read_type(T)), sizeof(T))
+        v = allocator(T, vector_len)
+
         buf = Vector{vecs_read_type(T)}(undef, dim)
 
         # Now, start parsing!
         while true
             read!(io, buf)
-            append!(v, vecs_convert(T, buf))
+            index += addto!(v, index, vecs_convert(T, buf))
 
             linecount += 1
             (ismaxed(linecount, maxlines) || eof(io)) && break
@@ -61,7 +81,7 @@ function load_vecs(::Type{T}, file; maxlines = nothing) where {T}
             nextdim = read(io, Int32)
             @assert dim == nextdim
         end
-        return dim
+        return v, dim
     end
     return vecs_reshape(T, v, dim)
 end
