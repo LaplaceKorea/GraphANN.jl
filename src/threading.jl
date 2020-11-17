@@ -38,20 +38,24 @@ allthreads() = 1:Threads.nthreads()
 # So we have to do it on our own.
 #
 # Fortunately, it's quite easy!
-function dynamic_thread(f::F, domain, worksize) where {F}
-    count = Threads.Atomic{Int}(1)
-    len = length(domain)
-    Threads.@threads for j in allthreads()
-        while true
-            k = Threads.atomic_add!(count, 1)
-            start = worksize * (k - 1) + 1
-            start > len && break
+@static if ENABLE_THREADING
+    function dynamic_thread(f::F, domain, worksize) where {F}
+        count = Threads.Atomic{Int}(1)
+        len = length(domain)
+        Threads.@threads for j in allthreads()
+            while true
+                k = Threads.atomic_add!(count, 1)
+                start = worksize * (k - 1) + 1
+                start > len && break
 
-            stop = min(worksize * k, len)
-            for i in start:stop
-                f(@inbounds domain[i])
+                stop = min(worksize * k, len)
+                for i in start:stop
+                    f(@inbounds domain[i])
+                end
             end
         end
     end
+else
+    dynamic_thread(f::F, domain, x...) where {F} = map(f, domain)
 end
 

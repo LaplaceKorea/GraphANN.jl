@@ -2,6 +2,7 @@ using GraphANN
 using Test
 
 # Extra stdlib imports
+using InteractiveUtils  # for `code_native`
 using Statistics
 
 # Extra helpful imports
@@ -10,6 +11,7 @@ using LightGraphs
 import GraphANN: Neighbor
 
 include("utils.jl")
+include("spans.jl")
 include("points/euclidean.jl")
 include("graphs/adjacency.jl")
 include("graphs/graphs.jl")

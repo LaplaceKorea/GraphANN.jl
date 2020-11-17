@@ -14,9 +14,14 @@ import SIMD
 import LightGraphs.SimpleGraphs: fadj
 import UnPack: @unpack, @pack!
 
+# Constants
+const INDEX_BALANCE_FACTOR = 64
+const ENABLE_THREADING = true
+
 # Includes
 include("utils.jl")
 include("threading.jl")
+include("spans.jl"); import .Spans: Span
 
 # Data representation
 include("points/euclidean.jl")
@@ -44,14 +49,6 @@ function _prepare(path = siftsmall())
         prune_threshold_degree = 150,
         prune_to_degree = 100,
     )
-
-    # parameters = GraphParameters(
-    #     alpha = 1.2,
-    #     window_size = 50,
-    #     target_degree = 50,
-    #     prune_threshold_degree = 70,
-    #     prune_to_degree = 30,
-    # )
 
     return (;
         dataset,

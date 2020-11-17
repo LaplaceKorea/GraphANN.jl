@@ -148,3 +148,9 @@ function Base.copyto!(x::FlatAdjacencyList, v, A::AbstractArray)
     return nothing
 end
 
+#####
+##### DenseAdjacencyList
+#####
+
+# This is for inference only - perform a single allocation for the whole adjacency list,
+# with elements packed as closely together as possible.
