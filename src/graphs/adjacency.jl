@@ -66,8 +66,7 @@ Base.length(x::DefaultAdjacencyList) = length(x.fadj)
 Base.length(x::DefaultAdjacencyList, i) = length(x[i])
 Base.empty!(x::DefaultAdjacencyList, i) = empty!(x[i])
 
-Base.iterate(x::DefaultAdjacencyList) = iterate(x.fadj)
-Base.iterate(x::DefaultAdjacencyList, s) = iterate(x.fadj, s)
+Base.iterate(x::DefaultAdjacencyList, s...) = iterate(x.fadj, s...)
 
 function Base.copyto!(x::DefaultAdjacencyList, v, A::AbstractArray)
     list = x[v]
@@ -154,3 +153,22 @@ end
 
 # This is for inference only - perform a single allocation for the whole adjacency list,
 # with elements packed as closely together as possible.
+struct DenseAdjacencyList{T} <: AbstractAdjacencyList{T}
+    storage::Vector{T}
+    fadj::Vector{Span{T}}
+end
+
+# Implement the (read only) AdjacencyList API
+_cannot_mutate() = error("Cannot modify a DenseAdjacencyList")
+
+Base.push!(x::DenseAdjacencyList, v) = _cannot_mutate()
+Base.getindex(x::DenseAdjacencyList, i) = x.fadj[i]
+caninsert(x::DenseAdjacencyList, i) = false
+
+Base.length(x::DenseAdjacencyList) = length(x.fadj)
+Base.length(x::DenseAdjacencyList, i) = length(x.fadj[i])
+Base.empty!(x::DenseAdjacencyList) = _cannot_mutate()
+
+Base.iterate(x::DenseAdjacencyList, s...) = iterate(x.fadj, s...)
+
+Base.copyto!(x::DenseAdjacencyList, args...) = _cannot_mutate()

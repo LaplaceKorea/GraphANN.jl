@@ -12,6 +12,8 @@ struct Span{T} <: DenseVector{T}
     length::Int64
 end
 
+Span(ptr::Ptr{T}, length::Integer) where {T} = Span{T}(ptr, convert(Int, length))
+
 # Implement Array Interface
 Base.pointer(x::Span) = x.ptr
 Base.unsafe_convert(::Type{Ptr{T}}, x::Span{T}) where {T} = pointer(x)

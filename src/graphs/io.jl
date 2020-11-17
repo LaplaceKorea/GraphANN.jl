@@ -25,16 +25,16 @@ function save(io::IO, g::UniDirectedGraph{T}) where {T}
     return nothing
 end
 
+function read_header(io::IO)
+    tup = read.((io,), ntuple(_ -> Int64, Val(4)))
+    return NamedTuple{(:elsize, :nv, :ne, :max_degree)}(tup)
+end
+
 load(file::AbstractString) = load(DefaultAdjacencyList{UInt32}, file)
 load(::Type{T}, file::AbstractString) where {T} = open(io -> load(T, io), file)
 
 function load(::Type{FlatAdjacencyList{T}}, io::IO) where {T}
-    # Read the header
-    elsize = read(io, Int64)
-    nv = read(io, Int64)
-    ne = read(io, Int64)
-    max_degree = read(io, Int64)
-
+    @unpack elsize, nv, max_degree = read_header(io)
     @assert elsize == sizeof(T)
 
     # Allocate destination array.
@@ -63,10 +63,7 @@ end
 
 function load(::Type{DefaultAdjacencyList{T}}, io::IO) where {T}
     # Read the header
-    elsize = read(io, Int64)
-    nv = read(io, Int64)
-    max_degree = read(io, Int64)
-
+    @unpack elsize, nv, max_degree = read_header(io)
     @assert elsize == sizeof(T)
 
     # Allocate destination array.
@@ -90,6 +87,39 @@ function load(::Type{DefaultAdjacencyList{T}}, io::IO) where {T}
     # Did we exhaust the whole file?
     v != (nv + 1) && error("Finished reading file before all vertices were discovered!")
     eof(io) || error("There seems to be more data left on the file!")
+    return UniDirectedGraph{T}(adj)
+end
+
+function load(::Type{DenseAdjacencyList{T}}, io::IO) where {T}
+    # Read the header
+    @unpack elsize, nv, ne, max_degree = read_header(io)
+    @assert elsize == sizeof(T)
+
+    # Preallocate the storage array and the Spans that are going to store the
+    # lengths and neighbors
+    A = Vector{T}(undef, ne)
+    spans = Vector{Span{T}}()
+    sizehint!(spans, nv)
+
+    progress_meter = ProgressMeter.Progress(nv, 1)
+    index = 1
+    v = 1
+    while (v <= nv && !eof(io))
+        num_neighbors = read(io, T)
+        read!(io, view(A, index:(index + num_neighbors - 1)))
+        push!(spans, Span(pointer(A, index), num_neighbors))
+        index += num_neighbors
+
+        # Loop footer (obviously)
+        ProgressMeter.next!(progress_meter)
+        v += 1
+    end
+
+    # Did we exhaust the whole file?
+    v != (nv + 1) && error("Finished reading file before all vertices were discovered!")
+    eof(io) || error("There seems to be more data left on the file!")
+
+    adj = DenseAdjacencyList{T}(A, spans)
     return UniDirectedGraph{T}(adj)
 end
 
