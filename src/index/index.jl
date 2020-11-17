@@ -303,7 +303,7 @@ function commit!(
 
     # Step 3 - process all over subscribed vertices
     #Threads.@threads for v in eachindex(needs_pruning)
-    dynamic_thread(eachindex(needs_pruning), 128) do v
+    dynamic_thread(eachindex(needs_pruning), 64) do v
         needs_pruning[v] || return nothing
 
         storage = tls[]
@@ -409,7 +409,7 @@ end
         r = start:stop
 
         # Use dynamic load balancing.
-        itertime = @elapsed dynamic_thread(r, 128) do i
+        itertime = @elapsed dynamic_thread(r, 64) do i
             # Get thread local storage
             storage = tls[]
 

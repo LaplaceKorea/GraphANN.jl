@@ -13,6 +13,7 @@ function save(io::IO, g::UniDirectedGraph{T}) where {T}
     # Save some stats about the graph in a header
     write(io, Int64(sizeof(T)))
     write(io, Int64(LightGraphs.nv(g)))
+    write(io, Int64(LightGraphs.ne(g)))
     write(io, Int64(maximum(LightGraphs.outdegree(g))))
 
     # Now, serialize the adjacency list
@@ -24,12 +25,14 @@ function save(io::IO, g::UniDirectedGraph{T}) where {T}
     return nothing
 end
 
-load(file::AbstractString) = open(io -> load(DefaultAdjacencyList{UInt32}, io), file)
+load(file::AbstractString) = load(DefaultAdjacencyList{UInt32}, file)
+load(::Type{T}, file::AbstractString) where {T} = open(io -> load(T, io), file)
 
 function load(::Type{FlatAdjacencyList{T}}, io::IO) where {T}
     # Read the header
     elsize = read(io, Int64)
     nv = read(io, Int64)
+    ne = read(io, Int64)
     max_degree = read(io, Int64)
 
     @assert elsize == sizeof(T)
