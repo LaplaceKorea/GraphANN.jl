@@ -34,12 +34,31 @@ allthreads() = 1:Threads.nthreads()
 ##### Dynamic
 #####
 
+struct BatchedRange{T <: AbstractRange}
+    range::T
+    batchsize::Int64
+end
+
+Base.length(x::BatchedRange) = ceil(Int, length(x.range) / x.batchsize)
+
+Base.@propagate_inbounds function Base.getindex(x::BatchedRange, i::Integer)
+    @unpack range, batchsize = x
+    start = batchsize * (i-1) + 1
+    stop = min(length(range), batchsize * i)
+    return subrange(range, start, stop)
+end
+
+# handle unit ranges and more general ranges separately so a `BatchedRange` returns
+# a `UnitRange` when it encloses a `UnitRange`.
+subrange(range::OrdinalRange, start, stop) = range[start]:step(range):range[stop]
+subrange(range::AbstractUnitRange, start, stop) = range[start]:range[stop]
+
 # Julia doesn't implement dynamic threading yet ...
 # So we have to do it on our own.
 #
 # Fortunately, it's quite easy!
 @static if ENABLE_THREADING
-    function dynamic_thread(f::F, domain, worksize) where {F}
+    function dynamic_thread(f::F, domain, worksize = 1) where {F}
         count = Threads.Atomic{Int}(1)
         len = length(domain)
         Threads.@threads for j in allthreads()

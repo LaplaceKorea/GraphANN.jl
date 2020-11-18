@@ -13,6 +13,7 @@ import GraphANN: Neighbor
 include("utils.jl")
 include("spans.jl")
 include("pm.jl")
+include("threading.jl")
 include("points/euclidean.jl")
 include("graphs/adjacency.jl")
 include("graphs/graphs.jl")
