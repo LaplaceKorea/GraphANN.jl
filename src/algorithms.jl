@@ -125,9 +125,9 @@ function search(
     end
 end
 
-# TODO: Thread local storage and multi-threading
+# Single Threaded Query
 function searchall(
-    algo,
+    algo::GreedySearch,
     meta_graph::MetaGraph,
     start_node,
     queries::AbstractVector;
@@ -148,3 +148,31 @@ function searchall(
     return dest
 end
 
+# Multi Threaded Query
+function searchall(
+    tls::ThreadLocal{<:GreedySearch},
+    meta::MetaGraph,
+    start_node,
+    queries::AbstractVector;
+    num_neighbors = 10
+)
+
+    num_queries = length(queries)
+    dest = Array{eltype(meta.graph),2}(undef, num_neighbors, num_queries)
+    dynamic_thread(eachindex(queries), 64) do r
+        for col in r
+            query = queries[col]
+            algo = tls[]
+            search(algo, meta, start_node, query)
+
+            # Copy over the results to the destination
+            results = destructive_extract!(algo.best)
+            dest_view = view(dest, :, col)
+            result_view = view(results, 1:num_neighbors)
+
+            dest_view .= getid.(result_view)
+        end
+    end
+
+    return dest
+end
