@@ -88,6 +88,8 @@ end
 #####
 
 function recall(groundtruth::AbstractVector, results::AbstractVector)
+    @assert length(groundtruth) == length(results)
+
     count = 0
     for i in groundtruth
         in(i, results) && (count += 1)
