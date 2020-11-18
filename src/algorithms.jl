@@ -10,8 +10,8 @@ mutable struct GreedySearch{H, T <: AbstractSet}
     # Pre-allocated buffer for the search list
     #
     # Strategy with the search list.
-    # Maintain the invariant that `queue ⊂ best`.
-    # `queue` will used to queue up nodes that have not yet been searched.
+    # Maintain the invariant that `best_unvisited ⊂ best`.
+    # `best_unvisited` will used to queue up nodes that have not yet been searched.
     # Since it is a queue, we can easily find the minimum element.
     #
     # When popping off neighbors to get the number of elements in `best` under
@@ -108,10 +108,9 @@ function search(
         neighbors = LightGraphs.outneighbors(graph, p)
         ln = length(neighbors)
         for i in eachindex(neighbors)
+            # Perform distance query, and try to prefetch the next datapoint.
             @inbounds v = neighbors[i]
             i < ln && prefetch(data, @inbounds neighbors[i+1])
-
-            # TODO: prefetch next vector
             @inbounds d = distance(query, data[v])
 
             ## only bother to add if it's better than the worst currently tracked.

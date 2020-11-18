@@ -24,6 +24,9 @@ end
 
 BinaryMinMaxHeap(xs::AbstractVector{T}) where T = BinaryMinMaxHeap{T}(xs)
 
+# This is an added method that sorts the heap valtree in place.
+# The state of the heap is destroyed, so this is only meant to be called after all items
+# have been added and we are just interested in getting the final sorted results.
 function destructive_extract!(heap::BinaryMinMaxHeap)
     sort!(heap.valtree; alg = Base.QuickSort)
     return heap.valtree
@@ -141,7 +144,9 @@ position `i`.
 """
 function children_and_grandchildren(maxlen::T, i::T) where {T <: Integer}
     # Change over DataStructures.jl
-    # Make non-allocating
+    # Make non-allocating by using a lazy filter.
+    # Since the number of children and grandchildren is always less than or equal to 6,
+    # this ends up being pretty efficient.
     lc = lchild(i)
     rc = rchild(i)
     tup = (lc, lchild(lc), rchild(lc), rc, lchild(rc), rchild(rc))

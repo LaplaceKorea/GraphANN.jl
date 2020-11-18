@@ -5,6 +5,11 @@ safe_maximum(f::F, itr, default = 0) where {F} = isempty(itr) ? default : maximu
 ##### Neighbor
 #####
 
+"""
+    Neighbor
+
+Lightweight struct for containing an ID/distance pair with a total ordering.
+"""
 struct Neighbor
     id::UInt32
     distance::Float32
@@ -121,5 +126,6 @@ function prefetch(ptr::Ptr)
         Tuple{Ptr{Cvoid}},
         Ptr{Cvoid}(ptr),
     )
+    return nothing
 end
 

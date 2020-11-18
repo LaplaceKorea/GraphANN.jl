@@ -46,8 +46,13 @@ pmallocator(path::AbstractString) = (type, dims...) -> pmallocator(type, path, d
 #####
 
 siftsmall() = joinpath(dirname(@__DIR__), "data", "siftsmall_base.fvecs")
-function _prepare(path = siftsmall(); allocator = stdallocator)
-    dataset = load_vecs(Euclidean{128,UInt8}, path; allocator = allocator)
+function _prepare(path = siftsmall(); allocator = stdallocator, maxlines = nothing)
+    dataset = load_vecs(
+        Euclidean{128,UInt8},
+        path;
+        maxlines = maxlines,
+        allocator = allocator
+    )
 
     parameters = GraphParameters(
         alpha = 1.2,

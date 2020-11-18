@@ -62,13 +62,13 @@ function bruteforce_search(
     _heaps = [BruteForceHeap{Neighbor}(num_neighbors) for _ in 1:groupsize]
     tls = ThreadLocal(_heaps)
 
-    # Not the most efficient way of doing this, but whatever
-    # Note: ProgressMeter is threadsafe
     num_queries = length(queries)
     meter = ProgressMeter.Progress(num_queries, 1)
 
     gt = Array{UInt64,2}(undef, num_neighbors, num_queries)
 
+    # Batch the query range so each thread works on a chunk of queries at a time.
+    # The dynamic load balancer will give one batch at a time to each worker.
     batched_iter = BatchedRange(1:num_queries, groupsize)
     dynamic_thread(batched_iter) do range
         heaps = tls[]
@@ -88,6 +88,14 @@ function bruteforce_search(
             vgt .= getid.(DataStructures.extract_all_rev!(heaps[heap_num].heap))
         end
 
+        # Note: ProgressMeter is threadsafe - so calling it here is okay.
+        # With modestly sized dataset, the arrival time of threads to this point should be
+        # staggered enough that lock contention shouldn't be an issue.
+        #
+        # For reference, it takes ~200 seconds to compute 100 nearest neighbors for a
+        # batch of 32 queries on Sift100M.
+        #
+        # That is FAR longer than any time will be spent fighting over this lock.
         ProgressMeter.next!(meter; step = length(range))
     end
     ProgressMeter.finish!(meter)
