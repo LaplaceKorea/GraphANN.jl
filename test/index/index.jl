@@ -48,11 +48,6 @@
 end
 
 @testset "Testing Index" begin
-    datadir = joinpath(dirname(@__DIR__), "..", "data")
-    dataset_path = joinpath(datadir, "siftsmall_base.fvecs")
-    query_path = joinpath(datadir, "siftsmall_query.fvecs")
-    groundtruth_path = joinpath(datadir, "siftsmall_groundtruth.ivecs")
-
     # Load the dataset into memory
     # For now, we have to resort to a little dance to convert the in-memory representation
     # to a collection of `euclidean` points.

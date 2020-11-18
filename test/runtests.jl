@@ -10,10 +10,16 @@ using LightGraphs
 
 import GraphANN: Neighbor
 
+const datadir = joinpath(dirname(@__DIR__), "data")
+const dataset_path = joinpath(datadir, "siftsmall_base.fvecs")
+const query_path = joinpath(datadir, "siftsmall_query.fvecs")
+const groundtruth_path = joinpath(datadir, "siftsmall_groundtruth.ivecs")
+
 include("utils.jl")
 include("spans.jl")
 include("pm.jl")
 include("threading.jl")
+include("bruteforce.jl")
 include("points/euclidean.jl")
 include("graphs/adjacency.jl")
 include("graphs/graphs.jl")
