@@ -4,7 +4,7 @@
 
 # Use the `GreedySearch` type to hold parameters and intermediate datastructures
 # used to control the greedy search.
-mutable struct GreedySearch{H, T <: AbstractSet}
+mutable struct GreedySearch{M, H, T <: AbstractSet}
     search_list_size::Int
 
     # Pre-allocated buffer for the search list
@@ -17,7 +17,7 @@ mutable struct GreedySearch{H, T <: AbstractSet}
     # When popping off neighbors to get the number of elements in `best` under
     # `search_list_size`, we will also need to pop items off `queue` IF there
     # is a match.
-    best::H
+    best::M
     best_unvisited::H
     visited::T
 end

@@ -178,6 +178,8 @@ maybeunion!(f::F, candidates::AbstractSet) where {F} = union!(candidates, f())
 maybeunion!(f::F, candidates::AbstractArray) where {F} = nothing
 
 """
+    neighbor_updates!(args...)
+
 This function roughly implements the `RobustPrune` algorithm presented in the paper.
 One difference is that instead of directly mutating the graph, we populate a `nextlist`
 that will contain the next neighbors for this node.

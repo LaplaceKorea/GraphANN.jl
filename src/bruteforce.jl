@@ -2,19 +2,19 @@
 ##### Bounded Heap
 #####
 
-struct BruteForceHeap{H}
+struct BoundedHeap{H}
     heap::H
     bound::Int
 end
 
-function BruteForceHeap{T}(bound::Int) where {T}
-    return BruteForceHeap(
+function BoundedHeap{T}(bound::Int) where {T}
+    return BoundedHeap(
         DataStructures.BinaryMaxHeap{T}(),
         bound,
     )
 end
 
-function Base.push!(H::BruteForceHeap, i)
+function Base.push!(H::BoundedHeap, i)
     if (length(H.heap) < H.bound || i < first(H.heap))
         push!(H.heap, i)
         if length(H.heap) > H.bound
@@ -59,7 +59,7 @@ function bruteforce_search(
 ) where {T}
     # Allocate max heaps for each
     # One for each column in the queries matrix
-    _heaps = [BruteForceHeap{Neighbor}(num_neighbors) for _ in 1:groupsize]
+    _heaps = [BoundedHeap{Neighbor}(num_neighbors) for _ in 1:groupsize]
     tls = ThreadLocal(_heaps)
 
     num_queries = length(queries)

@@ -48,6 +48,12 @@ function addto!(x::AbstractVector{T}, i, v::T) where {T}
     return 1
 end
 
+# Why is this function so complicated?
+# Well, it started out simple ... you pass in a UInt8, Float32, whatever you want, that
+# that's what you got in return.
+#
+# But eventually, I wanted it to return `Vector{<:Euclidean}` and, well, it just got worse
+# from there.
 function load_vecs(::Type{T}, file; maxlines = nothing, allocator = stdallocator) where {T}
     linecount = 0
     index = 1
@@ -56,7 +62,15 @@ function load_vecs(::Type{T}, file; maxlines = nothing, allocator = stdallocator
         # Make sure it is the same for all vectors.
         dim = read(io, Int32)
 
-        # Figure out how big we need to make the buffer
+        # Since we want to support different allocators, we want to allocate all the memory
+        # we're going to need up front.
+        #
+        # We do this by figuring out how many data points (aka lines) are in the dataset.
+        # This is either based on the maximum number of requested lines, or the file size
+        # (whichever is smaller).
+        #
+        # From there, we can work back how how many data points there will be and
+        # preallocate the storage.
         linesize = sizeof(Int32) + dim * sizeof(vecs_read_type(T))
         num_lines, rem = divrem(filesize(file), linesize)
         @assert rem == 0
@@ -86,22 +100,26 @@ function load_vecs(::Type{T}, file; maxlines = nothing, allocator = stdallocator
     return vecs_reshape(T, v, dim)
 end
 
-function save_vecs(file::AbstractString, A::AbstractMatrix{T}) where {T}
+function save_vecs(
+    file::AbstractString,
+    A::AbstractMatrix{T},
+    save_type::Type{U} = T
+) where {T,U}
     # Make the path if required
     dir = dirname(file)
     !ispath(dir) && mkpath(dir)
 
     # Drop down to an overloaded function that operates directly on a IO type object.
     open(file; write = true) do io
-        save_vecs(io, A)
+        save_vecs(io, A, save_type)
     end
 end
 
-function save_vecs(io::IO, A::AbstractMatrix{T}) where {T}
+function save_vecs(io::IO, A::AbstractMatrix{T}, save_type::U = T) where {T, U}
     meter = ProgressMeter.Progress(size(A, 2), 1)
     for col in eachcol(A)
         write(io, Int32(length(col)))
-        write(io, col)
+        write(io, convert(U, col))
         ProgressMeter.next!(meter)
     end
 end

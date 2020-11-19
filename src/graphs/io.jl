@@ -10,11 +10,7 @@ function save(file::AbstractString, g::UniDirectedGraph)
 end
 
 function save(io::IO, g::UniDirectedGraph{T}) where {T}
-    # Save some stats about the graph in a header
-    write(io, Int64(sizeof(T)))
-    write(io, Int64(LightGraphs.nv(g)))
-    write(io, Int64(LightGraphs.ne(g)))
-    write(io, Int64(maximum(LightGraphs.outdegree(g))))
+    write_header(io, g)
 
     # Now, serialize the adjacency list
     ProgressMeter.@showprogress 1 for v in LightGraphs.vertices(g)
@@ -25,6 +21,19 @@ function save(io::IO, g::UniDirectedGraph{T}) where {T}
     return nothing
 end
 
+function write_header(io::IO, g::UniDirectedGraph{T}) where {T}
+    # Save some stats about the graph in a header
+    write(io, Int64(sizeof(T)))
+    write(io, Int64(LightGraphs.nv(g)))
+    write(io, Int64(LightGraphs.ne(g)))
+    write(io, Int64(maximum(LightGraphs.outdegree(g))))
+end
+
+# Return the header as a NamedTuple.
+# This is so users of `read_header` can use `@unpack` on the results to obtain what
+# they need.
+#
+# This allows us to add features to the header without changing the code below.
 function read_header(io::IO)
     tup = read.((io,), ntuple(_ -> Int64, Val(4)))
     return NamedTuple{(:elsize, :nv, :ne, :max_degree)}(tup)

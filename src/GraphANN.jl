@@ -4,7 +4,6 @@ import DataStructures
 include("minmax_heap.jl")
 
 # Imports (avoid brining names into our namespace)
-import Distances
 import LightGraphs
 import ProgressMeter
 import Setfield
@@ -35,10 +34,16 @@ include("index/index.jl")
 # Data loaders for various formats.
 include("io/io.jl")
 
+# Allocator convenience functions
 stdallocator(::Type{T}, dims...) where {T} = Array{T}(undef, dims...)
+
 function pmallocator(::Type{T}, path::AbstractString, dims::Integer...) where {T}
     return pmmap(T, path, dims...)
 end
+
+# This is a partially applied version of the full allocator above.
+# Use it like `f = pmallocator("path/to/dir")` to construct a function `f` that will
+# have the same signature as the `stdallocator` above.
 pmallocator(path::AbstractString) = (type, dims...) -> pmallocator(type, path, dims...)
 
 #####

@@ -15,7 +15,7 @@ struct Neighbor
     distance::Float32
 end
 
-getid(x::Int) = x
+getid(x::Integer) = x
 getid(x::Neighbor) = x.id
 
 getdistance(x::Neighbor) = x.distance
@@ -65,6 +65,7 @@ Base.iterate(set::RobinSet, s) = iterate(keys(set.dict), s)
 #####
 
 # Find the medioid of a dataset
+raw(x::Union{<:AbstractVector,<:Tuple}) = x
 function medioid(data::Vector{T}) where {T}
     # First, find the element wise sum
     medioid = Euclidean(mapreduce(raw, (x,y) -> Float32.(x) .+ Float32.(y), data) ./ length(data))
