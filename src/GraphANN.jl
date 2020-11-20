@@ -22,6 +22,7 @@ include("utils.jl")
 include("threading.jl")
 include("spans.jl"); import .Spans: Span
 include("pm.jl"); import .PM: pmmap
+include("splitvector.jl"); import .SplitVectors: SplitVector
 include("bruteforce.jl")
 
 # Data representation
@@ -45,6 +46,24 @@ end
 # Use it like `f = pmallocator("path/to/dir")` to construct a function `f` that will
 # have the same signature as the `stdallocator` above.
 pmallocator(path::AbstractString) = (type, dims...) -> pmallocator(type, path, dims...)
+
+# function splitallocator(::Type{T}, path::AbstractString, dramsize, dim) where {T}
+#     requested_size = sizeof(T) * dim
+#     dram_alloc_len = div(min(dramsize, requested_size), sizeof(T))
+#     pm_alloc_len = max(0, div(requested_size - dramsize, sizeof(T)))
+#
+#     return SplitVector{T}(
+#         undef,
+#         dram_alloc_len,
+#         stdallocator,
+#         dram_alloc_len,
+#         pmallocator(path)
+#     )
+# end
+#
+# function splitallocator(path::AbstractString, dramsize)
+#     return (type, dim) -> splitallocator(type, path, dramsize, dim)
+# end
 
 #####
 ##### Misc development functions
@@ -78,7 +97,7 @@ function sweep(
     start_node,
     queries::AbstractVector;
     num_neighbors = 1,
-    buf_range = 5:5:120,
+    buf_range = 10:5:120,
 )
     all_times = []
     all_ids = []

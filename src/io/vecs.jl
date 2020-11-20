@@ -77,6 +77,7 @@ function load_vecs(::Type{T}, file; maxlines = nothing, allocator = stdallocator
         if (maxlines !== nothing)
             num_lines = min(num_lines, maxlines)
         end
+        meter = ProgressMeter.Progress(num_lines, 1, "Loading Dataset...")
 
         vector_len = div(num_lines * dim * sizeof(vecs_read_type(T)), sizeof(T))
         v = allocator(T, vector_len)
@@ -89,12 +90,14 @@ function load_vecs(::Type{T}, file; maxlines = nothing, allocator = stdallocator
             index += addto!(v, index, vecs_convert(T, buf))
 
             linecount += 1
+            ProgressMeter.next!(meter)
             (ismaxed(linecount, maxlines) || eof(io)) && break
 
             # Read the next dimension. Make sure it's the same.
             nextdim = read(io, Int32)
             @assert dim == nextdim
         end
+        ProgressMeter.finish!(meter)
         return v, dim
     end
     return vecs_reshape(T, v, dim)

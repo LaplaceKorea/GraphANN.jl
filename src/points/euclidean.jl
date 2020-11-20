@@ -111,6 +111,11 @@ function vnni_accumulate(
     Base.@_inline_meta
 
     # Use LLVM call to directly insert the assembly instruction.
+    # Don't worry about the conversion from <32 x i16> to <16 x i32>.
+    # For some reason, the signature of the LLVM instrinsic wants <16 x i32>, but it's
+    # treated correctly by the hardware ...
+    #
+    # This may be related to C++ AVX intrinsic datatypes being element type agnostic.
     decl = "declare <16 x i32> @llvm.x86.avx512.vpdpwssd.512(<16 x i32>, <16 x i32>, <16 x i32>) #1"
     s = """
         %a1 = bitcast <32 x i16> %1 to <16 x i32>
@@ -120,6 +125,8 @@ function vnni_accumulate(
         ret <16 x i32> %val
         """
 
+    # SIMD.Vec's wrap around SIMD.LVec, which Julia knows how to pass correctly to LLVM
+    # as raw LLVM vectors.
     x = Base.llvmcall(
         (decl, s),
         SIMD.LVec{16,Int32},

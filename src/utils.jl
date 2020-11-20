@@ -116,11 +116,14 @@ end
 ##### Lowest Level Prefetch
 #####
 
+# prefetch - into L1?
+# prefetch1 - into L2
+# prefetch2 - into LLC
 function prefetch(ptr::Ptr)
     Base.@_inline_meta
     Base.llvmcall(raw"""
         %val = inttoptr i64 %0 to i8*
-        call void asm sideeffect "prefetch $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
+        call void asm sideeffect "prefetcht1 $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
         ret void
         """,
         Cvoid,
@@ -129,4 +132,33 @@ function prefetch(ptr::Ptr)
     )
     return nothing
 end
+
+#####
+##### BatchedRange
+#####
+
+struct BatchedRange{T <: AbstractRange}
+    range::T
+    batchsize::Int64
+end
+
+Base.length(x::BatchedRange) = ceil(Int, length(x.range) / x.batchsize)
+
+function batched(range::AbstractRange, batchsize::Integer)
+    return BatchedRange(range, convert(Int64, batchsize))
+end
+
+Base.@propagate_inbounds function Base.getindex(x::BatchedRange, i::Integer)
+    @unpack range, batchsize = x
+    start = batchsize * (i-1) + 1
+    stop = min(length(range), batchsize * i)
+    return subrange(range, start, stop)
+end
+
+Base.iterate(x::BatchedRange, s = 1)  = s > length(x) ? nothing : (x[s], s+1)
+
+# handle unit ranges and more general ranges separately so a `BatchedRange` returns
+# a `UnitRange` when it encloses a `UnitRange`.
+subrange(range::OrdinalRange, start, stop) = range[start]:step(range):range[stop]
+subrange(range::AbstractUnitRange, start, stop) = range[start]:range[stop]
 

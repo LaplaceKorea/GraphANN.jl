@@ -356,7 +356,6 @@ function generate_index(
     @unpack window_size, target_degree, prune_threshold_degree = parameters
 
     # Generate a random `max_degree` regular graph.
-    # NOTE: This is a hack for now - need to write a generator for the UniDiGraph.
     # TODO: Also, default the graph to UInt32's to save on space.
     # Keep this as a parameter so we can promote to Int64's if needed.
     graph = random_regular(
@@ -373,7 +372,6 @@ function generate_index(
     needs_pruning = [false for _ in 1:LightGraphs.nv(graph)]
 
     meta = MetaGraph(graph, data)
-
     tls = ThreadLocal(;
         greedy = GreedySearch(window_size),
         pruner = Pruner{Neighbor}(),
@@ -415,23 +413,19 @@ end
     @unpack graph, data = meta
     @unpack alpha, target_degree = parameters
 
-    # TODO: replace with shuffle
+    # TODO: Shuffle visit order.
     num_batches = ceil(Int, length(data) / batchsize)
     progress_meter = ProgressMeter.Progress(num_batches, 1, "Computing Index...")
-    for batch_number in 1:num_batches
-        start = ((batch_number - 1) * batchsize) + 1
-        stop = min(batch_number * batchsize, length(data))
-        r = start:stop
-
+    for r in batched(1:length(data), batchsize)
         # Use dynamic load balancing.
-        itertime = @elapsed dynamic_thread(r, INDEX_BALANCE_FACTOR) do i
+        itertime = @elapsed dynamic_thread(r, INDEX_BALANCE_FACTOR) do vertex
             # Get thread local storage
             storage = tls[]
 
             # Perform a greedy search from this node.
             # The visited list will live inside the `greedy` object and will be extracted
             # using the `getvisited` function.
-            search(storage.greedy, meta, i, data[i])
+            search(storage.greedy, meta, vertex, data[vertex])
             candidates = getvisited(storage.greedy)
 
             # Run the `RobustPrune` algorithm on the graph starting at this point.
@@ -441,13 +435,13 @@ end
             neighbor_updates!(
                 nextlist,
                 candidates,
-                i,
+                vertex,
                 meta,
                 storage.pruner,
                 alpha,
                 target_degree,
             )
-            storage.nextlists[i] = nextlist
+            storage.nextlists[vertex] = nextlist
         end
 
         # Update the graph.

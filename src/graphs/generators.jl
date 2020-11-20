@@ -7,7 +7,7 @@ function random_regular(
     nv,
     ne;
     max_edges = ne,
-    slack = 1.05,
+    slack = 1.00,
     allocator = stdallocator,
 ) where {T <: Integer}
 
@@ -23,7 +23,7 @@ function random_regular(
     nv,
     ne;
     max_edges = ne,
-    slack = 1.05,
+    slack = 1.00,
     allocator = stdallocator,
 ) where {T <: Integer}
 
@@ -41,7 +41,7 @@ function _populate!(A::Matrix{T}, ne) where {T}
     tls = ThreadLocal(T[])
     nv = size(A, 2)
 
-    Threads.@threads for col in 1:nv
+    dynamic_thread(1:nvm, 128) do i
         storage = tls[]
         empty!(storage)
 
