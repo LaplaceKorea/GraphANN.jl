@@ -109,11 +109,12 @@ function search(
         ln = length(neighbors)
 
         # Prefetch all new datapoints.
+        # IMPORTANT: This is critical for performance!
         for vertex in neighbors
             @inbounds prefetch(data, vertex)
         end
 
-        # Compute
+        # Distance computations
         for i in eachindex(neighbors)
             # Perform distance query, and try to prefetch the next datapoint.
             @inbounds v = neighbors[i]

@@ -1,6 +1,4 @@
 # Preprocess a file with the expected element type.
-ismaxed(x, ::Nothing) = false
-ismaxed(x, y) = (x >= y)
 ismatch(r::Regex, s) = (match(r, s) !== nothing)
 
 # Auto detect format based on file extension.
@@ -85,7 +83,7 @@ function load_vecs(::Type{T}, file; maxlines = nothing, allocator = stdallocator
 
             linecount += 1
             ProgressMeter.next!(meter)
-            (ismaxed(linecount, maxlines) || eof(io)) && break
+            ((linecount === maxlines) || eof(io)) && break
 
             # Read the next dimension. Make sure it's the same.
             nextdim = read(io, Int32)
