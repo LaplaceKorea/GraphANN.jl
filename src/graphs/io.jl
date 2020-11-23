@@ -2,21 +2,36 @@
 ##### Serialization
 #####
 
-function save(file::AbstractString, g::UniDirectedGraph)
+function save(file::AbstractString, g::UniDirectedGraph; kw...)
     open(file; write = true) do io
-        save(io, g)
+        save(io, g; kw...)
     end
     return nothing
 end
 
-function save(io::IO, g::UniDirectedGraph{T}) where {T}
+function save(
+    io::IO,
+    g::UniDirectedGraph{T};
+    buffersize = div(2_000_000_000, sizeof(T))
+) where {T}
     write_header(io, g)
 
-    # Now, serialize the adjacency list
+    # Write number of neighbors
+    write(io, T.(LightGraphs.outdegree(g)))
+
+    # Write the adjacency lists themselves.
+    # Queue up the adjacency lists into large chunks to try to get slightly better
+    # bandwidth.
+    buffer = T[]
+    sizehint!(buffer, buffersize)
+    last_vertex = LightGraphs.nv(g)
+
     ProgressMeter.@showprogress 1 for v in LightGraphs.vertices(g)
-        neighbors = LightGraphs.outneighbors(g, v)
-        write(io, T(length(neighbors)))
-        write(io, neighbors)
+        append!(buffer, LightGraphs.outneighbors(g, v))
+        if length(buffer) >= buffersize || v == last_vertex
+            write(io, buffer)
+            empty!(buffer)
+        end
     end
     return nothing
 end
@@ -39,64 +54,53 @@ function read_header(io::IO)
     return NamedTuple{(:elsize, :nv, :ne, :max_degree)}(tup)
 end
 
+header_length() = 4
+
 load(file::AbstractString; kw...) = load(DefaultAdjacencyList{UInt32}, file; kw...)
-load(::Type{T}, file::AbstractString; kw...) where {T} = open(io -> load(T, io; kw...), file)
-
-function load(::Type{FlatAdjacencyList{T}}, io::IO) where {T}
-    @unpack elsize, nv, max_degree = read_header(io)
-    @assert elsize == sizeof(T)
-
-    # Allocate destination array.
-    g = UniDirectedGraph{T}(FlatAdjacencyList{T}(nv, max_degree))
-    v = 1
-    buffer = T[]
-
-    progress_meter = ProgressMeter.Progress(nv, 1)
-
-    while (v <= nv && !eof(io))
-        num_neighbors = read(io, T)
-        resize!(buffer, num_neighbors)
-        read!(io, buffer)
-        copyto!(g, v, buffer)
-
-        # Loop footer (obviously)
-        ProgressMeter.next!(progress_meter)
-        v += 1
-    end
-
-    # Did we exhaust the whole file?
-    v != (nv + 1) && error("Finished reading file before all vertices were discovered!")
-    eof(io) || error("There seems to be more data left on the file!")
-    return g
+function load(::Type{T}, file::AbstractString; kw...) where {T}
+    return open(io -> load(T, io; kw...), file)
 end
 
 function load(::Type{DefaultAdjacencyList{T}}, io::IO) where {T}
     # Read the header
-    @unpack elsize, nv, max_degree = read_header(io)
+    @unpack elsize, nv, ne, max_degree = read_header(io)
     @assert elsize == sizeof(T)
 
     # Allocate destination array.
+    outdegrees = Vector{T}(undef, nv)
+    read!(io, outdegrees)
+
     adj = DefaultAdjacencyList{T}()
-    v = 1
-
-    progress_meter = ProgressMeter.Progress(nv, 1)
-
-    while (v <= nv && !eof(io))
+    ProgressMeter.@showprogress 1 for v in 1:nv
         buffer = T[]
-        num_neighbors = read(io, T)
-        resize!(buffer, num_neighbors)
+        resize!(buffer, outdegrees[v])
         read!(io, buffer)
         push!(adj, buffer)
+    end
 
-        # Loop footer (obviously)
-        ProgressMeter.next!(progress_meter)
-        v += 1
+    eof(io) || error("There seems to be more data left on the file!")
+    return UniDirectedGraph{T}(adj)
+end
+
+function load(::Type{FlatAdjacencyList{T}}, io::IO) where {T}
+    @unpack elsize, nv, ne, max_degree = read_header(io)
+    @assert elsize == sizeof(T)
+
+    outdegrees = Vector{T}(undef, nv)
+    read!(io, outdegrees)
+
+    # Allocate destination array.
+    g = UniDirectedGraph{T}(FlatAdjacencyList{T}(nv, max_degree))
+    buffer = T[]
+    ProgressMeter.@showprogress 1 for v in 1:nv
+        resize!(buffer, outdegrees[v])
+        read!(io, buffer)
+        copyto!(g, v, buffer)
     end
 
     # Did we exhaust the whole file?
-    v != (nv + 1) && error("Finished reading file before all vertices were discovered!")
     eof(io) || error("There seems to be more data left on the file!")
-    return UniDirectedGraph{T}(adj)
+    return g
 end
 
 function load(
@@ -104,35 +108,37 @@ function load(
     io::IO;
     allocator = stdallocator,
 ) where {T}
-    # Read the header
     @unpack elsize, nv, ne, max_degree = read_header(io)
     @assert elsize == sizeof(T)
 
-    # Preallocate the storage array and the Spans that are going to store the
-    # lengths and neighbors
+    # Load how long each adjacency list is.
+    degrees = Vector{T}(undef, nv)
+    read!(io, degrees)
+
+    # Preallocate the storage and load everything into memory.
     A = allocator(T, ne)
+    read!(io, A)
+    eof(io) || error("There seems to be more room in the file!")
+
+    # Reconstruct the graph from the degree information.
     spans = Vector{Span{T}}()
     sizehint!(spans, nv)
 
     progress_meter = ProgressMeter.Progress(nv, 1)
     index = 1
-    v = 1
-    while (v <= nv && !eof(io))
-        num_neighbors = read(io, T)
-        read!(io, view(A, index:(index + num_neighbors - 1)))
-        push!(spans, Span(pointer(A, index), num_neighbors))
-        index += num_neighbors
-
-        # Loop footer (obviously)
-        ProgressMeter.next!(progress_meter)
-        v += 1
+    ProgressMeter.@showprogress 1 for v in 1:nv
+        degree = degrees[v]
+        push!(spans, Span(pointer(A, index), degree))
+        index += degree
     end
 
-    # Did we exhaust the whole file?
-    v != (nv + 1) && error("Finished reading file before all vertices were discovered!")
-    eof(io) || error("There seems to be more data left on the file!")
+    # Post processing sanity check
+    index != (ne + 1) && error("""
+        Incorrect final index.
+        Should be: $(ne + 1). Is: ($index).
+        """
+    )
 
     adj = DenseAdjacencyList{T}(A, spans)
     return UniDirectedGraph{T}(adj)
 end
-

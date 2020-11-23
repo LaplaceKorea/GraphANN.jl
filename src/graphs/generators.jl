@@ -41,7 +41,7 @@ function _populate!(A::Matrix{T}, ne) where {T}
     tls = ThreadLocal(T[])
     nv = size(A, 2)
 
-    dynamic_thread(1:nvm, 128) do i
+    dynamic_thread(1:nv, 128) do col
         storage = tls[]
         empty!(storage)
 

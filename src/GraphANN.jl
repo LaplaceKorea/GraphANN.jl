@@ -3,6 +3,9 @@ module GraphANN
 import DataStructures
 include("minmax_heap.jl")
 
+# stdlib
+import Mmap
+
 # Imports (avoid brining names into our namespace)
 import LightGraphs
 import ProgressMeter

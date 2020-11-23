@@ -140,9 +140,9 @@ function searchall(
 )
     num_queries = length(queries)
     dest = Array{eltype(meta_graph.graph),2}(undef, num_neighbors, num_queries)
-    times = Vector{Int}(undef, num_queries)
+    #times = Vector{Int}(undef, num_queries)
     for (col, query) in enumerate(queries)
-        start = time_ns()
+        #start = time_ns()
         search(algo, meta_graph, start_node, query)
 
         # Copy over the results to the destination
@@ -151,9 +151,10 @@ function searchall(
         result_view = view(results, 1:num_neighbors)
 
         dest_view .= getid.(result_view)
-        times[col] = time_ns() - start
+        #times[col] = time_ns() - start
     end
-    return dest, times
+    return dest
+    #return dest, times
 end
 
 # Multi Threaded Query
