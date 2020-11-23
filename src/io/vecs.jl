@@ -35,17 +35,11 @@ end
 
 # Overload points for customizing loading.
 vecs_read_type(::Type{T}) where {T} = T
-vecs_convert(::Type, buf) = buf
 vecs_reshape(::Type, v, dim) = reshape(v, convert(Int, dim), :)
 
 function addto!(x::AbstractVector{T}, i, v::AbstractVector{T}) where {T}
     copyto!(x, i, v, 1, length(v))
     return length(v)
-end
-
-function addto!(x::AbstractVector{T}, i, v::T) where {T}
-    x[i] = v
-    return 1
 end
 
 # Why is this function so complicated?
@@ -87,7 +81,7 @@ function load_vecs(::Type{T}, file; maxlines = nothing, allocator = stdallocator
         # Now, start parsing!
         while true
             read!(io, buf)
-            index += addto!(v, index, vecs_convert(T, buf))
+            index += addto!(v, index, buf)
 
             linecount += 1
             ProgressMeter.next!(meter)
