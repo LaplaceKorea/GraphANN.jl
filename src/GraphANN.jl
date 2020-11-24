@@ -35,8 +35,12 @@ include("graphs/graphs.jl")
 include("algorithms.jl")
 include("index/index.jl")
 
+# Prefetcher to increase performance
+include("prefetch/prefetch.jl")
+
 # Data loaders for various formats.
 include("io/io.jl")
+
 
 # Allocator convenience functions
 stdallocator(::Type{T}, dims...) where {T} = Array{T}(undef, dims...)

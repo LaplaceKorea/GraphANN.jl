@@ -25,12 +25,12 @@ include("graphs/graphs.jl")
 include("test_minmax_heap.jl")
 include("greedy.jl")
 
+# Prefetch machinery
+include("prefetch/queue.jl")
+
 # Index building
 include("index/index.jl")
 
 # Loades
 include("io/vecs.jl")
 
-@testset "GraphANN.jl" begin
-    # Write your tests here.
-end
