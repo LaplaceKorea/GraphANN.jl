@@ -5,6 +5,28 @@ end
 
 Euclidean{N,T}() where {N,T} = Euclidean(ntuple(_ -> zero(T), N))
 
+zeroas(::Type{T}, ::Type{Euclidean{N,U}}) where {T,N,U} = Euclidean{N,T}()
+zeroas(::Type{T}, x::E) where {T, E <: Euclidean} = zeroas(T, E)
+
+# Generic plus
+@generated function Base.:+(x::Euclidean{N}, y::Euclidean{N}) where {N}
+    syms = [Symbol("z$i") for i in 1:N]
+    exprs = [:($(syms[i]) = x[$i] + y[$i]) for i in 1:N]
+    return quote
+        $(exprs...)
+        Euclidean(($(syms...),))
+    end
+end
+
+@generated function Base.:/(x::Euclidean{N,T}, y::U) where {N, T, U <: Number}
+    syms = [Symbol("z$i") for i in 1:N]
+    exprs = [:($(syms[i]) = x[$i] / y) for i in 1:N]
+    return quote
+        $(exprs...)
+        Euclidean(($(syms...),))
+    end
+end
+
 raw(x::Euclidean) = x.vals
 
 Base.length(::Euclidean{N}) where {N} = N

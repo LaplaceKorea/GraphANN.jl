@@ -98,23 +98,22 @@ end
 function save_vecs(
     file::AbstractString,
     A::AbstractMatrix{T},
-    save_type::Type{U} = T
-) where {T,U}
+) where {T}
     # Make the path if required
     dir = dirname(file)
     !ispath(dir) && mkpath(dir)
 
     # Drop down to an overloaded function that operates directly on a IO type object.
     open(file; write = true) do io
-        save_vecs(io, A, save_type)
+        save_vecs(io, A)
     end
 end
 
-function save_vecs(io::IO, A::AbstractMatrix{T}, save_type::U = T) where {T, U}
+function save_vecs(io::IO, A::AbstractMatrix{T}) where {T}
     meter = ProgressMeter.Progress(size(A, 2), 1)
     for col in eachcol(A)
         write(io, Int32(length(col)))
-        write(io, convert(U, col))
+        write(io, col)
         ProgressMeter.next!(meter)
     end
 end

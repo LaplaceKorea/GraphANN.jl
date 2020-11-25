@@ -87,10 +87,10 @@ function _prepare(path = siftsmall(); allocator = stdallocator, maxlines = nothi
 
     parameters = GraphParameters(
         alpha = 1.2,
-        window_size = 50,
+        window_size = 200,
         target_degree = 128,
-        prune_threshold_degree = 150,
-        prune_to_degree = 100,
+        prune_threshold_degree = 140,
+        prune_to_degree = 120,
     )
 
     return (;

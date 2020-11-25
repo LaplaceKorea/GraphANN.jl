@@ -29,7 +29,11 @@ function random_regular(
 
     # Allocate destination space
     adj = allocator(T, ceil(Int, slack * max_edges), nv)
-    adj .= zero(T)
+
+    # Multithreaded zeroing
+    dynamic_thread(1:nv, 2^16) do col
+        @views adj[:,col] .= zero(T)
+    end
 
     _populate!(adj, ne)
     lengths = fill(T(ne), nv)

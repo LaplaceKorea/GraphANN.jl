@@ -67,8 +67,11 @@ Base.iterate(set::RobinSet, s) = iterate(keys(set.dict), s)
 # Find the medioid of a dataset
 raw(x::Union{<:AbstractVector,<:Tuple}) = x
 function medioid(data::Vector{T}) where {T}
-    # First, find the element wise sum
-    medioid = Euclidean(mapreduce(raw, (x,y) -> Float32.(x) .+ Float32.(y), data) ./ length(data))
+    tls = ThreadLocal(zeroas(Float32, T))
+    dynamic_thread(data, 1024) do i
+        tls[] += i
+    end
+    medioid = sum(getall(tls)) / length(data)
     return first(nearest_neighbor(medioid, data))
 end
 
@@ -77,16 +80,19 @@ end
 #####
 
 function nearest_neighbor(query::T, data::AbstractVector) where {T}
-    min_ind = 0
-    min_dist = typemax(eltype(query))
-    for (i, x) in enumerate(data)
+    tls = ThreadLocal((min_ind = 0, min_dist = typemax(eltype(query))))
+    dynamic_thread(1:length(data), 128) do i
+        @inbounds x = data[i]
+        @unpack min_ind, min_dist = tls[]
         dist = distance(query, x)
         if dist < min_dist
-            min_dist = dist
-            min_ind = i
+            tls[] = (min_ind = i, min_dist = dist)
         end
     end
-    return (min_ind, min_dist)
+
+    candidates = getall(tls)
+    _, i = findmin([x.min_dist for x in candidates])
+    return candidates[i]
 end
 
 #####
@@ -123,7 +129,7 @@ function prefetch(ptr::Ptr)
     Base.@_inline_meta
     Base.llvmcall(raw"""
         %val = inttoptr i64 %0 to i8*
-        call void asm sideeffect "prefetcht1 $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
+        call void asm sideeffect "prefetch $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
         ret void
         """,
         Cvoid,

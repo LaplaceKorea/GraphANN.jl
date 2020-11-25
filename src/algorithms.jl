@@ -92,21 +92,20 @@ end
 
 function search(
     algo::GreedySearch,
-    meta_graph::MetaGraph,
+    meta::MetaGraph,
     start_node,
     query,
 )
     empty!(algo)
 
     # Destructure argument
-    graph = meta_graph.graph
-    data = meta_graph.data
+    graph = meta.graph
+    data = meta.data
 
     pushcandidate!(algo, Neighbor(start_node, distance(query, data[start_node])))
     while !done(algo)
         p = getid(getcandidate!(algo))
         neighbors = LightGraphs.outneighbors(graph, p)
-        ln = length(neighbors)
 
         # Prefetch all new datapoints.
         # IMPORTANT: This is critical for performance!
@@ -117,11 +116,13 @@ function search(
         # Distance computations
         for i in eachindex(neighbors)
             # Perform distance query, and try to prefetch the next datapoint.
+            # NOTE: Checking if a vertex has been visited here is actually SLOWER than
+            # deferring until after the distance comparison.
             @inbounds v = neighbors[i]
             @inbounds d = distance(query, data[v])
 
             ## only bother to add if it's better than the worst currently tracked.
-            if !isfull(algo) || d < maximum(algo).distance
+            if d < maximum(algo).distance || !isfull(algo)
                 pushcandidate!(algo, Neighbor(v, d))
             end
         end
@@ -129,6 +130,7 @@ function search(
         # prune
         reduce!(algo)
     end
+    return nothing
 end
 
 # Single Threaded Query
@@ -141,9 +143,7 @@ function searchall(
 )
     num_queries = length(queries)
     dest = Array{eltype(meta_graph.graph),2}(undef, num_neighbors, num_queries)
-    #times = Vector{Int}(undef, num_queries)
     for (col, query) in enumerate(queries)
-        #start = time_ns()
         search(algo, meta_graph, start_node, query)
 
         # Copy over the results to the destination
@@ -152,10 +152,8 @@ function searchall(
         result_view = view(results, 1:num_neighbors)
 
         dest_view .= getid.(result_view)
-        #times[col] = time_ns() - start
     end
     return dest
-    #return dest, times
 end
 
 # Multi Threaded Query
@@ -169,6 +167,11 @@ function searchall(
 
     num_queries = length(queries)
     dest = Array{eltype(meta.graph),2}(undef, num_neighbors, num_queries)
+
+    for i in getall(tls)
+        empty!(i.times)
+    end
+
     dynamic_thread(eachindex(queries), 64) do r
         for col in r
             query = queries[col]
