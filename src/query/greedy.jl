@@ -168,10 +168,6 @@ function searchall(
     num_queries = length(queries)
     dest = Array{eltype(meta.graph),2}(undef, num_neighbors, num_queries)
 
-    for i in getall(tls)
-        empty!(i.times)
-    end
-
     dynamic_thread(eachindex(queries), 64) do r
         for col in r
             query = queries[col]
