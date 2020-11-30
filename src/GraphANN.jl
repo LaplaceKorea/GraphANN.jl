@@ -32,7 +32,7 @@ include("bruteforce.jl")
 include("points/euclidean.jl")
 
 include("graphs/graphs.jl")
-include("algorithms.jl")
+include("query/query.jl")
 include("index/index.jl")
 
 # Prefetcher to increase performance
