@@ -110,7 +110,7 @@ using GraphANN
 # Get the first 10 million entries in the Sift 1B dataset.
 # Note: trailing semi-colons are optional and just surpress the printing of the results to the REPL.
 dataset = GraphANN.load_vecs(GraphANN.Euclidean{128,UInt8}, "/data/bigann.bvecs"; maxlines = 10_000_000);
-queries = GraphANN.load_vecs(GraphANN.Euclidean{128,UInt8}, "/data/query.bvecs);
+queries = GraphANN.load_vecs(GraphANN.Euclidean{128,UInt8}, "/data/query.bvecs");
 
 gt = GraphANN.bruteforce_search(queries, dataset, 100; groupsize = 64, savefile = "groundtruth.ivecs")
 GraphANN.save_vecs("another_groundtruth.ivecs", gt)
