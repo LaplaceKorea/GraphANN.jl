@@ -88,9 +88,9 @@ function _prepare(path = siftsmall(); allocator = stdallocator, maxlines = nothi
     parameters = GraphParameters(
         alpha = 1.2,
         window_size = 200,
-        target_degree = 128,
-        prune_threshold_degree = 140,
-        prune_to_degree = 120,
+        target_degree = 64,
+        prune_threshold_degree = 72,
+        prune_to_degree = 56,
     )
 
     return (;
@@ -129,4 +129,4 @@ function sweep(
     return all_ids, all_times
 end
 
-end #module
+end # module

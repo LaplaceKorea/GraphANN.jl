@@ -116,3 +116,16 @@ gt = GraphANN.bruteforce_search(queries, dataset, 100; groupsize = 64, savefile 
 GraphANN.save_vecs("another_groundtruth.ivecs", gt)
 ```
 
+
+## Next Steps
+
+1. Prefetcher
+2. Index for Deep1B         [low-med (do later)]
+3. Moar metrics             [done]
+4. Higher quality index?    [get started]
+
+    - Things to look at
+        1. Window size during construction
+        2. Degree of constructed graph - effects on query
+
+    - Use Sift50M as a testbed

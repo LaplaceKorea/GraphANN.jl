@@ -2,9 +2,32 @@
 ##### GreedySearch
 #####
 
+## Telemetry Types for GreedySearch
+
+# Count number of distance computations
+mutable struct DistanceCount
+    count::Int
+end
+DistanceCount() = DistanceCount(0)
+reset!(x::DistanceCount) = (x.count = 0)
+
+# Count number of unique vertices
+mutable struct VerticesSeen
+    count::Int
+end
+VerticesSeen() = VerticesSeen(0)
+reset!(x::VerticesSeen) = (x.count = 0)
+
+mutable struct Latencies
+    start::Int
+    latencies::Vector{Int}
+end
+Latencies() = Latencies(0, Int[])
+reset!(x::Latencies) = empty!(x.latencies)
+
 # Use the `GreedySearch` type to hold parameters and intermediate datastructures
 # used to control the greedy search.
-mutable struct GreedySearch{M, H, T <: AbstractSet}
+mutable struct GreedySearch{T <: AbstractSet, U <: Telemetry}
     search_list_size::Int
 
     # Pre-allocated buffer for the search list
@@ -17,17 +40,30 @@ mutable struct GreedySearch{M, H, T <: AbstractSet}
     # When popping off neighbors to get the number of elements in `best` under
     # `search_list_size`, we will also need to pop items off `queue` IF there
     # is a match.
-    best::M
-    best_unvisited::H
+    best::BinaryMinMaxHeap{Neighbor}
+    best_unvisited::BinaryMinMaxHeap{Neighbor}
     visited::T
+    telemetry::U
 end
 
+# Get the telemetry
+telemetry(x::GreedySearch) = x.telemetry
+
+# TODO: Make @generated to ensure constant propagation
+reset!(x::Telemetry) = reset!.(Tuple(x.val))
+
 # The default struct
-function GreedySearch(search_list_size)
+function GreedySearch(search_list_size; kw...)
     best = BinaryMinMaxHeap{Neighbor}()
     best_unvisited = BinaryMinMaxHeap{Neighbor}()
     visited = RobinSet{UInt32}()
-    return GreedySearch(search_list_size, best, best_unvisited, visited)
+    return GreedySearch(
+        search_list_size,
+        best,
+        best_unvisited,
+        visited,
+        Telemetry(; kw...)
+    )
 end
 
 # Prepare for another run.
@@ -65,7 +101,7 @@ done(greedy::GreedySearch) = isempty(greedy.best_unvisited)
 Base.maximum(greedy::GreedySearch) = _unsafe_maximum(greedy.best)
 
 # Bring the size of the best list down to `search_list_size`
-# TODO; check if type inference works properly.
+# TODO: check if type inference works properly.
 # The function `_unsafe_maximum` can return `nothing`, but Julia should be able to
 # handle that
 function reduce!(greedy::GreedySearch)
@@ -121,6 +157,11 @@ function search(
             @inbounds v = neighbors[i]
             @inbounds d = distance(query, data[v])
 
+            # -- optional telemetry
+            ifhasa(telemetry(algo), DistanceCount) do x
+                x.count += 1
+            end
+
             ## only bother to add if it's better than the worst currently tracked.
             if d < maximum(algo).distance || !isfull(algo)
                 pushcandidate!(algo, Neighbor(v, d))
@@ -130,6 +171,12 @@ function search(
         # prune
         reduce!(algo)
     end
+
+    # -- optional telemetry
+    ifhasa(telemetry(algo), VerticesSeen) do x
+        x.count += length(algo.visited)
+    end
+
     return nothing
 end
 
@@ -141,17 +188,28 @@ function searchall(
     queries::AbstractVector;
     num_neighbors = 10
 )
+    reset!(telemetry(algo))
     num_queries = length(queries)
     dest = Array{eltype(meta_graph.graph),2}(undef, num_neighbors, num_queries)
     for (col, query) in enumerate(queries)
+        # -- optional telemetry
+        ifhasa(telemetry(algo), Latencies) do x
+            x.start = time_ns()
+        end
+
         search(algo, meta_graph, start_node, query)
 
         # Copy over the results to the destination
         results = destructive_extract!(algo.best)
         dest_view = view(dest, :, col)
         result_view = view(results, 1:num_neighbors)
-
         dest_view .= getid.(result_view)
+
+        # -- optional telemetry
+        # How long did the round trip take?
+        ifhasa(telemetry(algo), Latencies) do x
+            push!(x.latencies, time_ns() - x.start)
+        end
     end
     return dest
 end
@@ -164,6 +222,9 @@ function searchall(
     queries::AbstractVector;
     num_neighbors = 10
 )
+    for algo in getall(tls)
+        reset!(telemetry(algo))
+    end
 
     num_queries = length(queries)
     dest = Array{eltype(meta.graph),2}(undef, num_neighbors, num_queries)
@@ -172,16 +233,28 @@ function searchall(
         for col in r
             query = queries[col]
             algo = tls[]
+
+            # -- optional telemetry
+            ifhasa(telemetry(algo), Latencies) do x
+                x.start = time_ns()
+            end
+
             search(algo, meta, start_node, query)
 
             # Copy over the results to the destination
             results = destructive_extract!(algo.best)
             dest_view = view(dest, :, col)
             result_view = view(results, 1:num_neighbors)
-
             dest_view .= getid.(result_view)
+
+            # -- optional telemetry
+            # How long did the round trip take?
+            ifhasa(telemetry(algo), Latencies) do x
+                push!(x.latencies, time_ns() - x.start)
+            end
         end
     end
 
     return dest
 end
+

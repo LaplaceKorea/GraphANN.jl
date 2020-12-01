@@ -23,6 +23,13 @@ struct Telemetry{names,T}
     Telemetry(x::NamedTuple{names, T}) where {names, T} = new{names, T}(x)
 end
 
+# Overload `getproperty` so we can access entries in the wrapped `NamedTuple` using
+# the dot syntax.
+function Base.getproperty(x::Telemetry, v::Symbol)
+    val = getfield(x, :val)
+    return v == :val ? val : getproperty(val, v)
+end
+
 # Turn keywords into a NamedTuple.
 Telemetry(; kw...) = Telemetry((;kw...,))
 ifhasa(f::F, x::Telemetry, ::Type{T}) where {F,T} = maybecall(f, find(T, x))
