@@ -56,6 +56,7 @@ function bruteforce_search(
     dataset::AbstractVector{T},
     num_neighbors::Int = 100;
     groupsize = 32,
+    savefile = nothing,
 ) where {T}
     # Allocate max heaps for each
     # One for each column in the queries matrix
@@ -65,7 +66,7 @@ function bruteforce_search(
     num_queries = length(queries)
     meter = ProgressMeter.Progress(num_queries, 1)
 
-    gt = Array{UInt64,2}(undef, num_neighbors, num_queries)
+    gt = Array{UInt32,2}(undef, num_neighbors, num_queries)
 
     # Batch the query range so each thread works on a chunk of queries at a time.
     # The dynamic load balancer will give one batch at a time to each worker.
@@ -97,8 +98,24 @@ function bruteforce_search(
         #
         # That is FAR longer than any time will be spent fighting over this lock.
         ProgressMeter.next!(meter; step = length(range))
+
+        if savefile !== nothing && Threads.threadid() == 1
+            # NOTE: small race condition with updating `gt` while this is tryint to
+            # read it.
+            #
+            # However, it shouldn't affect the actual saved data.
+            #
+            # Do the trick of serializing to a temporary file and then moving to always
+            # ensure the saved file is valid.
+            tempfile = "$savefile.temp"
+            save_vecs(tempfile, gt)
+            mv(tempfile, savefile; force = true)
+        end
     end
     ProgressMeter.finish!(meter)
+
+    # final save
+    savefile === nothing || save_vecs(savefile, gt)
 
     return gt
 end
