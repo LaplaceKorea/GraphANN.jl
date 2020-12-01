@@ -2,7 +2,14 @@
 ##### Prefetcher Implementation
 #####
 
-include("atomic.jl"); import .Atomics: unsafe_atomic_cas!, unsafe_atomic_or!, unsafe_atomic_nand!
+module _Prefetcher
+
+# Many of the pieces that make up the prefetcher implementations are wrapped in inner
+# modules.
+#
+# This is done to help avoid polluting the main namespace.
+include("atomic.jl")
+include("indirection.jl")
 include("queue.jl"); import .Queue: SemiAtomicQueue
 
 struct Staging{T}
@@ -10,7 +17,7 @@ struct Staging{T}
     queues::Vector{SemiAtomicQueue{T}}
     # The staging area is protected by lock so only one prefetcher
     # thread can access it at a time.
-    lock::Threads.SpinLock
+    lock::ReentrantLock
 end
 
-
+end # module

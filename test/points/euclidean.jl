@@ -38,4 +38,35 @@ end
 
         @test isapprox(GraphANN.distance(a, b), euclidean_reference(raw(a), raw(b)))
     end
+
+    # Test some unary operations.
+    a = GraphANN.Euclidean(ntuple(_ -> rand(UInt8), 128))
+    b = a / 10
+    @test raw(b) == GraphANN.raw(a) ./ 10
+
+    c = GraphANN.Euclidean(ntuple(_ -> rand(UInt8), 128))
+    @test raw(a + c) == raw(a) .+ raw(c)
+
+    ### Test copying
+
+    # N.B.: Need to make `A` fairly large to ensure that the base pointer for `A`
+    # is aligned to a cacheline boundary.
+    # TODO: How do we ensure this in general?
+    A = Vector{GraphANN.Euclidean{128,UInt8}}(undef, 100)
+    z = eltype(A)()
+    x = GraphANN.Euclidean(ntuple(_ -> rand(UInt8), 128))
+    A .= Ref(z)
+
+    A[3] = x
+    @test A[2] == z
+    @test A[3] == x
+    @test A[4] == z
+
+    @test A[5] == z
+    @test A[6] == z
+    @test A[7] == z
+    GraphANN.fast_copyto!(pointer(A, 6), pointer(A, 3))
+    @test A[5] == z
+    @test A[6] == x
+    @test A[7] == z
 end

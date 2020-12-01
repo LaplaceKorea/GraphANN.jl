@@ -8,6 +8,9 @@ Euclidean{N,T}() where {N,T} = Euclidean(ntuple(_ -> zero(T), N))
 zeroas(::Type{T}, ::Type{Euclidean{N,U}}) where {T,N,U} = Euclidean{N,T}()
 zeroas(::Type{T}, x::E) where {T, E <: Euclidean} = zeroas(T, E)
 
+Base.sizeof(::Type{Euclidean{N,T}}) where {N,T} = N * sizeof(T)
+Base.sizeof(x::E) where {E <: Euclidean} = sizeof(E)
+
 # Generic plus
 @generated function Base.:+(x::Euclidean{N}, y::Euclidean{N}) where {N}
     syms = [Symbol("z$i") for i in 1:N]
@@ -165,3 +168,36 @@ function vnni_accumulate(
     return SIMD.Vec(x)
 end
 
+#####
+##### Fast pointer loads and stores
+#####
+
+@generated function fast_copyto!(dst::Ptr{E}, src::Ptr{E}) where {N,T, E <: Euclidean{N,T}}
+    # How many AVX loads and stores are we going to need?
+    veltype = UInt64
+    vtype = SIMD.Vec{8,veltype}
+
+    if mod(sizeof(E), sizeof(vtype)) != 0
+        error("Can only copy Euclidean points that are a multiple of 512 Bytes!")
+    end
+
+    # Now, generate the load and store instructions.
+    num_instructions = div(sizeof(E), sizeof(vtype))
+    syms = [Symbol("x$i") for i in 1:num_instructions]
+    loads = map(1:num_instructions) do i
+        # 3rd argument to `SIMD.vload` is `Val(true)` to imply an aligned load.
+        :($(syms[i]) = SIMD.vload($vtype, _src + $(sizeof(vtype)) * $(i-1), nothing, Val(true)))
+    end
+    stores = map(1:num_instructions) do i
+        # 3rd argument to `SIMD.vstore` is `Val(true)` to imply an aligned store.
+        :(SIMD.vstore($(syms[i]), _dst + $(sizeof(vtype)) * $(i-1), nothing, Val(true)))
+    end
+
+    return quote
+        _src = convert(Ptr{$veltype}, src)
+        _dst = convert(Ptr{$veltype}, dst)
+        $(loads...)
+        $(stores...)
+        return nothing
+    end
+end

@@ -1,10 +1,10 @@
 @testset "Testing SemiAtomicQueue" begin
-    navailable = GraphANN.Queue.navailable
-    consume! = GraphANN.Queue.consume!
-    commit! = GraphANN.Queue.commit!
+    navailable = GraphANN._Prefetcher.Queue.navailable
+    consume! = GraphANN._Prefetcher.Queue.consume!
+    commit! = GraphANN._Prefetcher.Queue.commit!
 
     # Small buffer
-    queue = GraphANN.SemiAtomicQueue{Int}(5)
+    queue = GraphANN._Prefetcher.SemiAtomicQueue{Int}(5)
     @test navailable(queue) == 0
     push!(queue, 1)
     push!(queue, 2)

@@ -1,9 +1,3 @@
-module Atomics
-
-# Marked as unsafe because there's no guarentee that the pointer passed to these
-# functions is valid.
-export unsafe_atomic_cas!, unsafe_atomic_or!, unsafe_atomic_nand!
-
 # Normal Julia uses a mutable Atomic type to perform atomic operations.
 # For the prefetch tracker, we want potentially billions of atomically modifiable objects,
 # so an allocation for each will just not do.
@@ -40,7 +34,7 @@ for typ in inttypes
             """,
             $typ,
             Tuple{Ptr{$typ}, $typ, $typ},
-            x, cmp, new,
+            ptr, cmp, new,
         )
     end
 
@@ -52,7 +46,7 @@ for typ in inttypes
             """,
             $typ,
             Tuple{Ptr{$typ}, $typ},
-            x, v
+            ptr, v
         )
     end
 
@@ -64,10 +58,7 @@ for typ in inttypes
             """,
             $typ,
             Tuple{Ptr{$typ}, $typ},
-            x, v
+            ptr, v
         )
     end
 end
-
-end # module
-

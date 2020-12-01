@@ -15,23 +15,23 @@ const dataset_path = joinpath(datadir, "siftsmall_base.fvecs")
 const query_path = joinpath(datadir, "siftsmall_query.fvecs")
 const groundtruth_path = joinpath(datadir, "siftsmall_groundtruth.ivecs")
 
-#include("utils.jl")
-#include("spans.jl")
-#include("pm.jl")
-#include("bruteforce.jl")
-#include("points/euclidean.jl")
-#include("graphs/adjacency.jl")
-#include("graphs/graphs.jl")
-#include("test_minmax_heap.jl")
+include("utils.jl")
+include("spans.jl")
+include("pm.jl")
+include("bruteforce.jl")
+include("points/euclidean.jl")
+include("graphs/adjacency.jl")
+include("graphs/graphs.jl")
+include("test_minmax_heap.jl")
 include("query/telemetry.jl")
-# include("query/greedy.jl")
-#
-# # Prefetch machinery
-# include("prefetch/queue.jl")
-#
-# # Index building
-# include("index/index.jl")
-#
-# # Loades
-# include("io/vecs.jl")
+include("query/greedy.jl")
+
+# Prefetch machinery
+include("prefetch/queue.jl")
+
+# Index building
+include("index/index.jl")
+
+# Loades
+include("io/vecs.jl")
 
