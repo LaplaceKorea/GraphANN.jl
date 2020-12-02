@@ -116,8 +116,21 @@ gt = GraphANN.bruteforce_search(queries, dataset, 100; groupsize = 64, savefile 
 GraphANN.save_vecs("another_groundtruth.ivecs", gt)
 ```
 
-
 ## Next Steps
+
+1. Measure Bandwidth - are we bandwidth limited?
+2. Ways of improving accuracy or performance.
+    - Do something else while waiting for data?
+    - Gather data more quickly.
+
+3. Measure accuracy after only a single round of pruning.
+
+4. Put documentation on graph serialization format ... actually with the serialized graphs.
+(and probably in the git repo as well)
+
+5. Measure exploration vs direct path when navigating to nearest neighbor (vague, but have general idea).
+
+----
 
 1. Prefetcher
 2. Index for Deep1B         [low-med (do later)]
@@ -129,3 +142,5 @@ GraphANN.save_vecs("another_groundtruth.ivecs", gt)
         2. Degree of constructed graph - effects on query
 
     - Use Sift50M as a testbed
+
+

@@ -73,6 +73,7 @@ Base.@propagate_inbounds function consume!(
     v::AbstractVector{T},
     start::Integer,
     queue::SAQ{T},
+    takemax = nothing,
 ) where {T}
     tail = unsafe_get(queue.tail)
     head = unsafe_get(queue.head)
@@ -84,6 +85,7 @@ Base.@propagate_inbounds function consume!(
         tail = (tail == length(buffer)) ? 1 : (tail + 1)
         v[start + count] = buffer[tail]
         count += 1
+        count === takemax && break
     end
 
     # Update tail pointer

@@ -22,7 +22,7 @@ function Base.get(A::IndirectionTable{T}, i::Integer) where {T}
 end
 
 # Add a specialization point.
-loadhook(ptr::Ptr) = unsafe_load(ptr)
+@inline loadhook(ptr::Ptr) = unsafe_load(ptr)
 Base.getindex(A::IndirectionTable, i::Integer) = loadhook(get(A, i))
 
 function Base.trylock(A::IndirectionTable, i::Integer)

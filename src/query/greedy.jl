@@ -79,6 +79,7 @@ visited!(greedy::GreedySearch, vertex) = push!(greedy.visited, getid(vertex))
 getvisited(greedy::GreedySearch) = greedy.visited
 
 # Get the closest non-visited vertex
+unsafe_peek(greedy::GreedySearch) = @inbounds greedy.best_unvisited.valtree[1]
 getcandidate!(greedy::GreedySearch) = popmin!(greedy.best_unvisited)
 
 isfull(greedy::GreedySearch) = length(greedy) >= greedy.search_list_size
@@ -140,7 +141,7 @@ function search(
 
     pushcandidate!(algo, Neighbor(start_node, distance(query, data[start_node])))
     while !done(algo)
-        p = getid(getcandidate!(algo))
+        p = getid(unsafe_peek(algo))
         neighbors = LightGraphs.outneighbors(graph, p)
 
         # Prefetch all new datapoints.
@@ -148,6 +149,12 @@ function search(
         for vertex in neighbors
             @inbounds prefetch(data, vertex)
         end
+
+        # Prune
+        # Do this here to allow the prefetched vectors time to arrive in the cache.
+        # This is also pretty important for performance.
+        getcandidate!(algo)
+        reduce!(algo)
 
         # Distance computations
         for i in eachindex(neighbors)
@@ -157,19 +164,16 @@ function search(
             @inbounds v = neighbors[i]
             @inbounds d = distance(query, data[v])
 
-            # -- optional telemetry
-            ifhasa(telemetry(algo), DistanceCount) do x
-                x.count += 1
-            end
-
             ## only bother to add if it's better than the worst currently tracked.
             if d < maximum(algo).distance || !isfull(algo)
                 pushcandidate!(algo, Neighbor(v, d))
             end
         end
 
-        # prune
-        reduce!(algo)
+        # -- optional telemetry
+        ifhasa(telemetry(algo), DistanceCount) do x
+            x.count += length(neighbors)
+        end
     end
 
     # -- optional telemetry
