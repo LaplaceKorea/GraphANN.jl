@@ -67,6 +67,7 @@ Base.iterate(set::RobinSet, s) = iterate(keys(set.dict), s)
 # Find the medioid of a dataset
 raw(x::Union{<:AbstractVector,<:Tuple}) = x
 zeroas(::Type{T}, x::Number) where {T} = zero(T)
+
 function medioid(data::Vector{T}) where {T}
     # Thread to make fast for larger datasets.
     tls = ThreadLocal(zeroas(Float32, T))

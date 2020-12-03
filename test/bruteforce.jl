@@ -21,5 +21,18 @@
     rank_swap = CartesianIndex(1,0)
     for (a, b) in Iterators.partition(mismatches, 2)
         @test b - a == rank_swap
+
+        # Test that the calculated distances are also the same.
+        _, acol = Tuple(a)
+        query = queries[acol]
+
+        # Need to add 1 to convert from the 0-based indexing to Julia's 1-based indexing.
+        @test ==(
+            GraphANN.distance(query, dataset[ids[a] + 1]),
+            GraphANN.distance(query, dataset[ids[b] + 1]),
+        )
+
+        @test ids[a] == gt[b]
+        @test gt[b] == ids[a]
     end
 end
