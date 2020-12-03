@@ -1,23 +1,33 @@
 #####
-##### Bounded Heap
+##### Bounded Max Heap
 #####
 
-struct BoundedHeap{H}
+struct BoundedMaxHeap{H}
     heap::H
     bound::Int
 end
 
-function BoundedHeap{T}(bound::Int) where {T}
-    return BoundedHeap(
+function BoundedMaxHeap{T}(bound::Int) where {T}
+    return BoundedMaxHeap(
         DataStructures.BinaryMaxHeap{T}(),
         bound,
     )
 end
 
-function Base.push!(H::BoundedHeap, i)
+"""
+    push!(H::BoundedMaxHeap, i)
+
+Add `i` to `H` if (1) `H` is not full or (2) `i` is less than maximal element in `H`.
+After calling `push!`, the length of `H` will be less than or equal to its established
+bound.
+"""
+function Base.push!(H::BoundedMaxHeap, i)
     if (length(H.heap) < H.bound || i < first(H.heap))
         push!(H.heap, i)
-        if length(H.heap) > H.bound
+
+        # Wrap in a "while" loop to handle the case where extra things got added somehow.
+        # (i.e., someone used this type incorrectly)
+        while length(H.heap) > H.bound
             pop!(H.heap)
         end
     end
@@ -60,12 +70,14 @@ function bruteforce_search(
 ) where {T}
     # Allocate max heaps for each
     # One for each column in the queries matrix
-    _heaps = [BoundedHeap{Neighbor}(num_neighbors) for _ in 1:groupsize]
+    _heaps = [BoundedMaxHeap{Neighbor}(num_neighbors) for _ in 1:groupsize]
     tls = ThreadLocal(_heaps)
 
     num_queries = length(queries)
     meter = ProgressMeter.Progress(num_queries, 1)
 
+    # Pre-allocate ground-truth array
+    # TODO: Parameterize integer type?
     gt = Array{UInt32,2}(undef, num_neighbors, num_queries)
 
     # Batch the query range so each thread works on a chunk of queries at a time.
@@ -73,6 +85,8 @@ function bruteforce_search(
     batched_iter = BatchedRange(1:num_queries, groupsize)
     dynamic_thread(batched_iter) do range
         heaps = tls[]
+
+        # Compute nearest neighbors for this batch across the whole dataset.
         for (base_id, base) in enumerate(dataset)
             for (heap_num, query_id) in enumerate(range)
                 query = queries[query_id]

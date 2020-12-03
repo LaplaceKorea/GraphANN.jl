@@ -1,37 +1,5 @@
 # DiskANN compatible loaders
-#
-# TODO: Think about padding to cache line sizes if needed.
 struct DiskANNLoader end
-
-#####
-##### Data Loader
-#####
-
-function load_data(::Type{T}, loader::DiskANNLoader, path::AbstractString) where {T}
-    return open(path; read = true) do io
-        load_data(T, loader, io)
-    end
-end
-
-function load_data(::Type{T}, loader::DiskANNLoader, io::IO) where {T}
-    num_points = read(io, Int32)
-    dim = read(io, Int32)
-    # Specialze loader on dimension of the data
-    #
-    # NB. For some reason, we actually need an *instance* of the decoding type, rather
-    # than just the type.
-    #
-    # For some reason, if we just pass the type `Euclidean{dim,T}`, it doesn't get treated
-    # as an `isbitstype` and the inner function explodes.
-    return _load_data(Euclidean{dim,T}(), loader, io, num_points)
-end
-
-@noinline function _load_data(::E, ::DiskANNLoader, io::IO, num_points) where {E}
-    @assert isbitstype(E)
-    dest = Vector{E}(undef, num_points)
-    read!(io, dest)
-    return dest
-end
 
 #####
 ##### Graph Loader

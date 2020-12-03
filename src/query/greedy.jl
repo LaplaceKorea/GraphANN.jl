@@ -136,9 +136,7 @@ function search(
     empty!(algo)
 
     # Destructure argument
-    graph = meta.graph
-    data = meta.data
-
+    @unpack graph, data = meta
     pushcandidate!(algo, Neighbor(start_node, distance(query, data[start_node])))
     while !done(algo)
         p = getid(unsafe_peek(algo))
@@ -152,7 +150,6 @@ function search(
 
         # Prune
         # Do this here to allow the prefetched vectors time to arrive in the cache.
-        # This is also pretty important for performance.
         getcandidate!(algo)
         reduce!(algo)
 
@@ -165,7 +162,7 @@ function search(
             @inbounds d = distance(query, data[v])
 
             ## only bother to add if it's better than the worst currently tracked.
-            if d < maximum(algo).distance || !isfull(algo)
+            if d < getdistance(maximum(algo)) || !isfull(algo)
                 pushcandidate!(algo, Neighbor(v, d))
             end
         end
@@ -205,9 +202,9 @@ function searchall(
 
         # Copy over the results to the destination
         results = destructive_extract!(algo.best)
-        dest_view = view(dest, :, col)
-        result_view = view(results, 1:num_neighbors)
-        dest_view .= getid.(result_view)
+        for i in 1:num_neighbors
+            @inbounds dest[i,col] = getid(results[i])
+        end
 
         # -- optional telemetry
         # How long did the round trip take?
@@ -247,9 +244,9 @@ function searchall(
 
             # Copy over the results to the destination
             results = destructive_extract!(algo.best)
-            dest_view = view(dest, :, col)
-            result_view = view(results, 1:num_neighbors)
-            dest_view .= getid.(result_view)
+            for i in 1:num_neighbors
+                @inbounds dest[i,col] = getid(results[i])
+            end
 
             # -- optional telemetry
             # How long did the round trip take?

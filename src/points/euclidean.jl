@@ -46,6 +46,8 @@ function distance(a::E, b::E) where {N, T, E <: Euclidean{N,T}}
     return s
 end
 
+# Generic fallback for computing distance between to similar-sized Euclidean points with
+# a different numeric type.
 function distance(a::A, b::B) where {N, TA, TB, A <: Euclidean{N, TA}, B <: Euclidean{N, TB}}
     T = promote_type(TA, TB)
     s = zero(T)
@@ -84,12 +86,6 @@ vecsize(::Type{Euclidean}, ::Type{UInt8}) = 32
 # Overload vecs loading functions
 vecs_read_type(::Type{Euclidean{N,T}}) where {N,T} = T
 
-# function vecs_convert(::Type{Euclidean{N,T}}, buf::Vector{T}) where {N,T}
-#     @assert mod(N, vecsize(Euclidean, T)) == 0
-#     @assert length(buf) == N
-#     return first(reinterpret(Euclidean{N,T}, buf))
-# end
-
 function addto!(v::Vector{Euclidean{N,T}}, index, buf::AbstractVector{T}) where {N,T}
     length(buf) == N || error("Lenght of buffer is incorrect!")
     v[index] = Euclidean{N,T}(ntuple(i -> buf[i], Val(N)))
@@ -103,7 +99,8 @@ vecs_reshape(::Type{<:Euclidean}, v, dim) = v
 #####
 
 # Turn a `Euclidean{N,UInt8}` into a tuple of `Vec{32,UInt8}`.
-# Ideally, the generated code for this should be a no-op
+# Ideally, the generated code for this should be a no-op, it's just awkward because
+# Julia doesn't really have a "bitcast" function ...
 @generated function deconstruct(x::Euclidean{N, UInt8}) where {N}
     s = vecsize(Euclidean, UInt8)
     @assert mod(N, s) == 0
@@ -125,9 +122,11 @@ function _distance(a::T, b::T) where {N, T <: NTuple{N, SIMD.Vec{32, UInt8}}}
     Base.@_inline_meta
     s = zero(SIMD.Vec{16,Int32})
     for i in 1:N
+        # 256-bits -> 512 bits
         x = convert(SIMD.Vec{32, Int16}, a[i])
         y = convert(SIMD.Vec{32, Int16}, b[i])
 
+        # Subtract than squared-reduction-sum
         z = x - y
         s = vnni_accumulate(s, z, z)
     end
@@ -172,6 +171,15 @@ end
 ##### Fast pointer loads and stores
 #####
 
+# Julia pessimizes direct pointer loads and stores by not assuming proper data type
+# alignment.
+#
+# Here, we manually assume alignment.
+#
+# N.B. This has the potential to cause problems with small arrays because Julia doesn't
+# do a great job ensuring that small arrays are aligned to cache-line boundaries.
+#
+# However, for even modestly sized arrays, this alignment works.
 @generated function fast_copyto!(dst::Ptr{E}, src::Ptr{E}) where {N,T, E <: Euclidean{N,T}}
     # How many AVX loads and stores are we going to need?
     veltype = UInt64
@@ -184,12 +192,16 @@ end
     # Now, generate the load and store instructions.
     num_instructions = div(sizeof(E), sizeof(vtype))
     syms = [Symbol("x$i") for i in 1:num_instructions]
+
     loads = map(1:num_instructions) do i
-        # 3rd argument to `SIMD.vload` is `Val(true)` to imply an aligned load.
+        # 3rd argument to `SIMD.vload` is a mask. Pass `nothing` to imply no masks.
+        # 4th argument to `SIMD.vload` is `Val(true)` to imply an aligned load.
         :($(syms[i]) = SIMD.vload($vtype, _src + $(sizeof(vtype)) * $(i-1), nothing, Val(true)))
     end
+
     stores = map(1:num_instructions) do i
-        # 3rd argument to `SIMD.vstore` is `Val(true)` to imply an aligned store.
+        # 3rd argument to `SIMD.vstore` is a mask. Pass `nothing` to imply no masks.
+        # 4th argument to `SIMD.vstore` is `Val(true)` to imply an aligned store.
         :(SIMD.vstore($(syms[i]), _dst + $(sizeof(vtype)) * $(i-1), nothing, Val(true)))
     end
 

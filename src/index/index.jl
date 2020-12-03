@@ -349,7 +349,6 @@ function generate_index(
     data,
     parameters::GraphParameters;
     batchsize = 1000,
-    tls_monitor = _ -> nothing,
     allocator = stdallocator,
     graph_type = DefaultAdjacencyList{UInt32},
 )
@@ -392,8 +391,7 @@ function generate_index(
             tls,
             locks,
             needs_pruning,
-            batchsize;
-            tls_monitor = tls_monitor,
+            batchsize,
         )
     end
 
@@ -406,9 +404,7 @@ end
     tls::ThreadLocal,
     locks::AbstractVector,
     needs_pruning::Vector{Bool},
-    batchsize::Integer;
-    # Optional monitors on thread local storage
-    tls_monitor = _ -> nothing,
+    batchsize::Integer,
 )
     @unpack graph, data = meta
     @unpack alpha, target_degree = parameters
@@ -445,9 +441,6 @@ end
         end
 
         # Update the graph.
-        # We also have the option of recording metrics about the state of the thread local
-        # storage to help appropriately size preallocation.
-        tls_monitor(tls)
         synctime = @elapsed commit!(
             meta,
             parameters,
@@ -456,55 +449,11 @@ end
             tls,
         )
 
-        tls_monitor(tls)
         ProgressMeter.next!(
             progress_meter;
             showvalues = ((:iter_time, itertime), (:sync_time, synctime)),
         )
     end
     return graph
-end
-
-#####
-##### Get the size of TLS structures
-#####
-
-struct TLSMonitor
-    record::Dict{Symbol,Int}
-    samplerate::Float64
-end
-
-function TLSMonitor(samplerate = 0.01)
-    record = Dict(
-        :pruner_length => 0,
-        :nextlist_length => 0,
-        :max_buffer_size => 0,
-    )
-    return TLSMonitor(record, samplerate)
-end
-
-function (monitor::TLSMonitor)(tls::ThreadLocal)
-    # Only kick in rarely.
-    rand() > monitor.samplerate && return nothing
-    record = monitor.record
-
-    @unpack pruner_length, nextlist_length, max_buffer_size = record
-
-    for storage in getall(tls)
-        pruner_length = max(pruner_length, length(storage.pruner))
-
-        nextlists = storage.nextlists
-        nextlist_length = max(
-            nextlist_length,
-            length(nextlists.buffers) + length(nextlists.nextlists)
-        )
-
-        a = safe_maximum(length, nextlists.buffers)
-        b = safe_maximum(length, values(nextlists.nextlists))
-        max_buffer_size = max(max_buffer_size, a, b)
-    end
-
-    @pack! record = pruner_length, nextlist_length, max_buffer_size
-    return nothing
 end
 

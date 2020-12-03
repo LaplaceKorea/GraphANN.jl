@@ -66,7 +66,9 @@ Base.iterate(set::RobinSet, s) = iterate(keys(set.dict), s)
 
 # Find the medioid of a dataset
 raw(x::Union{<:AbstractVector,<:Tuple}) = x
+zeroas(::Type{T}, x::Number) = zero(T)
 function medioid(data::Vector{T}) where {T}
+    # Thread to make fast for larger datasets.
     tls = ThreadLocal(zeroas(Float32, T))
     dynamic_thread(data, 1024) do i
         tls[] += i
@@ -80,16 +82,23 @@ end
 #####
 
 function nearest_neighbor(query::T, data::AbstractVector) where {T}
+    # Thread local storage is a NamedTuple with the following fields:
+    # `min_ind` - The index of the nearest neighbor seen by this thread so far.
+    # `min_dist` - The distance corresponding to the current nearest neighbor.
     tls = ThreadLocal((min_ind = 0, min_dist = typemax(eltype(query))))
+
     dynamic_thread(1:length(data), 128) do i
         @inbounds x = data[i]
         @unpack min_ind, min_dist = tls[]
         dist = distance(query, x)
+
+        # Update Thread Local Storage is closer
         if dist < min_dist
             tls[] = (min_ind = i, min_dist = dist)
         end
     end
 
+    # Find the nearest neighbor across all threads.
     candidates = getall(tls)
     _, i = findmin([x.min_dist for x in candidates])
     return candidates[i]
@@ -109,6 +118,8 @@ function recall(groundtruth::AbstractVector, results::AbstractVector)
     return count / length(groundtruth)
 end
 
+# Convenience function if we have more ground-truth vectors than results.
+# Truncates `groundtruth` to have as many neighbors as `results`.
 function recall(groundtruth::AbstractMatrix, results::AbstractMatrix)
     @assert size(groundtruth, 1) >= size(results, 1)
     @assert size(groundtruth, 2) == size(results, 2)

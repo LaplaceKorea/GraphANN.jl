@@ -26,7 +26,7 @@ function ThreadLocal(values::T) where {T}
 end
 
 Base.getindex(t::ThreadLocal) = t.values[Threads.threadid()]
-Base.setindex!(t::ThreadLocal, v) = t.values[Threads.threadid()] = v
+Base.setindex!(t::ThreadLocal, v) = (t.values[Threads.threadid()] = v)
 getall(t::ThreadLocal) = t.values
 
 allthreads() = 1:Threads.nthreads()

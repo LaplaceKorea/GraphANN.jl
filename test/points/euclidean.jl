@@ -25,14 +25,14 @@ end
 
     # Lets do some distance calculations
     scale = 100
-    for i in 1:10000
+    for i in 1:50000
         a = GraphANN.Euclidean(ntuple(_ -> scale * randn(Float32), 128))
         b = GraphANN.Euclidean(ntuple(_ -> scale * randn(Float32), 128))
 
         @test isapprox(GraphANN.distance(a, b), euclidean_reference(raw(a), raw(b)))
     end
 
-    for i in 1:10000
+    for i in 1:50000
         a = GraphANN.Euclidean(ntuple(_ -> rand(UInt8), 128))
         b = GraphANN.Euclidean(ntuple(_ -> rand(UInt8), 128))
 

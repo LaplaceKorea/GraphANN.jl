@@ -7,12 +7,14 @@ const NUM_SAVED_BITS = 1
 const POINTER_MASK = (one(UInt64) << NUM_SAVED_BITS) - one(UInt64)
 
 struct IndirectionTable{T}
+    # Keep a reference to the wrapped base datastructure to keep it from getting GC'd.
+    base::Vector{T}
     pointers::Vector{UInt64}
 end
 
 # Construct an indirection table wrapping a vector.
 function wrapvector(v::Vector{T}) where {T}
-    return IndirectionTable{T}([pointer(v, i) for i in eachindex(v)])
+    return IndirectionTable{T}(v, [pointer(v, i) for i in eachindex(v)])
 end
 
 Base.pointer(A::IndirectionTable, i) = pointer(A.pointers, i)
@@ -43,4 +45,12 @@ function Base.unlock(A::IndirectionTable, i::Integer)
     unsafe_atomic_nand!(pointer(A, i), POINTER_MASK)
     return nothing
 end
+
+# Don't make the following two functions atomic.
+# Require memory fence after all sets/resets are complete.
+function set!(A::IndirectionTable{T}, ptr::Ptr{T}, i) where {T}
+    A.pointers[i] = UInt64(ptr) | POINTER_MASK
+end
+
+reset!(A::IndirectionTable, i) = (A.pointers[i] = pointer(A.v, i))
 

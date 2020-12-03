@@ -21,11 +21,10 @@ const INDEX_BALANCE_FACTOR = 64
 const ENABLE_THREADING = true
 
 # Includes
-include("utils.jl")
 include("threading.jl")
+include("utils.jl")
 include("spans.jl"); import .Spans: Span
 include("pm.jl"); import .PM: pmmap
-include("splitvector.jl"); import .SplitVectors: SplitVector
 include("bruteforce.jl")
 
 # Data representation
@@ -41,6 +40,9 @@ include("prefetch/prefetch.jl")
 # Data loaders for various formats.
 include("io/io.jl")
 
+#####
+##### Allocators
+#####
 
 # Allocator convenience functions
 stdallocator(::Type{T}, dims...) where {T} = Array{T}(undef, dims...)
@@ -79,36 +81,6 @@ function _prepare(path = siftsmall(); allocator = stdallocator, maxlines = nothi
         dataset,
         parameters,
     )
-end
-
-function sweep(
-    meta::MetaGraph,
-    start_node,
-    queries::AbstractVector;
-    num_neighbors = 1,
-    buf_range = 10:5:120,
-)
-    all_times = []
-    all_ids = []
-
-    for window_size in buf_range
-        @show window_size
-        algo = GreedySearch(window_size)
-
-        # One warm up run to allocate data structures.
-        searchall(algo, meta, start_node, queries; num_neighbors = num_neighbors)
-
-        ids, times = searchall(
-            algo,
-            meta,
-            start_node,
-            queries;
-            num_neighbors = num_neighbors
-        )
-        push!(all_times, times)
-        push!(all_ids, ids)
-    end
-    return all_ids, all_times
 end
 
 end # module

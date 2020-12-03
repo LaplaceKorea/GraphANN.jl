@@ -61,6 +61,8 @@ Base.IndexStyle(::Type{<:Span}) = Base.IndexLinear()
 #
 # The result should contain unrolled loops if the loading and storing code is working
 # corretly.
+#
+# It should be noted that this test is currently broken :(
 broadcast_add(a, b) = a .+ b
 
 end
