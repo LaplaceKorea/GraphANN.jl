@@ -54,4 +54,22 @@ function acquire!(x::Staging{T}, dest::Vector{T}, num::Integer) where {T}
     return nothing
 end
 
+#####
+##### Prefetcher
+#####
+
+struct Prefetcher{T, U <: Unsigned, S <: Staging}
+    # Local DRAM cache
+    cache::Vector{T}
+    # Position-wise correlation between ids in the local cache and global ids.
+    # Use a sentinal value of 0 to indicate that a slot is not filled.
+    ids::Vector{U}
+    # Staging area where we get work items from.
+    staging::S
+
+    # -- pre-allocated temporary data-structures.
+    prefetch_worklist::Vector{U}
+    free_worklist::Vector{U}
+end
+
 end # module

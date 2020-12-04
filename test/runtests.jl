@@ -22,7 +22,6 @@ const groundtruth_path = joinpath(datadir, "siftsmall_groundtruth.ivecs")
 # R = 20
 # L = 20
 # α = 1.2
-#const diskann_index = joinpath(datadir, "siftsmall_base_70_75_1.2.index")
 const diskann_index = joinpath(datadir, "siftsmall_base_20_20_1.2.index")
 const diskann_query_ids = joinpath(datadir, "diskann_query_ids.jls")
 
@@ -34,7 +33,7 @@ include("points/euclidean.jl")
 include("graphs/adjacency.jl")
 include("graphs/graphs.jl")
 include("test_minmax_heap.jl")
-include("query/telemetry.jl")
+include("telemetry.jl")
 include("query/greedy.jl")
 
 # Query (comparison with DiskANN)

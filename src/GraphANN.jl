@@ -26,12 +26,13 @@ include("utils.jl")
 include("spans.jl"); import .Spans: Span
 include("pm.jl"); import .PM: pmmap
 include("bruteforce.jl")
+include("telemetry.jl"); import ._Telemetry: Telemetry, ifhasa
 
 # Data representation
 include("points/euclidean.jl")
 
 include("graphs/graphs.jl")
-include("query/query.jl")
+include("query/greedy.jl")
 include("index/index.jl")
 
 # Prefetcher to increase performance

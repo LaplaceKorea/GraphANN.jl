@@ -2,32 +2,36 @@
 ##### GreedySearch
 #####
 
-## Telemetry Types for GreedySearch
+"""
+    GreedyCallbacks
 
-# Count number of distance computations
-mutable struct DistanceCount
-    count::Int
-end
-DistanceCount() = DistanceCount(0)
-reset!(x::DistanceCount) = (x.count = 0)
+Keyword defined struct - called at different points during query execution.
+Allows for arbitrary telemetry to be defined.
 
-# Count number of unique vertices
-mutable struct VerticesSeen
-    count::Int
-end
-VerticesSeen() = VerticesSeen(0)
-reset!(x::VerticesSeen) = (x.count = 0)
+Fields and Signatures
+---------------------
 
-mutable struct Latencies
-    start::Int
-    latencies::Vector{Int}
+* `prequery` - Called before a single query is executed. Must take no arguments.
+    Does not automatically differentiate between multithreaded and singlethreaded cases.
+
+* `postquery` - Called after a single query is executed. Must take no arguments.
+    Does not automatically differentiate between multithreaded and singlethreaded cases.
+
+* `postdistance` - Called after distance computations for a vertex have been completed.
+    Signature: `postdistance(algo::GreedySearch, neighbors::AbstractVector)`.
+    - `algo` provides the current state of the search.
+    - `neighbors` the adjacency list for the vertex that was just processed.
+        *NOTE*: Do NOT mutate neighbors, it MUST be constant.
+"""
+Base.@kwdef struct GreedyCallbacks{A, B, C}
+    prequery::A = donothing
+    postquery::B = donothing
+    postdistance::C = donothing
 end
-Latencies() = Latencies(0, Int[])
-reset!(x::Latencies) = empty!(x.latencies)
 
 # Use the `GreedySearch` type to hold parameters and intermediate datastructures
 # used to control the greedy search.
-mutable struct GreedySearch{T <: AbstractSet, U <: Telemetry}
+mutable struct GreedySearch{T <: AbstractSet}
     search_list_size::Int
 
     # Pre-allocated buffer for the search list
@@ -43,17 +47,9 @@ mutable struct GreedySearch{T <: AbstractSet, U <: Telemetry}
     best::BinaryMinMaxHeap{Neighbor}
     best_unvisited::BinaryMinMaxHeap{Neighbor}
     visited::T
-    telemetry::U
 end
 
-# Get the telemetry
-telemetry(x::GreedySearch) = x.telemetry
-
-# TODO: Make @generated to ensure constant propagation
-reset!(x::Telemetry) = reset!.(Tuple(x.val))
-
-# The default struct
-function GreedySearch(search_list_size; kw...)
+function GreedySearch(search_list_size)
     best = BinaryMinMaxHeap{Neighbor}()
     best_unvisited = BinaryMinMaxHeap{Neighbor}()
     visited = RobinSet{UInt32}()
@@ -62,7 +58,6 @@ function GreedySearch(search_list_size; kw...)
         best,
         best_unvisited,
         visited,
-        Telemetry(; kw...)
     )
 end
 
@@ -132,6 +127,7 @@ function search(
     meta::MetaGraph,
     start_node,
     query,
+    callbacks = GreedyCallbacks(),
 )
     empty!(algo)
 
@@ -167,15 +163,7 @@ function search(
             end
         end
 
-        # -- optional telemetry
-        ifhasa(telemetry(algo), DistanceCount) do x
-            x.count += length(neighbors)
-        end
-    end
-
-    # -- optional telemetry
-    ifhasa(telemetry(algo), VerticesSeen) do x
-        x.count += length(algo.visited)
+        callbacks.postdistance(algo, neighbors)
     end
 
     return nothing
@@ -187,18 +175,16 @@ function searchall(
     meta_graph::MetaGraph,
     start_node,
     queries::AbstractVector;
-    num_neighbors = 10
+    num_neighbors = 10,
+    callbacks = GreedyCallbacks(),
 )
-    reset!(telemetry(algo))
     num_queries = length(queries)
     dest = Array{eltype(meta_graph.graph),2}(undef, num_neighbors, num_queries)
     for (col, query) in enumerate(queries)
         # -- optional telemetry
-        ifhasa(telemetry(algo), Latencies) do x
-            x.start = time_ns()
-        end
+        callbacks.prequery()
 
-        search(algo, meta_graph, start_node, query)
+        search(algo, meta_graph, start_node, query, callbacks)
 
         # Copy over the results to the destination
         results = destructive_extract!(algo.best)
@@ -207,10 +193,7 @@ function searchall(
         end
 
         # -- optional telemetry
-        # How long did the round trip take?
-        ifhasa(telemetry(algo), Latencies) do x
-            push!(x.latencies, time_ns() - x.start)
-        end
+        callbacks.postquery()
     end
     return dest
 end
@@ -221,12 +204,9 @@ function searchall(
     meta::MetaGraph,
     start_node,
     queries::AbstractVector;
-    num_neighbors = 10
+    num_neighbors = 10,
+    callbacks = GreedyCallbacks(),
 )
-    for algo in getall(tls)
-        reset!(telemetry(algo))
-    end
-
     num_queries = length(queries)
     dest = Array{eltype(meta.graph),2}(undef, num_neighbors, num_queries)
 
@@ -236,11 +216,9 @@ function searchall(
             algo = tls[]
 
             # -- optional telemetry
-            ifhasa(telemetry(algo), Latencies) do x
-                x.start = time_ns()
-            end
+            callbacks.prequery()
 
-            search(algo, meta, start_node, query)
+            search(algo, meta, start_node, query, callbacks)
 
             # Copy over the results to the destination
             results = destructive_extract!(algo.best)
@@ -249,10 +227,7 @@ function searchall(
             end
 
             # -- optional telemetry
-            # How long did the round trip take?
-            ifhasa(telemetry(algo), Latencies) do x
-                push!(x.latencies, time_ns() - x.start)
-            end
+            callbacks.postquery()
         end
     end
 
