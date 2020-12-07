@@ -44,3 +44,25 @@ function load_graph(::DiskANNLoader, io::IO, max_vertices; verbose = true)
     verbose && println()
     return graph
 end
+
+
+function save_graph(loader::DiskANNLoader, path::AbstractString, meta::MetaGraph)
+    return open(path; write = true) do io
+        save_graph(loader, io, meta)
+    end
+end
+
+function save_graph(::DiskANNLoader, io::IO, meta::MetaGraph)
+    @unpack graph, data = meta
+
+    write(io, UInt64(LightGraphs.nv(graph)))
+    write(io, Cuint(maximum(LightGraphs.outdegree(graph))))
+    write(io, Cuint(medioid(data) - 1))
+    for v in LightGraphs.vertices(graph)
+        neighbors = LightGraphs.outneighbors(graph, v)j
+        write(io, Cuint(length(neighbors)))
+        for u in neighbors
+            write(io, Cuint(u-1))
+        end
+    end
+end

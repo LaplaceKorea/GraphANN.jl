@@ -245,3 +245,13 @@ function latency_callbacks()
     return times, GreedyCallbacks(; prequery, postquery)
 end
 
+function latency_mt_callback()
+    times = ThreadLocal(UInt64[])
+    prequery = () -> push!(times[], time_ns())
+    postquery = () -> begin
+        _times = times[]
+        _times[end] = time_ns() - times[end]
+    end
+    return times, GreedyCallbacks(; prequery, postquery)
+end
+
