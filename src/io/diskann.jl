@@ -19,7 +19,7 @@ function load_graph(::DiskANNLoader, io::IO, max_vertices; verbose = true)
 
     # Use a buffer to temporarily store edge information.
     buffer = UInt32[]
-    graph = LightGraphs.SimpleDiGraph{UInt32}(max_vertices)
+    graph = UniDirectedGraph{UInt32}(max_vertices)
 
     verbose && print("Loading Graph")
 

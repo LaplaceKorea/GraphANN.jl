@@ -234,3 +234,14 @@ function searchall(
     return dest
 end
 
+#####
+##### Callback Implementations
+#####
+
+function latency_callbacks()
+    times = UInt64[]
+    prequery = () -> push!(times, time_ns())
+    postquery = () -> times[end] = time_ns() - times[end]
+    return times, GreedyCallbacks(; prequery, postquery)
+end
+

@@ -27,9 +27,7 @@
 # Anyways, this pre-allocates all memory needed and avoids the potential reallocation
 # penalty, at the cost of flexibility.
 
-# Define the interface
 abstract type AbstractAdjacencyList{T <: Integer} end
-caninsert(x::T) where {T <: AbstractAdjacencyList} = caninsert(T)
 
 #####
 ##### Default implementation

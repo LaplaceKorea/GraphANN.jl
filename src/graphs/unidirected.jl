@@ -25,7 +25,7 @@ struct UniDirectedGraph{
 end
 
 function UniDirectedGraph{T}(n::Integer = 0) where {T}
-    fadj = DefaultAdjacencyList([T[] for _ in 1:n])
+    fadj = DefaultAdjacencyList{T}([T[] for _ in 1:n])
     return UniDirectedGraph{T}(fadj)
 end
 UniDirectedGraph(n::Integer = 0) = UniDirectedGraph{Int}(n)
