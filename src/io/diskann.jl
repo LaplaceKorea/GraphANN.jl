@@ -55,11 +55,17 @@ end
 function save_graph(::DiskANNLoader, io::IO, meta::MetaGraph)
     @unpack graph, data = meta
 
-    write(io, UInt64(LightGraphs.nv(graph)))
+    # Compute how large the file will be when it's created.
+    filesize = sizeof(UInt64) +
+        2 * sizeof(Cuint) +
+        LightGraphs.nv(graph) * sizeof(Cuint) +
+        LightGraphs.ne(graph) * sizeof(Cuint)
+
+    write(io, UInt64(filesize))
     write(io, Cuint(maximum(LightGraphs.outdegree(graph))))
     write(io, Cuint(medioid(data) - 1))
     for v in LightGraphs.vertices(graph)
-        neighbors = LightGraphs.outneighbors(graph, v)j
+        neighbors = LightGraphs.outneighbors(graph, v)
         write(io, Cuint(length(neighbors)))
         for u in neighbors
             write(io, Cuint(u-1))

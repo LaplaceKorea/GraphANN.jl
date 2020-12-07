@@ -351,6 +351,7 @@ function generate_index(
     batchsize = 1000,
     allocator = stdallocator,
     graph_type = DefaultAdjacencyList{UInt32},
+    no_progress = false
 )
     @unpack window_size, target_degree, prune_threshold_degree = parameters
 
@@ -392,6 +393,7 @@ function generate_index(
             locks,
             needs_pruning,
             batchsize,
+            no_progress = no_progress,
         )
     end
 
@@ -404,7 +406,8 @@ end
     tls::ThreadLocal,
     locks::AbstractVector,
     needs_pruning::Vector{Bool},
-    batchsize::Integer,
+    batchsize::Integer;
+    no_progress = false
 )
     @unpack graph, data = meta
     @unpack alpha, target_degree = parameters
@@ -449,7 +452,7 @@ end
             tls,
         )
 
-        ProgressMeter.next!(
+        no_progress || ProgressMeter.next!(
             progress_meter;
             showvalues = ((:iter_time, itertime), (:sync_time, synctime)),
         )
