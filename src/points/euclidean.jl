@@ -1,3 +1,6 @@
+# @generated utilities
+_syms(n::Integer) = [Symbol("z$i") for i in 1:n]
+
 # Points using the euclidean distances metric
 struct Euclidean{N,T}
     vals::NTuple{N,T}
@@ -11,9 +14,19 @@ zeroas(::Type{T}, x::E) where {T, E <: Euclidean} = zeroas(T, E)
 Base.sizeof(::Type{Euclidean{N,T}}) where {N,T} = N * sizeof(T)
 Base.sizeof(x::E) where {E <: Euclidean} = sizeof(E)
 
+astype(::Type{T}, x::Euclidean{N,T}) where {N, T} = x
+@generated function astype(::Type{T}, x::Euclidean{N}) where {T,N}
+    syms = _syms(N)
+    exprs = [:($(syms[i]) = convert($T, x[$i])) for i in 1:N]
+    return quote
+        $(exprs...)
+        Euclidean{N,T}(($(syms...),))
+    end
+end
+
 # Generic plus
 @generated function Base.:+(x::Euclidean{N}, y::Euclidean{N}) where {N}
-    syms = [Symbol("z$i") for i in 1:N]
+    syms = _syms(N)
     exprs = [:($(syms[i]) = x[$i] + y[$i]) for i in 1:N]
     return quote
         $(exprs...)
@@ -22,7 +35,7 @@ Base.sizeof(x::E) where {E <: Euclidean} = sizeof(E)
 end
 
 @generated function Base.:/(x::Euclidean{N,T}, y::U) where {N, T, U <: Number}
-    syms = [Symbol("z$i") for i in 1:N]
+    syms = _syms(N)
     exprs = [:($(syms[i]) = x[$i] / y) for i in 1:N]
     return quote
         $(exprs...)
