@@ -384,7 +384,7 @@ function generate_index(
     # First iteration - set alpha = 1.0
     # Second iteration - decrease pruning threshold to `target_degree`
     for i in 1:2
-        _parameters = (i == 2) ? change_threshold(parameters) : onealpha(parameters)
+        _parameters = (i == 2) ? parameters : onealpha(parameters)
 
         _generate_index(
             meta,
@@ -396,6 +396,17 @@ function generate_index(
             no_progress = no_progress,
         )
     end
+
+    # Final cleanup - enforce degree constraint.
+    _parameters = change_threshold(parameters)
+    @unpack prune_threshold_degree = _parameters
+    Threads.@threads for v in LightGraphs.vertices(graph)
+        if length(LightGraphs.outneighbors(graph, v)) > prune_threshold_degree
+            @inbounds needs_pruning[v] = true
+        end
+    end
+    prune!(meta, _parameters, tls, needs_pruning)
+    apply_nextlists!(graph, locks, tls; empty = true)
 
     return meta
 end
