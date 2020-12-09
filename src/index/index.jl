@@ -383,8 +383,9 @@ function generate_index(
 
     # First iteration - set alpha = 1.0
     # Second iteration - decrease pruning threshold to `target_degree`
+    #for i in 1:2
     for i in 1:2
-        _parameters = (i == 2) ? parameters : onealpha(parameters)
+        _parameters = (i == 1) ? onealpha(parameters) : parameters
 
         _generate_index(
             meta,
