@@ -11,7 +11,7 @@ import UnPack: @unpack, @pack!
 #
 # This is done to help avoid polluting the main namespace.
 include("atomic.jl")
-include("indirection.jl")
+#include("indirection.jl")
 include("queue.jl"); import .Queue: SemiAtomicQueue
 
 mutable struct Staging{T}
@@ -58,18 +58,34 @@ end
 ##### Prefetcher
 #####
 
-struct Prefetcher{T, U <: Unsigned, S <: Staging}
-    # Local DRAM cache
-    cache::Vector{T}
-    # Position-wise correlation between ids in the local cache and global ids.
-    # Use a sentinal value of 0 to indicate that a slot is not filled.
-    ids::Vector{U}
+struct Prefetcher{S <: Staging, D, T}
     # Staging area where we get work items from.
     staging::S
+    # The data we're prefetching from.
+    data::D
+    # Pre-allocated temporary data-structures.
+    worklist::Vector{T}
+    tryfor::Int
 
-    # -- pre-allocated temporary data-structures.
-    prefetch_worklist::Vector{U}
-    free_worklist::Vector{U}
+    # Stop Token
+    stop::Ref{Bool}
+end
+
+stop!(prefetcher::Prefetcher) = (prefetcher.stop[] = true)
+reset!(prefetcher::Prefetcher) = (prefetcher.stop[] = false)
+
+function spin(prefetcher::Prefetcher)
+    @unpack staging, data, worklist, stop, tryfor = prefetcher
+    while !stop[]
+        # Gather incoming ids
+        acquire!(staging, worklist, tryfor)
+
+        # Try to prefetch each data item into the LLC
+        # Hopefully doesn't cause eviction if the data is in someone else's L2 ...
+        for index in worklist
+            prefetch(data, index, prefetch_llc)
+        end
+    end
 end
 
 end # module

@@ -152,6 +152,20 @@ function prefetch(ptr::Ptr)
     return nothing
 end
 
+function prefetch_llc(ptr::Ptr)
+    Base.@_inline_meta
+    Base.llvmcall(raw"""
+        %val = inttoptr i64 %0 to i8*
+        call void asm sideeffect "prefetch $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
+        ret void
+        """,
+        Cvoid,
+        Tuple{Ptr{Cvoid}},
+        Ptr{Cvoid}(ptr),
+    )
+    return nothing
+end
+
 #####
 ##### BatchedRange
 #####

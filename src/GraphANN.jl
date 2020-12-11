@@ -18,10 +18,9 @@ import UnPack: @unpack, @pack!
 
 # Constants
 const INDEX_BALANCE_FACTOR = 64
-const ENABLE_THREADING = true
 
 # Includes
-include("threading.jl")
+include("threading.jl"); using ._Threading
 include("utils.jl")
 include("spans.jl"); import .Spans: Span
 include("pm.jl"); import .PM: pmmap
@@ -55,7 +54,11 @@ end
 # This is a partially applied version of the full allocator above.
 # Use it like `f = pmallocator("path/to/dir")` to construct a function `f` that will
 # have the same signature as the `stdallocator` above.
-pmallocator(path::AbstractString) = (type, dims...) -> pmallocator(type, path, dims...)
+struct PMAllocator
+    path::String
+end
+(f::PMAllocator)(type, dims...) = pmallocator(type, f.path, dims...)
+pmallocator(path::AbstractString) = PMAllocator(path)
 
 #####
 ##### Misc development functions

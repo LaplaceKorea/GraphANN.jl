@@ -73,7 +73,7 @@ function distance(a::A, b::B) where {N, TA, TB, A <: Euclidean{N, TA}, B <: Eucl
 end
 
 # Prefetching
-function prefetch(A::AbstractVector{Euclidean{N,T}}, i) where {N,T}
+function prefetch(A::AbstractVector{Euclidean{N,T}}, i, f::F = prefetch) where {N,T,F}
     # Need to prefetch the entire vector
     # Compute how many cache lines are needed.
     # Divide the number of bytes by 64 to get cache lines.
@@ -81,7 +81,7 @@ function prefetch(A::AbstractVector{Euclidean{N,T}}, i) where {N,T}
 
     ptr = pointer(A, i)
     for i in 1:cache_lines
-        prefetch(ptr + 64 * (i-1))
+        f(ptr + 64 * (i-1))
     end
     return nothing
 end
