@@ -251,7 +251,7 @@ end
 
 function apply_nextlists!(graph, locks, tls::ThreadLocal; empty = false)
     # First step - copy over the next lists
-    Threads.@threads for _ in allthreads()
+    on_threads(allthreads()) do
         # Get local storage for this thread.
         # No need to lock because work partitioning is done such that the roote
         # nodes are unique for each thread.
@@ -272,7 +272,7 @@ end
 
 function add_backedges!(graph, locks, tls, needs_pruning, prune_threshold)
     # Merge all edges to add together
-    Threads.@threads for _ in allthreads()
+    on_threads(allthreads()) do
         storage = tls[]
         for (u, neighbors) in pairs(storage.nextlists)
             for v in neighbors
