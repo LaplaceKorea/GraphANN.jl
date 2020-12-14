@@ -25,6 +25,7 @@ const groundtruth_path = joinpath(datadir, "siftsmall_groundtruth.ivecs")
 const diskann_index = joinpath(datadir, "siftsmall_base_20_20_1.2.index")
 const diskann_query_ids = joinpath(datadir, "diskann_query_ids.jls")
 
+include("threading.jl")
 include("utils.jl")
 include("spans.jl")
 include("pm.jl")
@@ -45,6 +46,6 @@ include("prefetch/queue.jl")
 # Index building
 include("index/index.jl")
 
-# Loades
+# Loads
 include("io/vecs.jl")
 

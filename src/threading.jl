@@ -1,39 +1,7 @@
 module _Threading
 
-export ThreadLocal, getall, allthreads, dynamic_thread, on_threads
-
-#####
-##### Thread Local
-#####
-
-# A common pattern in Julia programming is to pre-allocate data and mutate it.
-# This is especially critical when threading because multi-threaded allocation in Julia
-# is pretty darn slow thanks to the garbage collector.
-#
-# This is a VERY convenient structure that replicates whatever you want for each thread
-# and automatically delivers the correct storage bundle when called with `getindex`
-# (i.e., the syntax [])
-
-# Thread local storage.
-struct ThreadLocal{T}
-    values::Vector{T}
-
-    # Inner constructor to resolve ambiguities
-    ThreadLocal{T}(values::Vector{T}) where {T} = new{T}(values)
-end
-
-# Convenience, wrap around a NamedTuple
-ThreadLocal(; kw...) = ThreadLocal((;kw...,))
-
-function ThreadLocal(values::T) where {T}
-    return ThreadLocal{T}([deepcopy(values) for _ in 1:Threads.nthreads()])
-end
-
-Base.getindex(t::ThreadLocal) = t.values[Threads.threadid()]
-Base.setindex!(t::ThreadLocal, v) = (t.values[Threads.threadid()] = v)
-getall(t::ThreadLocal) = t.values
-
-#allthreads() = 1:Threads.nthreads()
+export ThreadPool, ThreadLocal
+export getall, allthreads, dynamic_thread, on_threads
 
 #####
 ##### More finegraind thread control
@@ -55,6 +23,45 @@ end
 Base.IteratorSize(::ThreadPool) = Base.HasLength()
 Base.iterate(t::ThreadPool, s...) = iterate(t.threads, s...)
 
+# `allthreads()` returns a ThreadPool for (believe it or not) all threads!
+allthreads() = ThreadPool(1:Threads.nthreads())
+
+#####
+##### Thread Local
+#####
+
+# A common pattern in Julia programming is to pre-allocate data and mutate it.
+# This is especially critical when threading because multi-threaded allocation in Julia
+# is pretty darn slow thanks to the garbage collector.
+#
+# This is a VERY convenient structure that replicates whatever you want for each thread
+# and automatically delivers the correct storage bundle when called with `getindex`
+# (i.e., the syntax [])
+
+# Thread local storage.
+struct ThreadLocal{T}
+    # When used on conjunction with a ThreadPool, we need to make this a dictionary
+    # because we aren't guarenteed that thread id's start at 1.
+    values::Dict{Int64,T}
+
+    # Inner constructor to resolve ambiguities
+    ThreadLocal{T}(values::Dict{Int64,T}) where {T} = new{T}(values)
+end
+
+# Convenience, wrap around a NamedTuple
+# Need to define a few methods to get around ambiguities.
+ThreadLocal(; kw...) = ThreadLocal(allthreads(), (;kw...,))
+ThreadLocal(pool::ThreadPool; kw...) = ThreadLocal(pool, (;kw...,))
+ThreadLocal(values) = ThreadLocal(allthreads(), values)
+
+function ThreadLocal(pool::ThreadPool, values::T) where {T}
+    return ThreadLocal{T}(Dict(tid => deepcopy(values) for tid in pool))
+end
+
+Base.getindex(t::ThreadLocal) = t.values[Threads.threadid()]
+Base.setindex!(t::ThreadLocal, v) = (t.values[Threads.threadid()] = v)
+getall(t::ThreadLocal) = collect(values(t.values))
+
 # Ref:
 # https://github.com/oschulz/ParallelProcessingTools.jl/blob/6a354b4ac7e90942cfe1d766d739306852acb0db/src/onthreads.jl#L14
 # Schedules a task on a given thread.
@@ -66,6 +73,19 @@ function _schedule(t::Task, tid)
     return t
 end
 
+# If launching non-blocking tasks, it's helpful to be able to retrieve the tasks in case
+# an error happens.
+#
+# Thus, we make `on_threads` return an `OnThreads` instances that wraps all the launched
+# tasks.
+#
+# This allows us to wait on the tasks and potentially catch errors.
+struct TaskHandle
+    tasks::Vector{Task}
+end
+Base.wait(t::TaskHandle) = foreach(Base.wait, t.tasks)
+Base.length(t::TaskHandle) = length(t.tasks)
+
 function on_threads(
     func::F,
     pool::ThreadPool,
@@ -76,13 +96,10 @@ function on_threads(
         i = firstindex(tasks) + (tid - first(pool))
         tasks[i] = _schedule(Task(func), tid)
     end
-    wait && foreach(Base.wait, tasks)
-    return nothing
+    handle = TaskHandle(tasks)
+    wait && Base.wait(handle)
+    return handle
 end
-
-# `allthreads()` returns a ThreadPool for (believe it or not) all threads!
-allthreads() = ThreadPool(1:Threads.nthreads())
-
 #####
 ##### Dynamic
 #####
