@@ -49,3 +49,45 @@
     @test navailable(queue) == 0
     @test push!(queue, 5) == true
 end
+
+@testset "Testing multi-threading Atomic Queue" begin
+    navailable = GraphANN._Prefetcher.Queue.navailable
+    consume! = GraphANN._Prefetcher.Queue.consume!
+    commit! = GraphANN._Prefetcher.Queue.commit!
+
+    producer_pool = GraphANN.ThreadPool(1:1)
+    consumer_pool = GraphANN.ThreadPool(2:2)
+
+    # Make the queue smaller than the number of tokens to ensure that a wrap
+    # around happens
+    num_tokens = 10
+    queue_size = 5
+    queue = GraphANN._Prefetcher.SemiAtomicQueue{Int}(queue_size)
+
+    # Create a producer-consumer relationship here - begin with the consumer first.
+    dest = zeros(Int, num_tokens)
+    consumer_handle = GraphANN.on_threads(consumer_pool, false) do
+        index = 1
+        while true
+            sleep(0.05 * rand())
+            collected = consume!(dest, index, queue)
+            index += collected
+            index > num_tokens && break
+        end
+        return nothing
+    end
+
+    producer_handle = GraphANN.on_threads(producer_pool, true) do
+        for i in 1:num_tokens
+            sleep(0.1 * rand())
+            push!(queue, i)
+            sleep(0.05 * rand())
+            commit!(queue)
+        end
+        return nothing
+    end
+
+    # Wait for the consumer to finish
+    wait(consumer_handle)
+    @test dest == 1:num_tokens
+end

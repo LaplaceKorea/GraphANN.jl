@@ -5,6 +5,7 @@
 module _Prefetcher
 
 import UnPack: @unpack, @pack!
+using .._Threading
 
 # Many of the pieces that make up the prefetcher implementations are wrapped in inner
 # modules.
@@ -12,7 +13,7 @@ import UnPack: @unpack, @pack!
 # This is done to help avoid polluting the main namespace.
 include("atomic.jl")
 #include("indirection.jl")
-include("queue.jl"); import .Queue: SemiAtomicQueue
+include("queue.jl"); import .Queue: SemiAtomicQueue, commit!, consume!
 
 mutable struct Staging{T}
     # One queue for each query thread.
@@ -25,32 +26,42 @@ mutable struct Staging{T}
     lock::ReentrantLock
 end
 
+function Staging(queues::Vector{SemiAtomicQueue{T}}) where {T}
+    return Staging{T}(queues, 1, ReentrantLock())
+end
+
 function acquire!(x::Staging{T}, dest::Vector{T}, num::Integer) where {T}
     # Prepare destination
     resize!(dest, num)
 
-    # Global lock.
+    # Global lockitems_collected.
     # Access work items in the queues in a round robin manner.
     # Go until `num` tokens have been retrieved or all queues have been visited.
+    items_collected = 0
     Base.@lock x.lock begin
         @unpack queues, index = x
 
         num_queues = length(queues)
-        visited = 0
-        start = 1
+        queues_visited = 0
         while true
-            count = consume!(dest, start, queues[index], num + 1 - start)
+            count = consume!(
+                dest,
+                items_collected + 1,
+                queues[index],
+                num - items_collected,
+            )
 
             # Update counters
-            start += count
-            visited += 1
+            items_collected += count
+            queues_visited += 1
             index = (index == num_queues) ? 1 : (index + 1)
 
-            (start >= num || visited == num_queues) && break
+            (items_collected >= num || queues_visited == num_queues) && break
         end
 
         @pack! x = index
     end
+    resize!(dest, items_collected)
     return nothing
 end
 
@@ -58,11 +69,9 @@ end
 ##### Prefetcher
 #####
 
-struct Prefetcher{S <: Staging, D, T}
+struct PrefetchRunner{S <: Staging, T}
     # Staging area where we get work items from.
     staging::S
-    # The data we're prefetching from.
-    data::D
     # Pre-allocated temporary data-structures.
     worklist::Vector{T}
     tryfor::Int
@@ -71,11 +80,11 @@ struct Prefetcher{S <: Staging, D, T}
     stop::Ref{Bool}
 end
 
-stop!(prefetcher::Prefetcher) = (prefetcher.stop[] = true)
-reset!(prefetcher::Prefetcher) = (prefetcher.stop[] = false)
+stop!(prefetcher::PrefetchRunner) = (prefetcher.stop[] = true)
+reset!(prefetcher::PrefetchRunner) = (prefetcher.stop[] = false)
 
-function spin(prefetcher::Prefetcher)
-    @unpack staging, data, worklist, stop, tryfor = prefetcher
+function prefetch_loop(prefetcher::PrefetchRunner, data)
+    @unpack staging, worklist, stop, tryfor = prefetcher
     while !stop[]
         # Gather incoming ids
         acquire!(staging, worklist, tryfor)
@@ -86,6 +95,46 @@ function spin(prefetcher::Prefetcher)
             prefetch(data, index, prefetch_llc)
         end
     end
+end
+
+#####
+##### Ensemple of Prefetchers
+#####
+
+mutable struct Prefetcher{T, S <: Staging, U <: Integer}
+    thread_pool::ThreadPool{T}
+    staging::S
+
+    # Signals to runners - when `true`, stop prefetching.
+    stop_signals::Vector{Ref{Bool}}
+    worklists::Vector{Vector{U}}
+
+    # Handle to the tasks that are currently running.
+    # Maintain the following invariants:
+    # - `handle === nothing` only if we're sure no tasks spawned by the prefetcher are
+    # running.
+    # - Otherwise, tasks must be reachable until they are stopped or killed.
+    # - Once stopped of killed, this field may be reset to `nothing`.
+    tasks::Union{Nothing, TaskHandle}
+end
+
+stop!(p::Prefetcher) = foreach(i -> i[] = true, p.stop_signals)
+reset!(p::Prefetcher) = foreach(i -> i[] = false, p.stop_signals)
+
+function spin(prefetcher::Prefetcher, data; tryfor = 100)
+    @unpack thread_pool, staging, worklists, stop_signals = prefetcher
+    reset!(prefetcher)
+    handle = on_threads(thread_pool, false) do
+        # Obtain thread local storage
+        tid = Threads.threadid()
+        worklist = worklists[tid]
+        stop_signal = stop_signals[tid]
+
+        runner = PrefetchRunner(staging, worklist, tryfor, stop_signal)
+        prefetch_loop(runner, data)
+    end
+    @pack! prefetcher = handle
+    return nothing
 end
 
 end # module

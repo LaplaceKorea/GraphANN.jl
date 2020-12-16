@@ -50,13 +50,20 @@ Base.eltype(::Euclidean{N,T}) where {N,T} = T
 
 @inline Base.getindex(x::Euclidean, i) = getindex(x.vals, i)
 
-function distance(a::E, b::E) where {N, T, E <: Euclidean{N,T}}
-    s = zero(T)
-    # Using @simd really helps out here with agressive loop unrolling.
-    @simd for i in 1:N
-        @inbounds s += (a[i] - b[i]) ^ 2
+_cachelines(::Euclidean{N,T}) where {N,T} = (N * sizeof(T)) >> 6
+
+# Turn a `Euclidean{N,T}` into a tuple of `Vec{vecsize(Euclidean, T),T}`.
+# Ideally, the generated code for this should be a no-op, it's just awkward because
+# Julia doesn't really have a "bitcast" function ...
+@generated function deconstruct(x::Euclidean{N, T}) where {N, T}
+    s = vecsize(Euclidean, T)
+    @assert mod(N, s) == 0
+    num_tuples = div(N, s)
+    exprs = map(1:32:N) do i
+        inds = [:(x[$(i + j)]) for j in 0:(s-1)]
+        return :(SIMD.Vec{$s,T}(($(inds...),)))
     end
-    return s
+    return :(($(exprs...),))
 end
 
 # Generic fallback for computing distance between to similar-sized Euclidean points with
@@ -110,20 +117,6 @@ vecs_reshape(::Type{<:Euclidean}, v, dim) = v
 #####
 ##### Specialize for UInt8
 #####
-
-# Turn a `Euclidean{N,UInt8}` into a tuple of `Vec{32,UInt8}`.
-# Ideally, the generated code for this should be a no-op, it's just awkward because
-# Julia doesn't really have a "bitcast" function ...
-@generated function deconstruct(x::Euclidean{N, UInt8}) where {N}
-    s = vecsize(Euclidean, UInt8)
-    @assert mod(N, s) == 0
-    num_tuples = div(N, s)
-    exprs = map(1:32:N) do i
-        inds = [:(x[$(i + j)]) for j in 0:(s-1)]
-        return :(SIMD.Vec{$s,UInt8}(($(inds...),)))
-    end
-    return :(($(exprs...),))
-end
 
 # ASSUMPTION: Assume N is a multiple of `vecsize(Euclidean, UInt8)`
 # If this is not the case, then `deconstruct` will fail.

@@ -42,6 +42,7 @@ include("query/query.jl")
 
 # Prefetch machinery
 include("prefetch/queue.jl")
+include("prefetch/prefetch.jl")
 
 # Index building
 include("index/index.jl")

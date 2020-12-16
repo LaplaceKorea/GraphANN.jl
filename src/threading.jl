@@ -1,7 +1,7 @@
 module _Threading
 
-export ThreadPool, ThreadLocal
-export getall, allthreads, dynamic_thread, on_threads
+export ThreadPool, ThreadLocal, TaskHandle
+export getall, getpool, allthreads, dynamic_thread, on_threads
 
 #####
 ##### More finegraind thread control
@@ -39,13 +39,16 @@ allthreads() = ThreadPool(1:Threads.nthreads())
 # (i.e., the syntax [])
 
 # Thread local storage.
-struct ThreadLocal{T}
+struct ThreadLocal{T,U}
     # When used on conjunction with a ThreadPool, we need to make this a dictionary
     # because we aren't guarenteed that thread id's start at 1.
     values::Dict{Int64,T}
+    pool::ThreadPool{U}
 
     # Inner constructor to resolve ambiguities
-    ThreadLocal{T}(values::Dict{Int64,T}) where {T} = new{T}(values)
+    function ThreadLocal{T}(values::Dict{Int64,T}, pool::ThreadPool{U}) where {T, U}
+        return new{T, U}(values, pool)
+    end
 end
 
 # Convenience, wrap around a NamedTuple
@@ -55,12 +58,16 @@ ThreadLocal(pool::ThreadPool; kw...) = ThreadLocal(pool, (;kw...,))
 ThreadLocal(values) = ThreadLocal(allthreads(), values)
 
 function ThreadLocal(pool::ThreadPool, values::T) where {T}
-    return ThreadLocal{T}(Dict(tid => deepcopy(values) for tid in pool))
+    return ThreadLocal{T}(
+        Dict(tid => deepcopy(values) for tid in pool),
+        pool,
+    )
 end
 
 Base.getindex(t::ThreadLocal) = t.values[Threads.threadid()]
 Base.setindex!(t::ThreadLocal, v) = (t.values[Threads.threadid()] = v)
 getall(t::ThreadLocal) = collect(values(t.values))
+getpool(t::ThreadLocal) = t.pool
 
 # Ref:
 # https://github.com/oschulz/ParallelProcessingTools.jl/blob/6a354b4ac7e90942cfe1d766d739306852acb0db/src/onthreads.jl#L14
@@ -100,6 +107,7 @@ function on_threads(
     wait && Base.wait(handle)
     return handle
 end
+
 #####
 ##### Dynamic
 #####

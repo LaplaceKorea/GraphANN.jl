@@ -210,7 +210,7 @@ function searchall(
     num_queries = length(queries)
     dest = Array{eltype(meta.graph),2}(undef, num_neighbors, num_queries)
 
-    dynamic_thread(eachindex(queries), 64) do r
+    dynamic_thread(eachindex(queries), getpool(tls), 64) do r
         for col in r
             query = queries[col]
             algo = tls[]
