@@ -21,7 +21,7 @@
     io = IOBuffer(; read = true, write = true)
     code_native(
         io,
-        GraphANN.Spans.broadcast_add,
+        GraphANN._Base._Spans.broadcast_add,
         Tuple{GraphANN.Span{Float32}, GraphANN.Span{Float32}};
         syntax = :intel,
     )

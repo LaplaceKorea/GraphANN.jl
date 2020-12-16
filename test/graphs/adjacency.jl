@@ -22,7 +22,7 @@
     @test x[3] == [2]
 
     for i in 1:length(x)
-        @test GraphANN.caninsert(x, i)
+        @test GraphANN._Graphs.caninsert(x, i)
     end
 
     # Iteration
@@ -34,10 +34,10 @@
     @test x[4] == [1,2,3]
 
     # Insertion
-    GraphANN.unsafe_insert!(x, 1, 3, 4)
+    GraphANN._Graphs.unsafe_insert!(x, 1, 3, 4)
     @test x[1] == [2,3,4]
 
-    GraphANN.unsafe_insert!(x, 3, 1, 1)
+    GraphANN._Graphs.unsafe_insert!(x, 3, 1, 1)
     @test x[3] == [1,2]
 
     # Empty
@@ -53,7 +53,7 @@ end
     x = GraphANN.FlatAdjacencyList{UInt32}(3, 3)
 
     # initial lengths
-    @test GraphANN._max_degree(x) == 3
+    @test GraphANN._Graphs._max_degree(x) == 3
     @test length(x) == 3
     for i in 1:length(x)
         @test length(x, i) == 0
@@ -71,25 +71,28 @@ end
     ##### Inserting
     #####
 
-    @test GraphANN.caninsert(x, 1)
-    GraphANN.unsafe_insert!(x, 1, 1, 3)
+    caninsert = GraphANN._Graphs.caninsert
+    unsafe_insert! = GraphANN._Graphs.unsafe_insert!
+
+    @test caninsert(x, 1)
+    unsafe_insert!(x, 1, 1, 3)
     @test length(x, 1) == 1
     @test x[1] == [3]
 
     # insert at front
-    @test GraphANN.caninsert(x, 1)
-    GraphANN.unsafe_insert!(x, 1, 1, 1)
+    @test caninsert(x, 1)
+    unsafe_insert!(x, 1, 1, 1)
     @test length(x, 1) == 2
     @test x[1] == [1,3]
 
     # insert at middle
-    @test GraphANN.caninsert(x, 1)
-    GraphANN.unsafe_insert!(x, 1, 2, 2)
+    @test caninsert(x, 1)
+    unsafe_insert!(x, 1, 2, 2)
     @test length(x, 1) == 3
     @test x[1] == [1,2,3]
 
     # now, we should no longer be able to insert
-    @test GraphANN.caninsert(x, 1) == false
+    @test caninsert(x, 1) == false
 
     # iterations
     @test collect(x) == [[1,2,3], [], []]
@@ -99,13 +102,13 @@ end
     @test x[1] == []
 
     # Construct an insert that will move two elements
-    GraphANN.unsafe_insert!(x, 2, 1, 2)
-    GraphANN.unsafe_insert!(x, 2, 2, 3)
+    unsafe_insert!(x, 2, 1, 2)
+    unsafe_insert!(x, 2, 2, 3)
     @test x[2] == [2,3]
-    @test GraphANN.caninsert(x, 2)
+    @test caninsert(x, 2)
 
-    GraphANN.unsafe_insert!(x, 2, 1, 1)
-    @test GraphANN.caninsert(x, 2) == false
+    unsafe_insert!(x, 2, 1, 1)
+    @test caninsert(x, 2) == false
     @test x[2] == [1,2,3]
 
     # Try a sorted copy

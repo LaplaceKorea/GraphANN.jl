@@ -1,4 +1,4 @@
-module Spans
+module _Spans
 
 # Spans are simply a pointer-length pair to serve as a light weight, bounds checked access
 # to memory.

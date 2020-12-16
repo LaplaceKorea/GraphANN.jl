@@ -5,14 +5,13 @@
 module _Prefetcher
 
 import UnPack: @unpack, @pack!
-using .._Threading
+using .._Base
 
 # Many of the pieces that make up the prefetcher implementations are wrapped in inner
 # modules.
 #
 # This is done to help avoid polluting the main namespace.
 include("atomic.jl")
-#include("indirection.jl")
 include("queue.jl"); import .Queue: SemiAtomicQueue, commit!, consume!
 
 mutable struct Staging{T}

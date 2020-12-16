@@ -66,7 +66,6 @@ Base.iterate(set::RobinSet, s) = iterate(keys(set.dict), s)
 #####
 
 # Find the medioid of a dataset
-raw(x::Union{<:AbstractVector,<:Tuple}) = x
 zeroas(::Type{T}, x::Number) where {T} = zero(T)
 
 function medioid(data::Vector{T}) where {T}
@@ -194,4 +193,3 @@ Base.iterate(x::BatchedRange, s = 1)  = s > length(x) ? nothing : (x[s], s+1)
 # a `UnitRange` when it encloses a `UnitRange`.
 subrange(range::OrdinalRange, start, stop) = range[start]:step(range):range[stop]
 subrange(range::AbstractUnitRange, start, stop) = range[start]:range[stop]
-

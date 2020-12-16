@@ -8,8 +8,8 @@ end
 
 Euclidean{N,T}() where {N,T} = Euclidean(ntuple(_ -> zero(T), N))
 
-zeroas(::Type{T}, ::Type{Euclidean{N,U}}) where {T,N,U} = Euclidean{N,T}()
-zeroas(::Type{T}, x::E) where {T, E <: Euclidean} = zeroas(T, E)
+_Base.zeroas(::Type{T}, ::Type{Euclidean{N,U}}) where {T,N,U} = Euclidean{N,T}()
+_Base.zeroas(::Type{T}, x::E) where {T, E <: Euclidean} = zeroas(T, E)
 
 Base.sizeof(::Type{Euclidean{N,T}}) where {N,T} = N * sizeof(T)
 Base.sizeof(x::E) where {E <: Euclidean} = sizeof(E)
@@ -43,8 +43,6 @@ end
     end
 end
 
-raw(x::Euclidean) = x.vals
-
 Base.length(::Euclidean{N}) where {N} = N
 Base.eltype(::Euclidean{N,T}) where {N,T} = T
 
@@ -68,7 +66,7 @@ end
 
 # Generic fallback for computing distance between to similar-sized Euclidean points with
 # a different numeric type.
-function distance(a::A, b::B) where {N, TA, TB, A <: Euclidean{N, TA}, B <: Euclidean{N, TB}}
+function _Base.distance(a::A, b::B) where {N, TA, TB, A <: Euclidean{N, TA}, B <: Euclidean{N, TB}}
     T = promote_type(TA, TB)
     s = zero(T)
     @simd for i in 1:N
@@ -80,7 +78,7 @@ function distance(a::A, b::B) where {N, TA, TB, A <: Euclidean{N, TA}, B <: Eucl
 end
 
 # Prefetching
-function prefetch(A::AbstractVector{Euclidean{N,T}}, i, f::F = prefetch) where {N,T,F}
+function _Base.prefetch(A::AbstractVector{Euclidean{N,T}}, i, f::F = _Base.prefetch) where {N,T,F}
     # Need to prefetch the entire vector
     # Compute how many cache lines are needed.
     # Divide the number of bytes by 64 to get cache lines.
@@ -104,15 +102,15 @@ vecsize(::Type{Euclidean}, ::Type{Float32}) = 16
 vecsize(::Type{Euclidean}, ::Type{UInt8}) = 32
 
 # Overload vecs loading functions
-vecs_read_type(::Type{Euclidean{N,T}}) where {N,T} = T
+_IO.vecs_read_type(::Type{Euclidean{N,T}}) where {N,T} = T
 
-function addto!(v::Vector{Euclidean{N,T}}, index, buf::AbstractVector{T}) where {N,T}
+function _IO.addto!(v::Vector{Euclidean{N,T}}, index, buf::AbstractVector{T}) where {N,T}
     length(buf) == N || error("Lenght of buffer is incorrect!")
     v[index] = Euclidean{N,T}(ntuple(i -> buf[i], Val(N)))
     return 1
 end
 
-vecs_reshape(::Type{<:Euclidean}, v, dim) = v
+_IO.vecs_reshape(::Type{<:Euclidean}, v, dim) = v
 
 #####
 ##### Specialize for UInt8
@@ -120,7 +118,7 @@ vecs_reshape(::Type{<:Euclidean}, v, dim) = v
 
 # ASSUMPTION: Assume N is a multiple of `vecsize(Euclidean, UInt8)`
 # If this is not the case, then `deconstruct` will fail.
-function distance(a::E, b::E) where {N, E <: Euclidean{N, UInt8}}
+function _Base.distance(a::E, b::E) where {N, E <: Euclidean{N, UInt8}}
     return _distance(deconstruct(a), deconstruct(b))
 end
 

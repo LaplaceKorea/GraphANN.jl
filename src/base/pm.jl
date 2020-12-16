@@ -1,8 +1,16 @@
-module PM
+function pmallocator(::Type{T}, path::AbstractString, dims::Integer...) where {T}
+    return pmmap(T, path, dims...)
+end
 
-export pmmap
+# This is a partially applied version of the full allocator above.
+# Use it like `f = pmallocator("path/to/dir")` to construct a function `f` that will
+# have the same signature as the `stdallocator` above.
+struct PMAllocator
+    path::String
+end
+(f::PMAllocator)(type, dims...) = pmallocator(type, f.path, dims...)
+pmallocator(path::AbstractString) = PMAllocator(path)
 
-import Mmap
 
 const COUNT = Threads.Atomic{Int}(0)
 mmap_prefix() = "graphann_mmap_"
@@ -30,5 +38,3 @@ function pmmap(::Type{T}, dir::AbstractString, dims::Integer...; rmfile = true) 
     end
     return array
 end
-
-end # module

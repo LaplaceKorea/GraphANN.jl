@@ -2,10 +2,12 @@
 # NOTE: This is copied from DataStructures.jl
 #
 # Copied to make children_and_grandchildren non-alocating.
-using GraphANN: _make_binary_minmax_heap, is_minmax_heap, children_and_grandchildren
-using Base.Order: Forward, Reverse
+import GraphANN._Base: _make_binary_minmax_heap, is_minmax_heap, children_and_grandchildren
+import GraphANN._Base: popmax!, popmin!, popall!
+import GraphANN: BinaryMinMaxHeap
 
-import GraphANN: BinaryMinMaxHeap, popmax!, popmin!, popall!
+import Base.Order: Forward, Reverse
+
 
 @testset "Binary MinMax Heaps" begin
 

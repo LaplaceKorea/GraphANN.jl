@@ -9,19 +9,19 @@ function euclidean_reference(A, B)
     return s
 end
 
+raw(x::GraphANN.Euclidean) = x.vals
+
 @testset "Testing Euclidean Calculations" begin
     # Test some basic constructors and stuff
     x = GraphANN.Euclidean{128,Float32}()
     @test length(x) == 128
     @test eltype(x) == Float32
-    @test isa(GraphANN.raw(x), NTuple{128,Float32})
+    @test isa(raw(x), NTuple{128,Float32})
 
     x = GraphANN.Euclidean{96,UInt8}()
     @test length(x) == 96
     @test eltype(x) == UInt8
-    @test isa(GraphANN.raw(x), NTuple{96,UInt8})
-
-    raw = GraphANN.raw
+    @test isa(raw(x), NTuple{96,UInt8})
 
     # Lets do some distance calculations
     scale = 100
@@ -42,7 +42,7 @@ end
     # Test some unary operations.
     a = GraphANN.Euclidean(ntuple(_ -> rand(UInt8), 128))
     b = a / 10
-    @test raw(b) == GraphANN.raw(a) ./ 10
+    @test raw(b) == raw(a) ./ 10
 
     c = GraphANN.Euclidean(ntuple(_ -> rand(UInt8), 128))
     @test raw(a + c) == raw(a) .+ raw(c)

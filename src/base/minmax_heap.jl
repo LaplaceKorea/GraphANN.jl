@@ -329,4 +329,3 @@ function _unsafe_maximum(heap::BinaryMinMaxHeap, default = nothing)
     # Again, this is relying on the internals of DataStructures.jl
     return maximum(@inbounds heap.valtree[i] for i in 1:min(length(heap), 3))
 end
-
