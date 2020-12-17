@@ -1,5 +1,6 @@
 # @generated utilities
 _syms(n::Integer) = [Symbol("z$i") for i in 1:n]
+_genindex(num_vectors, i) = [:(x[$j][$i]) for j in 1:num_vectors]
 
 # Points using the euclidean distances metric
 struct Euclidean{N,T}
@@ -15,49 +16,67 @@ Base.zero(::Type{Euclidean{N,T}}) where {N,T} = Euclidean{N,T}()
 Base.sizeof(::Type{Euclidean{N,T}}) where {N,T} = N * sizeof(T)
 Base.sizeof(x::E) where {E <: Euclidean} = sizeof(E)
 
-astype(::Type{T}, x::Euclidean{N,T}) where {N, T} = x
-@generated function astype(::Type{T}, x::Euclidean{N}) where {T,N}
-    syms = _syms(N)
-    exprs = [:($(syms[i]) = convert($T, x[$i])) for i in 1:N]
-    return quote
-        $(exprs...)
-        Euclidean{N,T}(($(syms...),))
-    end
-end
-
-# Generic plus
-@generated function Base.:+(x::Euclidean{N}, y::Euclidean{N}) where {N}
-    syms = _syms(N)
-    exprs = [:($(syms[i]) = x[$i] + y[$i]) for i in 1:N]
-    return quote
-        $(exprs...)
-        Euclidean(($(syms...),))
-    end
-end
-
-@generated function Base.:/(x::Euclidean{N,T}, y::U) where {N, T, U <: Number}
-    syms = _syms(N)
-    exprs = [:($(syms[i]) = x[$i] / y) for i in 1:N]
-    return quote
-        $(exprs...)
-        Euclidean(($(syms...),))
-    end
-end
-
-@generated function round(::Type{T}, x::Euclidean{N}) where {T, N}
-    syms = _syms(N)
-    exprs = [:($(syms[i]) = round(T, x[$i])) for i in 1:N]
-    return quote
-        $(exprs...)
-        Euclidean(($(syms...),))
-    end
-end
-
 Base.length(::Euclidean{N}) where {N} = N
 Base.eltype(::Euclidean{N,T}) where {N,T} = T
 Base.eltype(::Type{Euclidean{N,T}}) where {N,T} = T
 
 @inline Base.getindex(x::Euclidean, i) = getindex(x.vals, i)
+
+# Use scalar behavior for broadcasting
+Base.broadcastable(x::Euclidean) = (x,)
+
+#####
+##### Ops
+#####
+
+# Strategy - use a generated function to apply an arbitrary function elementwise to a
+# collection of Euclidean vectors.
+#
+# Implementations for ops such as `+` and `-` can then all use the same code path through
+# the `_apply` function below.
+@generated function _apply(f::F, x::Euclidean{N}...) where {F,N}
+    return _apply_impl(N, length(x))
+end
+
+function _apply_impl(vector_length, num_vectors)
+    syms = _syms(vector_length)
+    exprs = [:($(syms[i]) = f($(_genindex(num_vectors, i)...))) for i in 1:vector_length]
+    return quote
+        $(exprs...)
+        Euclidean(($(syms...),))
+    end
+end
+
+# Unary ops
+astype(::Type{T}, x::Euclidean{N,T}) where {N, T} = x
+astype(::Type{T}, x::Euclidean) where {T} = _apply(i -> convert(T, i), x)
+Base.round(::Type{T}, x::Euclidean{N}) where {T, N} = _apply(i -> round(T, i), x)
+
+# The `sum` here always returns a Float64.
+# This is helpful for cases where vectors are composed of things like UInt8 which can
+# easily overflow.
+function Base.sum(x::Euclidean{N}) where {N}
+    s = zero(Float64)
+    for i in 1:N
+        s += x[i]
+    end
+    return s
+end
+
+# Binary Ops
+for op in [:+, :-]
+    @eval begin
+        Base.$op(x::Euclidean{N}, y::Euclidean{N}) where {N} = _apply($op, x, y)
+    end
+end
+
+function Base.:/(x::Euclidean{N,T}, y::U) where {N, T, U <: Number}
+    return _apply(i -> i / y, x)
+end
+
+#####
+##### Distance Computation
+#####
 
 _cachelines(::Euclidean{N,T}) where {N,T} = (N * sizeof(T)) >> 6
 

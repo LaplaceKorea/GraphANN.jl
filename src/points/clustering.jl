@@ -51,7 +51,6 @@ function choose_centroids(
         # Recompute total cost
         compute_cost!(costs, data, centroids)
         total_cost = sum(costs)
-        @show total_cost
     end
 
     # Choose the final candidates from this collection.
@@ -130,7 +129,7 @@ function lloyds(
     data::AbstractVector{T},
     centroids::AbstractVector{T};
     max_iterations = 10,
-    tol = 2.0,
+    tol = 1E-4,
     batchsize = 1024,
 ) where {T}
     # As thread local storage, keep track of the nearest centroids computed so far.
@@ -138,14 +137,15 @@ function lloyds(
 
     # Accumulate points assigned to this center so far.
     # Control access with a lock.
-    integrated_points = fill(zeroas(Float32, T), length(centroids))
+    integrated_points = fill(zeroas(Float64, T), length(centroids))
     locks = [Base.Threads.SpinLock() for _ in 1:length(centroids)]
     points_per_center = zeros(Int, length(centroids))
 
+    meter = ProgressMeter.Progress(max_iterations, 1, "Computing Centroids ...")
     ProgressMeter.@showprogress 1 for iter in 1:max_iterations
         dynamic_thread(batched(eachindex(data), batchsize)) do batch
-            min_so_far = tls[]
             # Reset thread local storage
+            min_so_far = tls[]
             min_so_far .= (_minsofar(),)
 
             # Compute the nearest centroids
@@ -153,6 +153,8 @@ function lloyds(
                 @inbounds center = centroids[center_index]
                 @unpack min_distance, min_index = min_so_far[offset]
 
+                # Compute distance from this point to this centroid.
+                # If the distance is less than the lowest so far, update the lowest.
                 this_distance = distance(data[index], center)
                 if this_distance < min_distance
                     update = (min_distance = this_distance, min_index = center_index)
@@ -178,9 +180,25 @@ function lloyds(
         new_centroids = integrated_points ./ points_per_center
 
         # Reset for new iteration
-        integrated_points .= (zero(eltype(integrated_points)),)
-        points_per_center .= 0
+        zero!(integrated_points)
+        zero!(points_per_center)
+
+        # How much did we move
+        movement = sum(sum.(new_centroids .- centroids))
+        total = sum(sum.(centroids))
+
         centroids .= round.(eltype(T), new_centroids)
+
+        # Exit condition
+        relative_movement = abs(movement / total)
+        ProgressMeter.next!(
+            meter;
+            showvalues = ((:relative_movement, relative_movement),)
+        )
+
+        (relative_movement < tol) && break
     end
+    ProgressMeter.finish!(meter)
+
     return centroids
 end

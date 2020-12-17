@@ -74,7 +74,7 @@ include("spans.jl"); import ._Spans: Span
 ##### Utilities
 #####
 
-export safe_maximum, donothing, printlnstyled
+export safe_maximum, donothing, printlnstyled, zero!
 export Neighbor, getid, getdistance, idequal
 export RobinSet
 export zeroas, medioid, nearest_neighbor
