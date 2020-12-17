@@ -1,5 +1,5 @@
 #####
-##### More finegraind thread control
+##### More finegrained thread control
 #####
 
 # Collection of threads for work together.

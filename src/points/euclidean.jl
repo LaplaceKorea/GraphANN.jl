@@ -10,6 +10,7 @@ Euclidean{N,T}() where {N,T} = Euclidean(ntuple(_ -> zero(T), N))
 
 _Base.zeroas(::Type{T}, ::Type{Euclidean{N,U}}) where {T,N,U} = Euclidean{N,T}()
 _Base.zeroas(::Type{T}, x::E) where {T, E <: Euclidean} = zeroas(T, E)
+Base.zero(::Type{Euclidean{N,T}}) where {N,T} = Euclidean{N,T}()
 
 Base.sizeof(::Type{Euclidean{N,T}}) where {N,T} = N * sizeof(T)
 Base.sizeof(x::E) where {E <: Euclidean} = sizeof(E)
@@ -43,8 +44,18 @@ end
     end
 end
 
+@generated function round(::Type{T}, x::Euclidean{N}) where {T, N}
+    syms = _syms(N)
+    exprs = [:($(syms[i]) = round(T, x[$i])) for i in 1:N]
+    return quote
+        $(exprs...)
+        Euclidean(($(syms...),))
+    end
+end
+
 Base.length(::Euclidean{N}) where {N} = N
 Base.eltype(::Euclidean{N,T}) where {N,T} = T
+Base.eltype(::Type{Euclidean{N,T}}) where {N,T} = T
 
 @inline Base.getindex(x::Euclidean, i) = getindex(x.vals, i)
 
