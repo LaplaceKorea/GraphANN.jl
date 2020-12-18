@@ -11,12 +11,14 @@ Euclidean{N,T}() where {N,T} = Euclidean(ntuple(_ -> zero(T), N))
 
 _Base.zeroas(::Type{T}, ::Type{Euclidean{N,U}}) where {T,N,U} = Euclidean{N,T}()
 _Base.zeroas(::Type{T}, x::E) where {T, E <: Euclidean} = zeroas(T, E)
+Base.zero(::E) where {E <: Euclidean} = zero(E)
 Base.zero(::Type{Euclidean{N,T}}) where {N,T} = Euclidean{N,T}()
 
 Base.sizeof(::Type{Euclidean{N,T}}) where {N,T} = N * sizeof(T)
 Base.sizeof(x::E) where {E <: Euclidean} = sizeof(E)
 
 Base.length(::Euclidean{N}) where {N} = N
+Base.length(::Type{<:Euclidean{N}}) where {N} = N
 Base.eltype(::Euclidean{N,T}) where {N,T} = T
 Base.eltype(::Type{Euclidean{N,T}}) where {N,T} = T
 
@@ -24,6 +26,12 @@ Base.eltype(::Type{Euclidean{N,T}}) where {N,T} = T
 
 # Use scalar behavior for broadcasting
 Base.broadcastable(x::Euclidean) = (x,)
+
+@generated function Base.merge(x::NTuple{K, Euclidean{N,T}}) where {K,N,T}
+    final_param = K * N
+    exprs = [:(x[$i].vals...) for i in 1:K]
+    return :(Euclidean{$final_param,T}(($(exprs...),)))
+end
 
 #####
 ##### Ops
@@ -48,9 +56,17 @@ function _apply_impl(vector_length, num_vectors)
 end
 
 # Unary ops
-astype(::Type{T}, x::Euclidean{N,T}) where {N, T} = x
-astype(::Type{T}, x::Euclidean) where {T} = _apply(i -> convert(T, i), x)
+Base.convert(::Type{T}, x::Euclidean{N,T}) where {N, T} = x
+Base.convert(::Type{T}, x::T) where {T <: Euclidean} = x
+Base.convert(::Type{Any}, x::Euclidean) = x
+Base.convert(::Type{T}, x::Euclidean) where {T} = _apply(i -> convert(T, i), x)
+
 Base.round(::Type{T}, x::Euclidean{N}) where {T, N} = _apply(i -> round(T, i), x)
+
+lossy_convert(::Type{T}, x::Euclidean) where {T} = convert(T, x)
+function lossy_convert(::Type{T}, x::Euclidean{N,U}) where {T <: Integer, N, U <: AbstractFloat}
+    return round(T, x)
+end
 
 # The `sum` here always returns a Float64.
 # This is helpful for cases where vectors are composed of things like UInt8 which can
@@ -83,21 +99,32 @@ _cachelines(::Euclidean{N,T}) where {N,T} = (N * sizeof(T)) >> 6
 # Turn a `Euclidean{N,T}` into a tuple of `Vec{vecsize(Euclidean, T),T}`.
 # Ideally, the generated code for this should be a no-op, it's just awkward because
 # Julia doesn't really have a "bitcast" function ...
-@generated function deconstruct(x::Euclidean{N, T}) where {N, T}
-    s = vecsize(Euclidean, T)
-    @assert mod(N, s) == 0
-    num_tuples = div(N, s)
-    exprs = map(1:32:N) do i
-        inds = [:(x[$(i + j)]) for j in 0:(s-1)]
-        return :(SIMD.Vec{$s,T}(($(inds...),)))
+function _deconstruct_impl(f, N::Integer, S::Integer)
+    @assert mod(N, S) == 0
+    num_tuples = div(N, S)
+
+    exprs = map(1:S:N) do i
+        inds = [:(x[$(i + j)]) for j in 0:(S-1)]
+        return :($f(($(inds...),)))
     end
     return :(($(exprs...),))
 end
 
+@generated function deconstruct(::Type{Euclidean{S,T}}, x::Euclidean{N,T}) where {S,T,N}
+    _deconstruct_impl(Euclidean{S,T}, N, S)
+end
+
+@generated function deconstruct(::Type{SIMD.Vec{S,T}}, x::Euclidean{N,T}) where {S,T,N}
+    _deconstruct_impl(SIMD.Vec{S,T}, N, S)
+end
+
 # Generic fallback for computing distance between to similar-sized Euclidean points with
 # a different numeric type.
+_promote_type(x...) = promote_type(x...)
+_promote_type(x::Type{T}...) where {T <: Integer} = Int64
+
 function _Base.distance(a::A, b::B) where {N, TA, TB, A <: Euclidean{N, TA}, B <: Euclidean{N, TB}}
-    T = promote_type(TA, TB)
+    T = _promote_type(TA, TB)
     s = zero(T)
     @simd for i in 1:N
         _a = @inbounds convert(T, a[i])
@@ -148,8 +175,18 @@ _IO.vecs_reshape(::Type{<:Euclidean}, v, dim) = v
 
 # ASSUMPTION: Assume N is a multiple of `vecsize(Euclidean, UInt8)`
 # If this is not the case, then `deconstruct` will fail.
-function _Base.distance(a::E, b::E) where {N, E <: Euclidean{N, UInt8}}
-    return _distance(deconstruct(a), deconstruct(b))
+const _FAST_EUCLIDEAN_U8 = Union{
+    Euclidean{32,UInt8},
+    Euclidean{64,UInt8},
+    Euclidean{96,UInt8},
+    Euclidean{128,UInt8},
+}
+
+function _Base.distance(a::E, b::E) where {E <: _FAST_EUCLIDEAN_U8}
+    return _distance(
+        deconstruct(SIMD.Vec{32,UInt8}, a),
+        deconstruct(SIMD.Vec{32,UInt8}, b),
+    )
 end
 
 function _distance(a::T, b::T) where {N, T <: NTuple{N, SIMD.Vec{32, UInt8}}}

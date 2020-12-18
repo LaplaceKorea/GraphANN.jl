@@ -62,11 +62,12 @@ it too large will hurt performance in the cache.
 The default is `groupsize = 32`.
 """
 function bruteforce_search(
-    queries::AbstractVector{T},
-    dataset::AbstractVector{T},
+    queries::AbstractVector,
+    dataset::AbstractVector,
     num_neighbors::Int = 100;
     groupsize = 32,
     savefile = nothing,
+    metric = distance,
 ) where {T}
     # Allocate max heaps for each
     # One for each column in the queries matrix
@@ -90,7 +91,7 @@ function bruteforce_search(
         for (base_id, base) in enumerate(dataset)
             for (heap_num, query_id) in enumerate(range)
                 query = queries[query_id]
-                dist = distance(query, base)
+                dist = metric(query, base)
 
                 # Need to convert from 1 based indexing to 0 based indexing...
                 push!(heaps[heap_num], Neighbor(base_id - 1, dist))

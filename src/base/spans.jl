@@ -44,10 +44,20 @@ function Base.getindex(x::Span, i::Int)
     return VectorizationBase.vload(pointer(x), sizeof(eltype(x)) * (i-1))
 end
 
+function Base.getindex(x::Span{<:NTuple}, i::Int)
+    @boundscheck checkbounds(x, i)
+    return unsafe_load(pointer(x, i))
+end
+
 function Base.setindex!(x::Span, v, i::Int)
     @boundscheck checkbounds(x, i)
     # NB: VectorizationBase loads and stores are index-0 instead of index-1!
     return VectorizationBase.vstore!(pointer(x), v, sizeof(eltype(x)) * (i-1))
+end
+
+function Base.setindex!(x::Span{<:NTuple}, v, i::Int)
+    @boundscheck checkbounds(x, i)
+    return unsafe_store!(pointer(x, i), v)
 end
 
 Base.IndexStyle(::Type{<:Span}) = Base.IndexLinear()

@@ -47,14 +47,7 @@
     @test collect(pruner) == 2:2:100
 end
 
-@testset "Testing Index" begin
-    # Load the dataset into memory
-    # For now, we have to resort to a little dance to convert the in-memory representation
-    # to a collection of `euclidean` points.
-    #
-    # Eventually, we'll have support for directly loading into a vector of `points`.
-    dataset = GraphANN.load_vecs(GraphANN.Euclidean{128,Float32}, dataset_path)
-
+function test_index(dataset, graph_type = GraphANN.DefaultAdjacencyList{UInt32})
     alpha = 1.2
     max_degree = 70
     window_size = 50
@@ -66,7 +59,7 @@ end
         prune_to_degree = 65,
     )
 
-    meta = GraphANN.generate_index(dataset, parameters)
+    meta = GraphANN.generate_index(dataset, parameters; graph_type = graph_type)
     g = meta.graph
 
     # Is the maximum degree of the generated graph within the set limit?
@@ -81,12 +74,25 @@ end
 
     @test eltype(ground_truth) == UInt32
     algo = GraphANN.GreedySearch(100)
-    meta = GraphANN.MetaGraph(g, dataset)
     start = GraphANN.medioid(dataset)
+    start = GraphANN.StartNode(start, dataset[start])
 
     ids = GraphANN.searchall(algo, meta, start, queries; num_neighbors = 100)
     recalls = GraphANN.recall(ground_truth, ids)
     @test mean(recalls) >= 0.99
+    return meta
+end
+
+@testset "Testing Index" begin
+    # Load the dataset into memory
+    dataset = GraphANN.load_vecs(GraphANN.Euclidean{128,Float32}, dataset_path)::Vector{GraphANN.Euclidean{128,Float32}}
+    dataset_u8 = convert.(UInt8, dataset)::Vector{GraphANN.Euclidean{128,UInt8}}
+
+    # Index generation using both Float32 and UInt8
+    meta = test_index(dataset)
+    test_index(dataset, GraphANN.FlatAdjacencyList{UInt32})
+    test_index(dataset_u8)
+    test_index(dataset_u8, GraphANN.FlatAdjacencyList{UInt32})
 
     #####
     ##### Graph IO
@@ -119,22 +125,4 @@ end
         graphs_equal(dense, default)
         graphs_equal(dense, flat)
     end
-
-    #####
-    ##### Try again, but with a FlatAdjacencyList
-    #####
-
-    meta = GraphANN.generate_index(
-        dataset,
-        parameters;
-        graph_type = GraphANN.FlatAdjacencyList{UInt32}
-    )
-    g = meta.graph
-
-    @test maximum(outdegree(g)) <= max_degree
-    @test is_connected(g)
-
-    ids = GraphANN.searchall(algo, meta, start, queries; num_neighbors = 100)
-    recalls = GraphANN.recall(ground_truth, ids)
-    @test mean(recalls) >= 0.99
 end

@@ -1,5 +1,5 @@
 #####
-##### Choose Initial Points
+##### Kmeans Clustering
 #####
 
 # Choose initial centroids based on k-means++
@@ -124,16 +124,42 @@ end
 ##### Lloyd's algorithm
 #####
 
-_minsofar() = (min_distance = typemax(Float64), min_index = 0)
-function lloyds(
-    data::AbstractVector{T},
-    centroids::AbstractVector{T};
+struct CurrentMinimum
+    distance::Float64
+    index::Int64
+end
+
+CurrentMinimum() = CurrentMinimum(typemax(Float64), zero(Int64))
+Base.isless(a::CurrentMinimum, b::CurrentMinimum) = (a.distance < b.distance)
+# Scalar broadcasting
+Base.broadcastable(x::CurrentMinimum) = (x,)
+
+function _find_centers!(min_so_far::AbstractVector{CurrentMinimum}, centroids, data, batch)
+    # Reset current minimums for the batch
+    min_so_far .= CurrentMinimum()
+    for center_index in eachindex(centroids), (offset, index) in enumerate(batch)
+        @inbounds center = centroids[center_index]
+
+        this_distance = distance(data[index], center)
+        candidate = CurrentMinimum(this_distance, center_index)
+
+        # Compute distance from this point to this centroid.
+        # If the distance is less than the lowest so far, update the lowest.
+        if candidate < min_so_far[offset]
+            min_so_far[offset] = candidate
+        end
+    end
+end
+
+function lloyds!(
+    centroids::AbstractVector{T},
+    data::AbstractVector{T};
     max_iterations = 10,
     tol = 1E-4,
     batchsize = 1024,
 ) where {T}
     # As thread local storage, keep track of the nearest centroids computed so far.
-    tls = ThreadLocal([(_minsofar()) for _ in 1:batchsize])
+    tls = ThreadLocal([CurrentMinimum() for _ in 1:batchsize])
 
     # Accumulate points assigned to this center so far.
     # Control access with a lock.
@@ -144,23 +170,8 @@ function lloyds(
     meter = ProgressMeter.Progress(max_iterations, 1, "Computing Centroids ...")
     ProgressMeter.@showprogress 1 for iter in 1:max_iterations
         dynamic_thread(batched(eachindex(data), batchsize)) do batch
-            # Reset thread local storage
             min_so_far = tls[]
-            min_so_far .= (_minsofar(),)
-
-            # Compute the nearest centroids
-            for center_index in 1:length(centroids), (offset, index) in enumerate(batch)
-                @inbounds center = centroids[center_index]
-                @unpack min_distance, min_index = min_so_far[offset]
-
-                # Compute distance from this point to this centroid.
-                # If the distance is less than the lowest so far, update the lowest.
-                this_distance = distance(data[index], center)
-                if this_distance < min_distance
-                    update = (min_distance = this_distance, min_index = center_index)
-                    min_so_far[offset] = update
-                end
-            end
+            _find_centers!(min_so_far, centroids, data, batch)
 
             # Accumulate the points assigned to centroids
             # Base iteration off the batch since it could be smaller (last batch)
@@ -168,7 +179,7 @@ function lloyds(
                 data_index = batch[offset]
                 datum = data[data_index]
 
-                @unpack min_index = min_so_far[offset]
+                min_index = min_so_far[offset].index
                 Base.@lock locks[min_index] begin
                     integrated_points[min_index] += datum
                     points_per_center[min_index] += 1
@@ -177,7 +188,10 @@ function lloyds(
         end
 
         # All cells have been integrated, compute new centroids
-        new_centroids = integrated_points ./ points_per_center
+        new_centroids = map(integrated_points, points_per_center) do ip, ppc
+            return ppc == 0 ? rand(data) : (ip / ppc)
+        end
+        #new_centroids = integrated_points ./ points_per_center
 
         # Reset for new iteration
         zero!(integrated_points)
@@ -187,7 +201,7 @@ function lloyds(
         movement = sum(sum.(new_centroids .- centroids))
         total = sum(sum.(centroids))
 
-        centroids .= round.(eltype(T), new_centroids)
+        centroids .= lossy_convert.(eltype(T), new_centroids)
 
         # Exit condition
         relative_movement = abs(movement / total)
@@ -199,6 +213,5 @@ function lloyds(
         (relative_movement < tol) && break
     end
     ProgressMeter.finish!(meter)
-
     return centroids
 end

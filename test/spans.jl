@@ -15,6 +15,14 @@
     @test_throws BoundsError x[0]
     @test_throws BoundsError x[length(x) + 1]
 
+    # Can we store tuples of `isbits` types as well?
+    A = [(i, i+1, i+2, i+3) for i in 1:10]
+    x = GraphANN.Span(pointer(A, 2), length(A) - 2)
+    @test x[1] == (2, 3, 4, 5)
+    @test x[end] == (9, 10, 11, 12)
+    x[1] = (0, 0, 0, 0)
+    @test A[2] == (0, 0, 0, 0)
+
     # Test that code vectorizes properly.
     # If it DOES vectorize, then we should see some unrolled loops in the assembly
     # code for the broadcasted add function.
@@ -43,4 +51,5 @@
     # Julia doesn't agressively compile in test mode.
     # That's annoying.
     @test_broken vcount == unroll_count
+
 end

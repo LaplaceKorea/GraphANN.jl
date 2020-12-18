@@ -77,6 +77,8 @@ approx_or_greater(a, b) = (a ≈ b) || (a > b)
 
     # Set up the algorithm.
     start = GraphANN.medioid(data)
+    start = GraphANN.StartNode(start, data[start])
+
     found_tail_mismatch = false
     found_swap_mismatch = false
     for (i, comparison) in enumerate(comparisons)

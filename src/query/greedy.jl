@@ -29,6 +29,11 @@ Base.@kwdef struct GreedyCallbacks{A, B, C}
     postdistance::C = donothing
 end
 
+struct StartNode{U,T}
+    index::U
+    value::T
+end
+
 # Use the `GreedySearch` type to hold parameters and intermediate datastructures
 # used to control the greedy search.
 mutable struct GreedySearch{T <: AbstractSet}
@@ -71,6 +76,7 @@ end
 Base.length(greedy::GreedySearch) = length(greedy.best)
 
 visited!(greedy::GreedySearch, vertex) = push!(greedy.visited, getid(vertex))
+isvisited(greedy::GreedySearch, vertex) = in(getid(vertex), greedy.visited)
 getvisited(greedy::GreedySearch) = greedy.visited
 
 # Get the closest non-visited vertex
@@ -79,11 +85,14 @@ getcandidate!(greedy::GreedySearch) = popmin!(greedy.best_unvisited)
 
 isfull(greedy::GreedySearch) = length(greedy) >= greedy.search_list_size
 
-function pushcandidate!(greedy::GreedySearch, vertex)
+function maybe_pushcandidate!(greedy::GreedySearch, vertex)
     # If this has already been seen, don't do anything.
     in(getid(vertex), greedy.visited) && return nothing
+    pushcandidate!(greedy, vertex)
+end
+
+function pushcandidate!(greedy::GreedySearch, vertex)
     visited!(greedy, vertex)
-    # TODO: Distance check?
 
     # Since we have not yet visited this vertex, we have to add it both to `best` and
     # `best_unvisited`,
@@ -122,18 +131,20 @@ end
 ##### Greedy Search Implementation
 #####
 
+# Standard distance computation
 function search(
     algo::GreedySearch,
     meta::MetaGraph,
-    start_node,
-    query,
+    start::StartNode,
+    query;
     callbacks = GreedyCallbacks(),
+    metric = distance,
 )
     empty!(algo)
 
     # Destructure argument
     @unpack graph, data = meta
-    pushcandidate!(algo, Neighbor(start_node, distance(query, data[start_node])))
+    pushcandidate!(algo, Neighbor(start.index, metric(query, start.value)))
     while !done(algo)
         p = getid(unsafe_peek(algo))
         neighbors = LightGraphs.outneighbors(graph, p)
@@ -155,7 +166,59 @@ function search(
             # NOTE: Checking if a vertex has been visited here is actually SLOWER than
             # deferring until after the distance comparison.
             @inbounds v = neighbors[i]
-            @inbounds d = distance(query, data[v])
+            @inbounds d = metric(query, data[v])
+
+            ## only bother to add if it's better than the worst currently tracked.
+            if d < getdistance(maximum(algo)) || !isfull(algo)
+                maybe_pushcandidate!(algo, Neighbor(v, d))
+            end
+        end
+
+        callbacks.postdistance(algo, neighbors)
+    end
+
+    return nothing
+end
+
+# Specialize for using PQ based distance computations.
+function search(
+    algo::GreedySearch,
+    meta::MetaGraph{<:Any, <:PQGraph},
+    start::StartNode,
+    query;
+    callbacks = GreedyCallbacks(),
+    metric = distance,
+)
+    empty!(algo)
+
+    # Destructure argument
+    @unpack graph, data = meta
+    pushcandidate!(algo, Neighbor(start.index, metric(query, start.value)))
+    while !done(algo)
+        p = getid(unsafe_peek(algo))
+        neighbors = LightGraphs.outneighbors(graph, p)
+
+        # TODO: Implement prefetching for PQGraphs
+        # # Prefetch all new datapoints.
+        # # IMPORTANT: This is critical for performance!
+        # for vertex in neighbors
+        #     @inbounds prefetch(data, vertex)
+        # end
+
+        # Prune
+        # Do this here to allow the prefetched vectors time to arrive in the cache.
+        getcandidate!(algo)
+        reduce!(algo)
+
+        # Distance computations
+        neighbor_points = data[p]
+        for i in eachindex(neighbors)
+            # Since PQ based distance computations take longer, check if we even need
+            # to perform the distance computation first.
+            @inbounds v = neighbors[i]
+            isvisited(greedy, v) && continue
+
+            @inbounds d = metric(query, neighbor_points[i])
 
             ## only bother to add if it's better than the worst currently tracked.
             if d < getdistance(maximum(algo)) || !isfull(algo)
@@ -173,10 +236,11 @@ end
 function searchall(
     algo::GreedySearch,
     meta_graph::MetaGraph,
-    start_node,
+    start::StartNode,
     queries::AbstractVector;
     num_neighbors = 10,
     callbacks = GreedyCallbacks(),
+    metric = distance,
 )
     num_queries = length(queries)
     dest = Array{eltype(meta_graph.graph),2}(undef, num_neighbors, num_queries)
@@ -184,7 +248,7 @@ function searchall(
         # -- optional telemetry
         callbacks.prequery()
 
-        search(algo, meta_graph, start_node, query, callbacks)
+        search(algo, meta_graph, start, query; callbacks, metric)
 
         # Copy over the results to the destination
         results = destructive_extract!(algo.best)
@@ -202,10 +266,11 @@ end
 function searchall(
     tls::ThreadLocal{<:GreedySearch},
     meta::MetaGraph,
-    start_node,
+    start::StartNode,
     queries::AbstractVector;
     num_neighbors = 10,
     callbacks = GreedyCallbacks(),
+    metric = distance,
 )
     num_queries = length(queries)
     dest = Array{eltype(meta.graph),2}(undef, num_neighbors, num_queries)
@@ -218,7 +283,7 @@ function searchall(
             # -- optional telemetry
             callbacks.prequery()
 
-            search(algo, meta, start_node, query, callbacks)
+            search(algo, meta, start, query; callbacks, metric)
 
             # Copy over the results to the destination
             results = destructive_extract!(algo.best)

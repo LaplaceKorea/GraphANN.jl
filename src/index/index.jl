@@ -436,7 +436,8 @@ end
             # Perform a greedy search from this node.
             # The visited list will live inside the `greedy` object and will be extracted
             # using the `getvisited` function.
-            search(storage.greedy, meta, vertex, data[vertex])
+            datum = data[vertex]
+            search(storage.greedy, meta, StartNode(vertex, datum), datum)
             candidates = getvisited(storage.greedy)
 
             # Run the `RobustPrune` algorithm on the graph starting at this point.
