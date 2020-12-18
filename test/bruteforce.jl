@@ -41,9 +41,11 @@
     compare_ids(ids)
 
     # Using UInt8
+    queries_u8 = [map(UInt8, i) for i in queries]
+    dataset_u8 = [map(UInt8, i) for i in dataset]
     ids = GraphANN.bruteforce_search(
-        convert.(UInt8, queries),
-        convert.(UInt8, dataset),
+        queries_u8,
+        dataset_u8,
     )
     compare_ids(ids)
 

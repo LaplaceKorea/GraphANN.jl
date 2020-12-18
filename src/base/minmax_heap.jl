@@ -32,6 +32,11 @@ function destructive_extract!(heap::BinaryMinMaxHeap)
     return heap.valtree
 end
 
+function destructive_extract!(heap::BinaryMinMaxHeap, k::Integer)
+    partialsort!(heap.valtree, 1:k)#; alg = Base.QuickSort)
+    return heap.valtree
+end
+
 ################################################
 #
 # core implementation

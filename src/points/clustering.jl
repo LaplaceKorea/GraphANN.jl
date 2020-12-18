@@ -151,6 +151,16 @@ function _find_centers!(min_so_far::AbstractVector{CurrentMinimum}, centroids, d
     end
 end
 
+# If converting from a Float to an Integer, then we need to round.
+# Otherwise, normal conversion is fine.
+#
+# Also, include a partially applied version for convenience, as well as a version that
+# knows how to broadcast across Euclidean points.
+maybe_round(::Type{T}, i) where {T} = convert(T, i)
+maybe_round(::Type{T}, i::AbstractFloat) where {T <: Integer} = round(T, i)
+maybe_round(::Type{T}) where {T} = i -> maybe_round(T, i)
+maybe_round(::Type{T}, i::Euclidean) where {T} = map(maybe_round(T), i)
+
 function lloyds!(
     centroids::AbstractVector{T},
     data::AbstractVector{T};
@@ -191,7 +201,6 @@ function lloyds!(
         new_centroids = map(integrated_points, points_per_center) do ip, ppc
             return ppc == 0 ? rand(data) : (ip / ppc)
         end
-        #new_centroids = integrated_points ./ points_per_center
 
         # Reset for new iteration
         zero!(integrated_points)
@@ -201,7 +210,7 @@ function lloyds!(
         movement = sum(sum.(new_centroids .- centroids))
         total = sum(sum.(centroids))
 
-        centroids .= lossy_convert.(eltype(T), new_centroids)
+        centroids .= maybe_round.(eltype(T), new_centroids)
 
         # Exit condition
         relative_movement = abs(movement / total)

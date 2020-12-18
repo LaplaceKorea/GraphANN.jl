@@ -40,7 +40,7 @@ end
 
     # Try clustering with both Float32 and UInt8 data types.
     cost_f32 = test_clustering(data)
-    cost_u8 = test_clustering(convert.(UInt8, data))
+    cost_u8 = test_clustering(map(i -> map(UInt8, i), data))
     # Relative error between the computed costs should be pretty low
     rel_error = abs(cost_f32 - cost_u8) / cost_f32
     @test rel_error < 1E-2

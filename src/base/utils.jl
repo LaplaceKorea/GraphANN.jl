@@ -167,6 +167,15 @@ function prefetch_llc(ptr::Ptr)
     return nothing
 end
 
+function unsafe_prefetch(x::AbstractVector{T}, i, len) where {T}
+    # Compute the number of cache lines accessed.
+    num_cache_lines = ceil(Int, len * sizeof(T) / 64)
+    ptr = pointer(x, i)
+    for j in 0:(num_cache_lines - 1)
+        prefetch(ptr + 64 * j)
+    end
+end
+
 #####
 ##### BatchedRange
 #####

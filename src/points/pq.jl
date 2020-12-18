@@ -91,23 +91,23 @@ end
 
 # Has the same structure as the adjacency list of a graph, but the entries are NTuples
 # that point to centroids
-struct PQGraph{N,T <: Unsigned}
+struct PQGraph{T <: Unsigned, N}
     raw::Vector{NTuple{N,T}}
     spans::Vector{Span{NTuple{N,T}}}
 
     # -- very specific inner constructor
-    function PQGraph{N, T}(
+    function PQGraph{T, N}(
         raw::Vector{NTuple{N,T}},
         spans::Vector{Span{NTuple{N,T}}},
-    ) where {N, T <: Unsigned}
-        return new{N,T}(raw, spans)
+    ) where {T <: Unsigned, N}
+        return new{T,N}(raw, spans)
     end
 end
 
 # Access the adjacency list
 Base.getindex(graph::PQGraph, i) = graph.spans[i]
 
-function PQGraph{N,T}(
+function PQGraph{T}(
     pqtable::PQTable{N},
     graph::UniDirectedGraph{<:Any, <:DenseAdjacencyList};
     allocator = stdallocator
@@ -134,11 +134,11 @@ function PQGraph{N,T}(
         accumulator += num_neighbors
         return span
     end
-    return PQGraph{N,T}(raw, spans)
+    return PQGraph{T,N}(raw, spans)
 end
 
 # Geneic fallback
-function PQGraph{N,T}(
+function PQGraph{T}(
     pqtable::PQTable{N},
     graph::UniDirectedGraph{<:Any};
     allocator = stdallocator
@@ -166,7 +166,7 @@ function PQGraph{N,T}(
         accumulator += num_neighbors
         return span
     end
-    return Span(raw, spans)
+    return PQGraph{T,N}(raw, spans)
 end
 
 

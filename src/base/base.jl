@@ -79,7 +79,7 @@ export Neighbor, getid, getdistance, idequal
 export RobinSet
 export zeroas, medioid, nearest_neighbor
 export recall
-export prefetch, prefetch_llc
+export prefetch, prefetch_llc, unsafe_prefetch
 export BatchedRange, batched
 include("utils.jl")
 

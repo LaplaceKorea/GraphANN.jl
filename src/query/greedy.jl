@@ -199,11 +199,10 @@ function search(
         neighbors = LightGraphs.outneighbors(graph, p)
 
         # TODO: Implement prefetching for PQGraphs
-        # # Prefetch all new datapoints.
-        # # IMPORTANT: This is critical for performance!
-        # for vertex in neighbors
-        #     @inbounds prefetch(data, vertex)
-        # end
+        # Prefetch all new datapoints.
+        # IMPORTANT: This is critical for performance!
+        neighbor_points = data[p]
+        unsafe_prefetch(neighbor_points, 1, length(neighbor_points))
 
         # Prune
         # Do this here to allow the prefetched vectors time to arrive in the cache.
@@ -211,12 +210,11 @@ function search(
         reduce!(algo)
 
         # Distance computations
-        neighbor_points = data[p]
         for i in eachindex(neighbors)
             # Since PQ based distance computations take longer, check if we even need
             # to perform the distance computation first.
             @inbounds v = neighbors[i]
-            isvisited(greedy, v) && continue
+            isvisited(algo, v) && continue
 
             @inbounds d = metric(query, neighbor_points[i])
 
@@ -235,7 +233,7 @@ end
 # Single Threaded Query
 function searchall(
     algo::GreedySearch,
-    meta_graph::MetaGraph,
+    meta::MetaGraph,
     start::StartNode,
     queries::AbstractVector;
     num_neighbors = 10,
@@ -243,15 +241,15 @@ function searchall(
     metric = distance,
 )
     num_queries = length(queries)
-    dest = Array{eltype(meta_graph.graph),2}(undef, num_neighbors, num_queries)
+    dest = Array{eltype(meta.graph),2}(undef, num_neighbors, num_queries)
     for (col, query) in enumerate(queries)
         # -- optional telemetry
         callbacks.prequery()
 
-        search(algo, meta_graph, start, query; callbacks, metric)
+        search(algo, meta, start, query; callbacks, metric)
 
         # Copy over the results to the destination
-        results = destructive_extract!(algo.best)
+        results = destructive_extract!(algo.best, num_neighbors)
         for i in 1:num_neighbors
             @inbounds dest[i,col] = getid(results[i])
         end
@@ -286,7 +284,7 @@ function searchall(
             search(algo, meta, start, query; callbacks, metric)
 
             # Copy over the results to the destination
-            results = destructive_extract!(algo.best)
+            results = destructive_extract!(algo.best, num_neighbors)
             for i in 1:num_neighbors
                 @inbounds dest[i,col] = getid(results[i])
             end

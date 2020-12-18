@@ -16,12 +16,10 @@ raw(x::GraphANN.Euclidean) = x.vals
     x = GraphANN.Euclidean{128,Float32}()
     @test length(x) == 128
     @test eltype(x) == Float32
-    @test isa(raw(x), NTuple{128,Float32})
 
     x = GraphANN.Euclidean{96,UInt8}()
     @test length(x) == 96
     @test eltype(x) == UInt8
-    @test isa(raw(x), NTuple{96,UInt8})
 
     # Lets do some distance calculations
     scale = 100

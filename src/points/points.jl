@@ -12,6 +12,7 @@ import LightGraphs
 import LightGraphs.SimpleGraphs: fadj
 import ProgressMeter
 import SIMD
+using StaticArrays
 import UnPack: @unpack
 
 export Euclidean

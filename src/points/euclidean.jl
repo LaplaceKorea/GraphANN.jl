@@ -4,10 +4,14 @@ _genindex(num_vectors, i) = [:(x[$j][$i]) for j in 1:num_vectors]
 
 # Points using the euclidean distances metric
 struct Euclidean{N,T}
-    vals::NTuple{N,T}
+    vals::SVector{N,T}
 end
 
-Euclidean{N,T}() where {N,T} = Euclidean(ntuple(_ -> zero(T), N))
+unwrap(x::Euclidean) = x.vals
+
+Euclidean{N,T}() where {N,T} = Euclidean(@SVector zeros(T, N))
+Euclidean{N,T}(vals::NTuple{N,T}) where {N,T} = Euclidean(SVector{N,T}(vals))
+Euclidean(vals::NTuple{N,T}) where {N,T} = Euclidean{N,T}(vals)
 
 _Base.zeroas(::Type{T}, ::Type{Euclidean{N,U}}) where {T,N,U} = Euclidean{N,T}()
 _Base.zeroas(::Type{T}, x::E) where {T, E <: Euclidean} = zeroas(T, E)
@@ -26,69 +30,13 @@ Base.eltype(::Type{Euclidean{N,T}}) where {N,T} = T
 
 # Use scalar behavior for broadcasting
 Base.broadcastable(x::Euclidean) = (x,)
+Base.map(f::F, x::Euclidean...) where {F} = Euclidean(map(f, unwrap.(x)...))
+Base.:/(x::Euclidean, y::Number) = Euclidean(unwrap(x) ./ y)
 
-@generated function Base.merge(x::NTuple{K, Euclidean{N,T}}) where {K,N,T}
-    final_param = K * N
-    exprs = [:(x[$i].vals...) for i in 1:K]
-    return :(Euclidean{$final_param,T}(($(exprs...),)))
-end
+Base.:+(x::Euclidean...) = map(+, x...)
+Base.:-(x::Euclidean...) = map(-, x...)
 
-#####
-##### Ops
-#####
-
-# Strategy - use a generated function to apply an arbitrary function elementwise to a
-# collection of Euclidean vectors.
-#
-# Implementations for ops such as `+` and `-` can then all use the same code path through
-# the `_apply` function below.
-@generated function _apply(f::F, x::Euclidean{N}...) where {F,N}
-    return _apply_impl(N, length(x))
-end
-
-function _apply_impl(vector_length, num_vectors)
-    syms = _syms(vector_length)
-    exprs = [:($(syms[i]) = f($(_genindex(num_vectors, i)...))) for i in 1:vector_length]
-    return quote
-        $(exprs...)
-        Euclidean(($(syms...),))
-    end
-end
-
-# Unary ops
-Base.convert(::Type{T}, x::Euclidean{N,T}) where {N, T} = x
-Base.convert(::Type{T}, x::T) where {T <: Euclidean} = x
-Base.convert(::Type{Any}, x::Euclidean) = x
-Base.convert(::Type{T}, x::Euclidean) where {T} = _apply(i -> convert(T, i), x)
-
-Base.round(::Type{T}, x::Euclidean{N}) where {T, N} = _apply(i -> round(T, i), x)
-
-lossy_convert(::Type{T}, x::Euclidean) where {T} = convert(T, x)
-function lossy_convert(::Type{T}, x::Euclidean{N,U}) where {T <: Integer, N, U <: AbstractFloat}
-    return round(T, x)
-end
-
-# The `sum` here always returns a Float64.
-# This is helpful for cases where vectors are composed of things like UInt8 which can
-# easily overflow.
-function Base.sum(x::Euclidean{N}) where {N}
-    s = zero(Float64)
-    for i in 1:N
-        s += x[i]
-    end
-    return s
-end
-
-# Binary Ops
-for op in [:+, :-]
-    @eval begin
-        Base.$op(x::Euclidean{N}, y::Euclidean{N}) where {N} = _apply($op, x, y)
-    end
-end
-
-function Base.:/(x::Euclidean{N,T}, y::U) where {N, T, U <: Number}
-    return _apply(i -> i / y, x)
-end
+Base.iterate(x::Euclidean, s...) = iterate(unwrap(x), s...)
 
 #####
 ##### Distance Computation
