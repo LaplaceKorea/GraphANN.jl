@@ -8,13 +8,14 @@ struct Euclidean{N,T}
 end
 
 unwrap(x::Euclidean) = x.vals
+Base.Tuple(x::Euclidean) = Tuple(unwrap(x))
 
 Euclidean{N,T}() where {N,T} = Euclidean(@SVector zeros(T, N))
 Euclidean{N,T}(vals::NTuple{N,T}) where {N,T} = Euclidean(SVector{N,T}(vals))
 Euclidean(vals::NTuple{N,T}) where {N,T} = Euclidean{N,T}(vals)
 
-_Base.zeroas(::Type{T}, ::Type{Euclidean{N,U}}) where {T,N,U} = Euclidean{N,T}()
-_Base.zeroas(::Type{T}, x::E) where {T, E <: Euclidean} = zeroas(T, E)
+ _Base.zeroas(::Type{T}, ::Type{Euclidean{N,U}}) where {T,N,U} = Euclidean{N,T}()
+ _Base.zeroas(::Type{T}, x::E) where {T, E <: Euclidean} = zeroas(T, E)
 Base.zero(::E) where {E <: Euclidean} = zero(E)
 Base.zero(::Type{Euclidean{N,T}}) where {N,T} = Euclidean{N,T}()
 
@@ -68,6 +69,10 @@ end
 
 # Generic fallback for computing distance between to similar-sized Euclidean points with
 # a different numeric type.
+#
+# The generic fallback when using integet datapoints is an Int64, to avoid any potential
+# issues with overflow.
+# If we overflow an Int64, we're doing something wrong ...
 _promote_type(x...) = promote_type(x...)
 _promote_type(x::Type{T}...) where {T <: Integer} = Int64
 

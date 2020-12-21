@@ -17,9 +17,9 @@ import UnPack: @unpack
 
 export Euclidean
 include("euclidean.jl")
-include("clustering.jl")
 
-export PQTable, PQGraph
-include("pq.jl")
+#export PQTable, PQGraph
+#include("clustering.jl")
+#include("pq.jl")
 
 end

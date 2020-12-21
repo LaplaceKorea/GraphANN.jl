@@ -16,6 +16,7 @@ include("base/base.jl"); using ._Base
 include("graphs/graphs.jl"); using ._Graphs
 include("io/io.jl"); using ._IO
 include("points/points.jl"); using ._Points
+include("quantization/quantization.jl"); using ._Quantization
 
 # Core implementation
 include("query/greedy.jl")

@@ -4,6 +4,12 @@ donothing(x...) = nothing
 printlnstyled(x...; kw...) = printstyled(x..., "\n"; kw...)
 zero!(x) = (x .= zero(eltype(x)))
 
+# Partially applied function
+struct Map{F}
+    f::F
+end
+(f::Map)(x...) = map(f.f, x...)
+
 #####
 ##### Neighbor
 #####

@@ -42,12 +42,16 @@ function PQTable{N}(data::Vector{Euclidean{M,T}}, num_centroids) where {N, M, T}
 end
 
 # Encoding
-encode(table::PQTable, x) = encode(UInt64, table, x)
-function encode(::Type{U}, table::PQTable{N,V,T}, x::V) where {U <: Unsigned, N,V,T}
+unsafe_encode!(ptr::Ptr, encoder, x) = _unsafe_encode_fallback!(ptr, encoder, x)
+function _unsafe_encode_fallback!(
+    ptr::Ptr{U},
+    table::PQTable{N,V,T},
+    x::V
+) where {U <: Unsigned, N,V,T}
     @unpack centroids = table
 
     dx = deconstruct(T, x)
-    return ntuple(Val(N)) do i
+    for i in 1:N
         current_minimum = CurrentMinimum()
         for (index, centroid) in enumerate(centroids[i])
             candidate = CurrentMinimum(distance(dx[i], centroid), index)
@@ -55,7 +59,10 @@ function encode(::Type{U}, table::PQTable{N,V,T}, x::V) where {U <: Unsigned, N,
                 current_minimum = candidate
             end
         end
-        return U(current_minimum.index - 1)
+
+        val = U(current_minimum.index - 1)
+        unsafe_store!(ptr, val)
+        ptr += sizeof(val)
     end
 end
 
@@ -67,22 +74,6 @@ end
 function decode(table::PQTable, b::NTuple{N, T}) where {N,T}
     @unpack centroids = table
     merge(ntuple(i -> @inbounds(centroids[i][b[i] + one(T)]), Val(N)))
-end
-
-function _query(table::PQTable, queries::AbstractVector)
-    results = Array{Int64,1}(undef, num_neighbors)
-    dynamic_thread(eachindex(queries)) do query_index
-        query = queries[query_index]
-        current_minimum = CurrentMinimum()
-        for (index, x) in enumerate(centroids[i])
-            candidate = CurrentMinimum(distance(dx[i], centroid), index)
-            if candidate < current_minimum
-                current_minimum = candidate
-            end
-        end
-        return U(current_minimum.index - 1)
-
-    end
 end
 
 #####
@@ -110,8 +101,10 @@ Base.getindex(graph::PQGraph, i) = graph.spans[i]
 function PQGraph{T}(
     pqtable::PQTable{N},
     graph::UniDirectedGraph{<:Any, <:DenseAdjacencyList};
-    allocator = stdallocator
-) where {N,T}
+    allocator = stdallocator,
+    code_type::Type{U} = UInt8,
+    encoder = pqtable,
+) where {N,T,U}
     # Pre-allocate destination
     raw = allocator(NTuple{N,T}, LightGraphs.ne(graph))
 
@@ -122,7 +115,7 @@ function PQGraph{T}(
     @unpack data = pqtable
     dynamic_thread(eachindex(storage), 32) do i
         v = storage[i]
-        raw[i] = encode(pqtable, data[v])
+        unsafe_encode!(convert(Ptr{U}, pointer(raw, i)), encoder, data[v])
     end
 
     # Now that the raw storage has been computed, we just need to construct the

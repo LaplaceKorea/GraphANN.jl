@@ -5,7 +5,7 @@ function test_clustering(data)
     # (1) Always decrease as we apply refinements
     # (2) Be lower than the the cost of using the origin as a single cluster centroid.
     num_centroids = 128
-    centroids = GraphANN._Points.choose_centroids(
+    centroids = GraphANN._Quantization.choose_centroids(
         data,
         num_centroids;
         num_iterations = 10,
@@ -16,12 +16,12 @@ function test_clustering(data)
 
     # Remeber - the computed cost is really the square of the cost since that's easier to
     # calculate and the square-root function is monotonic.
-    initial_cost = sum(GraphANN._Points.compute_cost!(costs, data, centroids))
+    initial_cost = sum(GraphANN._Quantization.compute_cost!(costs, data, centroids))
     origin_cost = sum(sum, data)
     @test sqrt(initial_cost) < origin_cost
 
     # Refine using Lloyd's algorithm
-    GraphANN._Points.lloyds!(
+    GraphANN._Quantization.lloyds!(
         centroids,
         data;
         max_iterations = 50,
@@ -29,7 +29,7 @@ function test_clustering(data)
         batchsize = 1024,
     )
 
-    cost = sum(GraphANN._Points.compute_cost!(costs, data, centroids))
+    cost = sum(GraphANN._Quantization.compute_cost!(costs, data, centroids))
     @test cost < initial_cost
     @test sqrt(cost) < origin_cost
     return cost

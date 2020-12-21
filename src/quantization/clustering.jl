@@ -208,7 +208,7 @@ function lloyds!(
 
         # How much did we move
         movement = sum(sum.(new_centroids .- centroids))
-        total = sum(sum.(centroids))
+        total = sum(sum, centroids)
 
         centroids .= maybe_round.(eltype(T), new_centroids)
 

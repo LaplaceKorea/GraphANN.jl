@@ -86,7 +86,7 @@ end
 @testset "Testing Index" begin
     # Load the dataset into memory
     dataset = GraphANN.load_vecs(GraphANN.Euclidean{128,Float32}, dataset_path)::Vector{GraphANN.Euclidean{128,Float32}}
-    dataset_u8 = GraphANN._Points.maybe_round.(UInt8, dataset)
+    dataset_u8 = GraphANN._Quantization.maybe_round.(UInt8, dataset)
 
     # Index generation using both Float32 and UInt8
     meta = test_index(dataset)
