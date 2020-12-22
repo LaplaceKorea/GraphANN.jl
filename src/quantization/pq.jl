@@ -2,7 +2,7 @@
 ##### Product Quantize a dataset
 #####
 
-function _valdiv(A, B)
+function exact_div(A, B)
     div, rem = divrem(A, B)
     if iszero(rem)
         return div
@@ -11,12 +11,16 @@ function _valdiv(A, B)
     end
 end
 
+# Type Parameters
+# N - size(self.centroids, 2) - The number of centroids in this clustering.
+# V - The element type of the wrapped dataset.
+# T - The element type of the centroid types.
 struct PQTable{N,V,T}
     # The data that we're quantizing
     data::Vector{V}
 
     # Centroids - one for each partition of the data space
-    centroids::NTuple{N, Vector{T}}
+    centroids::Matrix{T}
 end
 
 # TODO: Work on making inference work better here.
@@ -24,8 +28,7 @@ end
 function PQTable{N}(data::Vector{Euclidean{M,T}}, num_centroids) where {N, M, T}
     # How many element are in each partition?
     # `_valdiv` will error if `N` does not divide the data size.
-    partition_size = _valdiv(M, N)
-
+    partition_size = exact_div(M, N)
     centroids = ntuple(Val(N)) do i
         _data = getindex.(deconstruct.(Euclidean{partition_size,T}, data), i)
         centroids = choose_centroids(
@@ -38,10 +41,33 @@ function PQTable{N}(data::Vector{Euclidean{M,T}}, num_centroids) where {N, M, T}
         return centroids
     end
 
-    return PQTable(data, centroids)
+    centroids = reduce(hcat, centroids)
+    return PQTable{N,eltype(data),eltype(centroids)}(data, centroids)
 end
 
+encoded_type(::Type{U}, ::PQTable{N}) where {U,N} = NTuple{N,U}
+
 # Encoding
+# We use unsafe version dealing directly with pointers for efficiency's sake.
+# Directly moving around big tuples is expensive and it's hard to iteratively build large
+# tuples.
+#
+# So instead, we allocate space for the tuple ahead of time and periodically update
+# the correct regions.
+#
+# It's not the cleanest thing in the world, but should work.
+encode(encoder, x) = encode(UInt64, encoder, x)
+function encode(::Type{U}, encoder, x) where {U}
+    ref = Ref{encoded_type(U, encoder)}()
+    # Keep the compiler from trying to optimize away `ref`.
+    # This is likely not needed, but can't hurt as this is a generic method that is not
+    # likely to be used in performance critical code paths.
+    GC.@preserve ref begin
+        unsafe_encode!(convert(Ptr{U}, pointer_from_objref(ref)), encoder, x)
+    end
+    return ref[]
+end
+
 unsafe_encode!(ptr::Ptr, encoder, x) = _unsafe_encode_fallback!(ptr, encoder, x)
 function _unsafe_encode_fallback!(
     ptr::Ptr{U},
@@ -53,7 +79,7 @@ function _unsafe_encode_fallback!(
     dx = deconstruct(T, x)
     for i in 1:N
         current_minimum = CurrentMinimum()
-        for (index, centroid) in enumerate(centroids[i])
+        for (index, centroid) in enumerate(view(centroids, :, i))
             candidate = CurrentMinimum(distance(dx[i], centroid), index)
             if candidate < current_minimum
                 current_minimum = candidate
@@ -68,12 +94,14 @@ end
 
 # Assymetric Distance Computation
 function (table::PQTable{N,V,T})(a::V, b::NTuple{N, <:Integer}) where {N,T,V}
-    distance(a, decode(table, b))
+    return compute_distance_fallback(table, a, b)
 end
+
+compute_distance_fallback(table, a, b) = distance(a, decode(table, b))
 
 function decode(table::PQTable, b::NTuple{N, T}) where {N,T}
     @unpack centroids = table
-    merge(ntuple(i -> @inbounds(centroids[i][b[i] + one(T)]), Val(N)))
+    merge(ntuple(i -> @inbounds(centroids[b[i] + one(T), i]), Val(N)))
 end
 
 #####

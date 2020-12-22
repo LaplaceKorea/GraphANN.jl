@@ -39,6 +39,11 @@ Base.:-(x::Euclidean...) = map(-, x...)
 
 Base.iterate(x::Euclidean, s...) = iterate(unwrap(x), s...)
 
+@generated function Base.merge(x::NTuple{K, <:Euclidean{N}}) where {K,N}
+    exprs = [:(x[$i][$j]) for j in 1:N, i in 1:K] |> vec
+    return :(Euclidean(($(exprs...),)))
+end
+
 #####
 ##### Distance Computation
 #####
