@@ -101,7 +101,7 @@ compute_distance_fallback(table, a, b) = distance(a, decode(table, b))
 
 function decode(table::PQTable, b::NTuple{N, T}) where {N,T}
     @unpack centroids = table
-    merge(ntuple(i -> @inbounds(centroids[b[i] + one(T), i]), Val(N)))
+    merge(ntuple(i -> @inbounds(centroids[Int(b[i]) + one(Int), i]), Val(N)))
 end
 
 #####
