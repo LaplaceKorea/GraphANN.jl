@@ -8,6 +8,7 @@ using Statistics
 
 # Extra helpful imports
 using LightGraphs
+import SIMD
 
 import GraphANN: Neighbor
 
@@ -31,6 +32,7 @@ include("spans.jl")
 include("pm.jl")
 include("bruteforce.jl")
 include("points/euclidean.jl")
+include("points/points.jl")
 include("points/clustering.jl")
 include("graphs/adjacency.jl")
 include("graphs/graphs.jl")

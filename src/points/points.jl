@@ -15,11 +15,10 @@ import SIMD
 using StaticArrays
 import UnPack: @unpack
 
+export SIMDLanes
+include("simd.jl")
+
 export Euclidean
 include("euclidean.jl")
 
-#export PQTable, PQGraph
-#include("clustering.jl")
-#include("pq.jl")
-
-end
+end # module

@@ -39,6 +39,8 @@ Base.:-(x::Euclidean...) = map(-, x...)
 
 Base.iterate(x::Euclidean, s...) = iterate(unwrap(x), s...)
 
+Base.convert(::Type{SIMD.Vec{N,T}}, x::Euclidean{N,T}) where {N, T} = SIMD.Vec{N,T}(Tuple(x))
+
 @generated function Base.merge(x::NTuple{K, <:Euclidean{N}}) where {K,N}
     exprs = [:(x[$i][$j]) for j in 1:N, i in 1:K] |> vec
     return :(Euclidean(($(exprs...),)))
@@ -50,7 +52,6 @@ end
 
 _cachelines(::Euclidean{N,T}) where {N,T} = (N * sizeof(T)) >> 6
 
-# Turn a `Euclidean{N,T}` into a tuple of `Vec{vecsize(Euclidean, T),T}`.
 # Ideally, the generated code for this should be a no-op, it's just awkward because
 # Julia doesn't really have a "bitcast" function ...
 function _deconstruct_impl(f, N::Integer, S::Integer)
@@ -79,18 +80,24 @@ end
 # issues with overflow.
 # If we overflow an Int64, we're doing something wrong ...
 _promote_type(x...) = promote_type(x...)
-_promote_type(x::Type{T}...) where {T <: Integer} = Int64
+_promote_type(x::Type{T}...) where {T <: Integer} = Int32
+_promote_type(x::Type{Int}...) = Int
 
-function _Base.distance(a::A, b::B) where {N, TA, TB, A <: Euclidean{N, TA}, B <: Euclidean{N, TB}}
+function _Base.distance(
+    a::A,
+    b::B
+) where {N, TA, TB, A <: Euclidean{N, TA}, B <: Euclidean{N, TB}}
     T = _promote_type(TA, TB)
     s = zero(T)
-    @simd for i in 1:N
-        _a = @inbounds convert(T, a[i])
-        _b = @inbounds convert(T, b[i])
-        s += (_a - _b) ^ 2
+
+    @fastmath @simd for i in 1:N
+        @inbounds ca = convert(T, a[i])
+        @inbounds cb = convert(T, b[i])
+        s += (ca - cb) ^2
     end
     return s
 end
+
 
 # Prefetching
 function _Base.prefetch(A::AbstractVector{Euclidean{N,T}}, i, f::F = _Base.prefetch) where {N,T,F}
@@ -105,16 +112,6 @@ function _Base.prefetch(A::AbstractVector{Euclidean{N,T}}, i, f::F = _Base.prefe
     end
     return nothing
 end
-
-# What is the vector size for various sized primitives
-#
-# Use a full 512-bit cache line for Float32
-vecsize(::Type{Euclidean}, ::Type{Float32}) = 16
-
-# For UInt8, we need to expand individual UInt8's to Int16's.
-# Thus, size the vectors for UInt8 to be 32 (half the 512-bit AVX size so that when we
-# expand them to Int16's, the whole 512-bit cache line is occupied.
-vecsize(::Type{Euclidean}, ::Type{UInt8}) = 32
 
 # Overload vecs loading functions
 _IO.vecs_read_type(::Type{Euclidean{N,T}}) where {N,T} = T

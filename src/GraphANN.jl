@@ -16,6 +16,7 @@ include("base/base.jl"); using ._Base
 include("graphs/graphs.jl"); using ._Graphs
 include("io/io.jl"); using ._IO
 include("points/points.jl"); using ._Points
+include("prefetch/prefetch.jl"); using ._Prefetcher
 include("quantization/quantization.jl"); using ._Quantization
 
 # Core implementation
@@ -23,7 +24,6 @@ include("query/greedy.jl")
 include("index/index.jl")
 
 # Prefetcher to increase performance
-include("prefetch/prefetch.jl")
 
 #####
 ##### Misc development functions

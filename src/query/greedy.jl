@@ -34,9 +34,12 @@ struct StartNode{U,T}
     value::T
 end
 
+struct HasPrefetching end
+struct NoPrefetching end
+
 # Use the `GreedySearch` type to hold parameters and intermediate datastructures
 # used to control the greedy search.
-mutable struct GreedySearch{T <: AbstractSet}
+mutable struct GreedySearch{T <: AbstractSet, P}
     search_list_size::Int
 
     # Pre-allocated buffer for the search list
@@ -52,9 +55,10 @@ mutable struct GreedySearch{T <: AbstractSet}
     best::BinaryMinMaxHeap{Neighbor}
     best_unvisited::BinaryMinMaxHeap{Neighbor}
     visited::T
+    prefetch_queue::P
 end
 
-function GreedySearch(search_list_size)
+function GreedySearch(search_list_size; prefetch_queue = nothing)
     best = BinaryMinMaxHeap{Neighbor}()
     best_unvisited = BinaryMinMaxHeap{Neighbor}()
     visited = RobinSet{UInt32}()
@@ -63,8 +67,13 @@ function GreedySearch(search_list_size)
         best,
         best_unvisited,
         visited,
+        prefetch_queue,
     )
 end
+
+# Base prefetching on the existence of a non-nothing element in the prefetch queue
+hasprefetching(::GreedySearch{<:Any,Nothing}) = NoPrefetching()
+hasprefetching(::GreedySearch) = HasPrefetching()
 
 # Prepare for another run.
 function Base.empty!(greedy::GreedySearch)
@@ -81,7 +90,23 @@ getvisited(greedy::GreedySearch) = greedy.visited
 
 # Get the closest non-visited vertex
 unsafe_peek(greedy::GreedySearch) = @inbounds greedy.best_unvisited.valtree[1]
-getcandidate!(greedy::GreedySearch) = popmin!(greedy.best_unvisited)
+#getcandidate!(greedy::GreedySearch) = popmin!(greedy.best_unvisited)
+
+getcandidate!(greedy::GreedySearch) = getcandidate!(greedy, hasprefetching(greedy))
+getcandidate!(greedy::GreedySearch, ::NoPrefetching) = popmin!(greedy.best_unvisited)
+
+function getcandidate!(greedy::GreedySearch, ::HasPrefetching)
+    @unpack best_unvisited, prefetch_queue = greedy
+    candidate = popmin!(best_unvisited)
+
+    # If there's another candidate in the queue, try to prefetch it.
+    if !isempty(best_unvisited)
+        push!(prefetch_queue, getid(unsafe_peek(greedy)))
+        _Prefetcher.commit!(prefetch_queue)
+    end
+
+    return candidate
+end
 
 isfull(greedy::GreedySearch) = length(greedy) >= greedy.search_list_size
 
@@ -98,7 +123,16 @@ function pushcandidate!(greedy::GreedySearch, vertex)
     # `best_unvisited`,
     push!(greedy.best, vertex)
     push!(greedy.best_unvisited, vertex)
+    #maybe_prefetch(greedy, vertex)
     return nothing
+end
+
+maybe_prefetch(greedy::GreedySearch, vertex) = maybe_prefetch(greedy, hasprefetching(greedy), vertex)
+maybe_prefetch(greedy::GreedySearch, ::NoPrefetching, vertex) = nothing
+function maybe_prefetch(greedy::GreedySearch, ::HasPrefetching, vertex)
+    @unpack prefetch_queue = greedy
+    push!(prefetch_queue, getid(vertex))
+    _Prefetcher.commit!(prefetch_queue)
 end
 
 done(greedy::GreedySearch) = isempty(greedy.best_unvisited)
@@ -134,7 +168,7 @@ end
 # Standard distance computation
 function search(
     algo::GreedySearch,
-    meta::MetaGraph,
+    meta,
     start::StartNode,
     query;
     callbacks = GreedyCallbacks(),
@@ -181,59 +215,59 @@ function search(
 end
 
 # Specialize for using PQ based distance computations.
-function search(
-    algo::GreedySearch,
-    meta::MetaGraph{<:Any, <:PQGraph},
-    start::StartNode,
-    query;
-    callbacks = GreedyCallbacks(),
-    metric = distance,
-)
-    empty!(algo)
-
-    # Destructure argument
-    @unpack graph, data = meta
-    pushcandidate!(algo, Neighbor(start.index, metric(query, start.value)))
-    while !done(algo)
-        p = getid(unsafe_peek(algo))
-        neighbors = LightGraphs.outneighbors(graph, p)
-
-        # TODO: Implement prefetching for PQGraphs
-        # Prefetch all new datapoints.
-        # IMPORTANT: This is critical for performance!
-        neighbor_points = data[p]
-        unsafe_prefetch(neighbor_points, 1, length(neighbor_points))
-
-        # Prune
-        # Do this here to allow the prefetched vectors time to arrive in the cache.
-        getcandidate!(algo)
-        reduce!(algo)
-
-        # Distance computations
-        for i in eachindex(neighbors)
-            # Since PQ based distance computations take longer, check if we even need
-            # to perform the distance computation first.
-            @inbounds v = neighbors[i]
-            isvisited(algo, v) && continue
-
-            @inbounds d = metric(query, neighbor_points[i])
-
-            ## only bother to add if it's better than the worst currently tracked.
-            if d < getdistance(maximum(algo)) || !isfull(algo)
-                pushcandidate!(algo, Neighbor(v, d))
-            end
-        end
-
-        callbacks.postdistance(algo, neighbors)
-    end
-
-    return nothing
-end
+# function search(
+#     algo::GreedySearch,
+#     meta::MetaGraph{<:Any, <:PQGraph},
+#     start::StartNode,
+#     query;
+#     callbacks = GreedyCallbacks(),
+#     metric = distance,
+# )
+#     empty!(algo)
+#
+#     # Destructure argument
+#     @unpack graph, data = meta
+#     pushcandidate!(algo, Neighbor(start.index, metric(query, start.value)))
+#     while !done(algo)
+#         p = getid(unsafe_peek(algo))
+#         neighbors = LightGraphs.outneighbors(graph, p)
+#
+#         # TODO: Implement prefetching for PQGraphs
+#         # Prefetch all new datapoints.
+#         # IMPORTANT: This is critical for performance!
+#         neighbor_points = data[p]
+#         unsafe_prefetch(neighbor_points, 1, length(neighbor_points))
+#
+#         # Prune
+#         # Do this here to allow the prefetched vectors time to arrive in the cache.
+#         getcandidate!(algo)
+#         reduce!(algo)
+#
+#         # Distance computations
+#         for i in eachindex(neighbors)
+#             # Since PQ based distance computations take longer, check if we even need
+#             # to perform the distance computation first.
+#             @inbounds v = neighbors[i]
+#             isvisited(algo, v) && continue
+#
+#             @inbounds d = metric(query, neighbor_points[i])
+#
+#             ## only bother to add if it's better than the worst currently tracked.
+#             if d < getdistance(maximum(algo)) || !isfull(algo)
+#                 pushcandidate!(algo, Neighbor(v, d))
+#             end
+#         end
+#
+#         callbacks.postdistance(algo, neighbors)
+#     end
+#
+#     return nothing
+# end
 
 # Single Threaded Query
 function searchall(
     algo::GreedySearch,
-    meta::MetaGraph,
+    meta,
     start::StartNode,
     queries::AbstractVector;
     num_neighbors = 10,
@@ -263,7 +297,7 @@ end
 # Multi Threaded Query
 function searchall(
     tls::ThreadLocal{<:GreedySearch},
-    meta::MetaGraph,
+    meta,
     start::StartNode,
     queries::AbstractVector;
     num_neighbors = 10,

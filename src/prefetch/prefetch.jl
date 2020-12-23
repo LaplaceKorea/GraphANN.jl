@@ -4,8 +4,15 @@
 
 module _Prefetcher
 
-import UnPack: @unpack, @pack!
+export commit!, consume!
+
+# local deps
 using .._Base
+using .._Graphs
+
+# deps
+import LightGraphs
+import UnPack: @unpack, @pack!
 
 # Many of the pieces that make up the prefetcher implementations are wrapped in inner
 # modules.
@@ -14,10 +21,52 @@ using .._Base
 include("atomic.jl")
 include("queue.jl"); import .Queue: SemiAtomicQueue, commit!, consume!
 
+# Behaves like a metagraph, but provides prefetching as well!
+struct PrefetchedMeta{D, G, P}
+    data::D
+    graph::G
+    prefetcher::P
+end
+
+getqueue(A::PrefetchedMeta) = getqueue(A.prefetcher)
+Base.getindex(A::PrefetchedMeta, i...) = getindex(A.meta, i...)
+
+function start(A::PrefetchedMeta; kw...)
+    reset!(A.prefetcher)
+    start(A.prefetcher, MetaGraph(A.graph, A.data); kw...)
+end
+
+function stop(A::PrefetchedMeta)
+    stop!(A.prefetcher)
+    wait(A.prefetcher)
+end
+
+function prefetch_wrap(
+    meta::MetaGraph,
+    query_pool::ThreadPool,
+    prefetch_pool::ThreadPool;
+    queue_capacity = 1000,
+    int_type::Type{U} = UInt32,
+) where {U}
+    @unpack data, graph = meta
+    # Construct queues for each thread in `query_pool`, then construct a staging area
+    # that serves as the destination for all these queues.
+    queues = Dict(i => SemiAtomicQueue{U}(queue_capacity) for i in query_pool)
+    staging = Staging(queues)
+
+    prefetcher = Prefetcher{U}(prefetch_pool, staging)
+    return PrefetchedMeta(data, graph, prefetcher)
+end
+
+#####
+##### Implementation
+#####
+
 mutable struct Staging{T}
     # One queue for each query thread.
     # Keep track of a current index so we can access this vector in a round-robin manner.
-    queues::Vector{SemiAtomicQueue{T}}
+    queues::Dict{Int,SemiAtomicQueue{T}}
+    queue_iter::Vector{SemiAtomicQueue{T}}
     index::Int
 
     # The staging area is protected by lock so only one prefetcher
@@ -25,9 +74,12 @@ mutable struct Staging{T}
     lock::ReentrantLock
 end
 
-function Staging(queues::Vector{SemiAtomicQueue{T}}) where {T}
-    return Staging{T}(queues, 1, ReentrantLock())
+function Staging(queues::Dict{Int,SemiAtomicQueue{T}}) where {T}
+    queue_iter = collect(values(queues))
+    return Staging{T}(queues, queue_iter, 1, ReentrantLock())
 end
+
+getqueue(x::Staging) = x.queues[Threads.threadid()]
 
 function acquire!(x::Staging{T}, dest::Vector{T}, num::Integer) where {T}
     # Prepare destination
@@ -38,15 +90,15 @@ function acquire!(x::Staging{T}, dest::Vector{T}, num::Integer) where {T}
     # Go until `num` tokens have been retrieved or all queues have been visited.
     items_collected = 0
     Base.@lock x.lock begin
-        @unpack queues, index = x
+        @unpack queue_iter, index = x
 
-        num_queues = length(queues)
+        num_queues = length(queue_iter)
         queues_visited = 0
         while true
             count = consume!(
                 dest,
                 items_collected + 1,
-                queues[index],
+                queue_iter[index],
                 num - items_collected,
             )
 
@@ -82,31 +134,41 @@ end
 stop!(prefetcher::PrefetchRunner) = (prefetcher.stop[] = true)
 reset!(prefetcher::PrefetchRunner) = (prefetcher.stop[] = false)
 
-function prefetch_loop(prefetcher::PrefetchRunner, data)
+function prefetch_loop(prefetcher::PrefetchRunner, meta::MetaGraph)
     @unpack staging, worklist, stop, tryfor = prefetcher
+    @unpack data, graph = meta
+
+    #worklist_lengths = Int[]
+
     while !stop[]
         # Gather incoming ids
         acquire!(staging, worklist, tryfor)
 
         # Try to prefetch each data item into the LLC
         # Hopefully doesn't cause eviction if the data is in someone else's L2 ...
-        for index in worklist
-            prefetch(data, index, prefetch_llc)
+        #if !isempty(worklist)
+        #    push!(worklist_lengths, length(worklist))
+        #end
+        for u in worklist, v in LightGraphs.outneighbors(graph, u)
+            prefetch(data, v)#, prefetch_llc)
         end
     end
+
+    #@show worklist_lengths
+    return nothing
 end
 
 #####
 ##### Ensemple of Prefetchers
 #####
 
-mutable struct Prefetcher{T, S <: Staging, U <: Integer}
+mutable struct Prefetcher{U <: Integer, T, S <: Staging}
     thread_pool::ThreadPool{T}
     staging::S
 
     # Signals to runners - when `true`, stop prefetching.
-    stop_signals::Vector{Ref{Bool}}
-    worklists::Vector{Vector{U}}
+    stop_signals::Dict{Int, Base.RefValue{Bool}}
+    worklists::Dict{Int, Vector{U}}
 
     # Handle to the tasks that are currently running.
     # Maintain the following invariants:
@@ -117,22 +179,37 @@ mutable struct Prefetcher{T, S <: Staging, U <: Integer}
     tasks::Union{Nothing, TaskHandle}
 end
 
-stop!(p::Prefetcher) = foreach(i -> i[] = true, p.stop_signals)
-reset!(p::Prefetcher) = foreach(i -> i[] = false, p.stop_signals)
+function Prefetcher{U}(thread_pool::ThreadPool, staging::Staging) where {U}
+    stop_signals = Dict(i => Ref(false) for i in thread_pool)
+    worklists = Dict(i => U[] for i in thread_pool)
 
-function spin(prefetcher::Prefetcher, data; tryfor = 100)
+    return Prefetcher(
+        thread_pool,
+        staging,
+        stop_signals,
+        worklists,
+        nothing,
+    )
+end
+
+getqueue(p::Prefetcher) = getqueue(p.staging)
+stop!(p::Prefetcher) = foreach(i -> i[] = true, values(p.stop_signals))
+reset!(p::Prefetcher) = foreach(i -> i[] = false, values(p.stop_signals))
+Base.wait(p::Prefetcher) = wait(values(p.tasks))
+
+function start(prefetcher::Prefetcher, meta; tryfor = 100)
     @unpack thread_pool, staging, worklists, stop_signals = prefetcher
     reset!(prefetcher)
-    handle = on_threads(thread_pool, false) do
+    tasks = on_threads(thread_pool, false) do
         # Obtain thread local storage
         tid = Threads.threadid()
         worklist = worklists[tid]
         stop_signal = stop_signals[tid]
 
         runner = PrefetchRunner(staging, worklist, tryfor, stop_signal)
-        prefetch_loop(runner, data)
+        prefetch_loop(runner, meta)
     end
-    @pack! prefetcher = handle
+    @pack! prefetcher = tasks
     return nothing
 end
 
