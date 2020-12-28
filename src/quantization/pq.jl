@@ -41,15 +41,16 @@ function PQTable{N}(data::Vector{Euclidean{M,T}}, num_centroids::Integer) where 
             num_iterations = 10,
             oversample = 5
         )
-        lloyds!(centroids, _data; max_iterations = 100)
-        return centroids
+        return lloyds(centroids, _data; max_iterations = 100)
     end
 
     centroids = reduce(hcat, centroids)
     return PQTable{N}(data, centroids)
 end
+encoded_length(::PQTable{N}) where {N} = N
 
-encoded_type(::Type{U}, ::PQTable{N}) where {U,N} = NTuple{N,U}
+refpointer(::Type{T}, x::Ref{U}) where {T,U} = Ptr{T}(Base.unsafe_convert(Ptr{U}, x))
+refpointer(x::Ref{T}) where {T} = refpointer(T, x)
 
 # Encoding
 # We use unsafe version dealing directly with pointers for efficiency's sake.
@@ -62,13 +63,13 @@ encoded_type(::Type{U}, ::PQTable{N}) where {U,N} = NTuple{N,U}
 # It's not the cleanest thing in the world, but should work.
 encode(encoder, x) = encode(UInt64, encoder, x)
 function encode(::Type{U}, encoder, x) where {U}
-    ref = Ref{encoded_type(U, encoder)}()
+    ref = Ref(ntuple(_ -> zero(U), encoded_length(encoder)))
 
     # Keep the compiler from trying to optimize away `ref`.
     # This is likely not needed, but can't hurt as this is a generic method that is not
     # likely to be used in performance critical code paths.
     GC.@preserve ref begin
-        unsafe_encode!(convert(Ptr{U}, pointer_from_objref(ref)), encoder, x)
+        unsafe_encode!(refpointer(U, ref), encoder, x)
     end
     return ref[]
 end
@@ -78,10 +79,10 @@ function _unsafe_encode_fallback!(
     ptr::Ptr{U},
     table::PQTable{N,V,T},
     x::V
-) where {U <: Unsigned, N,V,T}
+) where {U <: Unsigned, N, V <: Euclidean, T}
     @unpack centroids = table
 
-    dx = deconstruct(T, x)
+    dx = deconstruct(Euclidean{length(T),eltype(x)}, x)
     for i in 1:N
         current_minimum = CurrentMinimum()
         for (index, centroid) in enumerate(view(centroids, :, i))
@@ -95,6 +96,15 @@ function _unsafe_encode_fallback!(
         unsafe_store!(ptr, val)
         ptr += sizeof(val)
     end
+end
+
+# Compute distance for a vector of data points.
+function encode(::Type{U}, encoder, x::AbstractVector) where {U}
+    data = Vector{NTuple{encoded_length(encoder),U}}(undef, length(x))
+    dynamic_thread(eachindex(data)) do i
+        unsafe_encode!(Ptr{U}(pointer(data, i)), encoder, x[i])
+    end
+    return data
 end
 
 # Assymetric Distance Computation

@@ -39,7 +39,11 @@ Base.:-(x::Euclidean...) = map(-, x...)
 
 Base.iterate(x::Euclidean, s...) = iterate(unwrap(x), s...)
 
-Base.convert(::Type{SIMD.Vec{N,T}}, x::Euclidean{N,T}) where {N, T} = SIMD.Vec{N,T}(Tuple(x))
+Base.convert(::Type{SIMD.Vec{N,T}}, x::Euclidean{N,T}) where {N,T} = SIMD.Vec{N,T}(Tuple(x))
+Base.convert(::Type{Euclidean{N,T}}, x::Euclidean{N,T}) where {N,T} = x
+function Base.convert(::Type{Euclidean{N,T}}, x::Euclidean{N,U}) where {N,T,U}
+    return map(i -> convert(T, i), x)
+end
 
 @generated function Base.merge(x::NTuple{K, <:Euclidean{N}}) where {K,N}
     exprs = [:(x[$i][$j]) for j in 1:N, i in 1:K] |> vec
@@ -47,57 +51,119 @@ Base.convert(::Type{SIMD.Vec{N,T}}, x::Euclidean{N,T}) where {N, T} = SIMD.Vec{N
 end
 
 #####
-##### Distance Computation
+##### SIMD Promotion and Stuff
 #####
 
-_cachelines(::Euclidean{N,T}) where {N,T} = (N * sizeof(T)) >> 6
+const SIMDType{N,T} = Union{Euclidean{N,T}, SIMD.Vec{N,T}}
+
+struct Sentinel{A,B} end
+simd_type(::Type{A}, ::Type{B}) where {A,B} = Sentinel{A,B}()
+simd_type(::Type{Float32}, ::Type{UInt8}) = (16, Float32)
+simd_type(::Type{Float32}, ::Type{Float32}) = (16, Float32)
+simd_type(::Type{UInt8}, ::Type{UInt8}) = (32, Int16)
+simd_type(::Type{UInt8}, ::Type{Int16}) = (32, Int16)
+
+accum_type(::Type{T}) where {T <: SIMD.Vec} = T
+accum_type(::Type{SIMD.Vec{32, Int16}}) = SIMD.Vec{16,Int32}
+
+_simd_select(::Sentinel, x) = x
+_simd_select(x, ::Sentinel) = x
+_simd_select(x::T, y::T) where {T} = x
+
+function _simd_select(::Sentinel{A,B}, ::Sentinel{B,A}) where {A,B}
+    error("Define `simd_type` for types $A and $B")
+end
+
+promote_simd(::A, ::B) where {A <: Euclidean, B <: Euclidean} = promote_simd(A, B)
+function promote_simd(
+    ::Type{<:SIMDType{<:Any,A}},
+    ::Type{<:SIMDType{<:Any,B}}
+) where {A, B}
+    N, T = _simd_select(simd_type(A, B), simd_type(B, A))
+    return SIMD.Vec{N,T}
+end
+
+struct SIMDWrap{V,K,N,T}
+    vectors::NTuple{K,SIMD.Vec{N,T}}
+end
+SIMDWrap{V}(x::NTuple{K,SIMD.Vec{N,T}}) where {V,K,N,T} = SIMDWrap{V,K,N,T}(x)
+
+Base.@propagate_inbounds function Base.getindex(x::SIMDWrap{V}, i) where {V}
+    return convert(V, x.vectors[i])
+end
+Base.length(::SIMDWrap{K}) where {K} = K
+
+function simd_wrap(::Type{SIMD.Vec{N1,T1}}, x::Euclidean{N2,T2}) where {N1,T1,N2,T2}
+    # Convert `x` into a collection of appropriately sized vectors
+    vectors = deconstruct(SIMD.Vec{N1,T2}, x)
+    return SIMDWrap{SIMD.Vec{N1,T1}}(vectors)
+end
+
+#####
+##### Fancy Bitcast
+#####
 
 # Ideally, the generated code for this should be a no-op, it's just awkward because
 # Julia doesn't really have a "bitcast" function ...
-function _deconstruct_impl(f, N::Integer, S::Integer)
-    @assert mod(N, S) == 0
-    num_tuples = div(N, S)
-
-    exprs = map(1:S:N) do i
-        inds = [:(x[$(i + j)]) for j in 0:(S-1)]
+# This also has the benefit of allowing us to do lazy zero padding if necessary.
+function _deconstruct_impl(f, N::Integer, S::Integer, ::Type{T}) where {T}
+    num_tuples = ceil(Int, N / S)
+    exprs = map(1:num_tuples) do i
+        inds = map(1:S) do j
+            index = (i - 1) * S + j
+            return index <= N ? :(x[$index]) : :(zero($T))
+        end
         return :($f(($(inds...),)))
     end
+
     return :(($(exprs...),))
 end
 
 @generated function deconstruct(::Type{Euclidean{S,T}}, x::Euclidean{N,T}) where {S,T,N}
-    _deconstruct_impl(Euclidean{S,T}, N, S)
+    _deconstruct_impl(Euclidean{S,T}, N, S, T)
 end
 
 @generated function deconstruct(::Type{SIMD.Vec{S,T}}, x::Euclidean{N,T}) where {S,T,N}
-    _deconstruct_impl(SIMD.Vec{S,T}, N, S)
+    _deconstruct_impl(SIMD.Vec{S,T}, N, S, T)
 end
 
-# Generic fallback for computing distance between to similar-sized Euclidean points with
-# a different numeric type.
-#
-# The generic fallback when using integet datapoints is an Int64, to avoid any potential
-# issues with overflow.
-# If we overflow an Int64, we're doing something wrong ...
-_promote_type(x...) = promote_type(x...)
-_promote_type(x::Type{T}...) where {T <: Integer} = Int32
-_promote_type(x::Type{Int}...) = Int
+#####
+##### Distance Computation
+#####
 
-function _Base.distance(
-    a::A,
-    b::B
-) where {N, TA, TB, A <: Euclidean{N, TA}, B <: Euclidean{N, TB}}
-    T = _promote_type(TA, TB)
+function _Base.distance(a::A, b::B) where {A <: Euclidean, B <: Euclidean}
+    T = promote_simd(A, B)
+    return distance(simd_wrap(T, a), simd_wrap(T, b))
+end
+
+function _Base.distance(a::SIMDWrap{V,K}, b::SIMDWrap{V,K}) where {V, K}
+    Base.@_inline_meta
+    s = zero(accum_type(V))
+
+    for i in 1:K
+        z = @inbounds(a[i] - b[i])
+        s = square_accum(z, s)
+    end
+    return _sum(s)
+end
+
+# The generic "sum" function in SIMD.jl is actually really slow.
+# Here, we define our own generic reducing sum function which actually ends up being much
+# faster ...
+function _sum(x::SIMD.Vec{N,T}) where {N,T}
     s = zero(T)
-
-    @fastmath @simd for i in 1:N
-        @inbounds ca = convert(T, a[i])
-        @inbounds cb = convert(T, b[i])
-        s += (ca - cb) ^2
+    @inbounds @simd for i in 1:N
+        s += x[i]
     end
     return s
 end
 
+# Specialize to use special AVX instructions.
+square(x::T) where {T} = square_accum(x, zero(accum_type(T)))
+square_accum(x, y) = Base.muladd(x, x, y)
+function square_accum(x::SIMD.Vec{32,Int16}, y::SIMD.Vec{16,Int32})
+    return vnni_accumulate(y, x, x)
+end
 
 # Prefetching
 function _Base.prefetch(A::AbstractVector{Euclidean{N,T}}, i, f::F = _Base.prefetch) where {N,T,F}
@@ -105,7 +171,6 @@ function _Base.prefetch(A::AbstractVector{Euclidean{N,T}}, i, f::F = _Base.prefe
     # Compute how many cache lines are needed.
     # Divide the number of bytes by 64 to get cache lines.
     cache_lines = (N * sizeof(T)) >> 6
-
     ptr = pointer(A, i)
     for i in 1:cache_lines
         f(ptr + 64 * (i-1))
@@ -113,51 +178,9 @@ function _Base.prefetch(A::AbstractVector{Euclidean{N,T}}, i, f::F = _Base.prefe
     return nothing
 end
 
-# Overload vecs loading functions
-_IO.vecs_read_type(::Type{Euclidean{N,T}}) where {N,T} = T
-
-function _IO.addto!(v::Vector{Euclidean{N,T}}, index, buf::AbstractVector{T}) where {N,T}
-    length(buf) == N || error("Lenght of buffer is incorrect!")
-    v[index] = Euclidean{N,T}(ntuple(i -> buf[i], Val(N)))
-    return 1
-end
-
-_IO.vecs_reshape(::Type{<:Euclidean}, v, dim) = v
-
 #####
 ##### Specialize for UInt8
 #####
-
-# ASSUMPTION: Assume N is a multiple of `vecsize(Euclidean, UInt8)`
-# If this is not the case, then `deconstruct` will fail.
-const _FAST_EUCLIDEAN_U8 = Union{
-    Euclidean{32,UInt8},
-    Euclidean{64,UInt8},
-    Euclidean{96,UInt8},
-    Euclidean{128,UInt8},
-}
-
-function _Base.distance(a::E, b::E) where {E <: _FAST_EUCLIDEAN_U8}
-    return _distance(
-        deconstruct(SIMD.Vec{32,UInt8}, a),
-        deconstruct(SIMD.Vec{32,UInt8}, b),
-    )
-end
-
-function _distance(a::T, b::T) where {N, T <: NTuple{N, SIMD.Vec{32, UInt8}}}
-    Base.@_inline_meta
-    s = zero(SIMD.Vec{16,Int32})
-    for i in 1:N
-        # 256-bits -> 512 bits
-        x = convert(SIMD.Vec{32, Int16}, a[i])
-        y = convert(SIMD.Vec{32, Int16}, b[i])
-
-        # Subtract than squared-reduction-sum
-        z = x - y
-        s = vnni_accumulate(s, z, z)
-    end
-    return sum(s)
-end
 
 function vnni_accumulate(
     x::SIMD.Vec{16,Int32},
@@ -191,5 +214,48 @@ function vnni_accumulate(
     )
 
     return SIMD.Vec(x)
+end
+
+#####
+##### Vector Loading Functions
+#####
+
+_IO.vecs_read_type(::Type{Euclidean{N,T}}) where {N,T} = T
+
+function _IO.addto!(v::Vector{Euclidean{N,T}}, index, buf::AbstractVector{T}) where {N,T}
+    length(buf) == N || error("Lenght of buffer is incorrect!")
+    v[index] = Euclidean{N,T}(ntuple(i -> buf[i], Val(N)))
+    return 1
+end
+
+_IO.vecs_reshape(::Type{<:Euclidean}, v, dim) = v
+
+#####
+##### Deprecated
+#####
+
+# Generic fallback for computing distance between to similar-sized Euclidean points with
+# a different numeric type.
+#
+# The generic fallback when using integet datapoints is an Int64, to avoid any potential
+# issues with overflow.
+# If we overflow an Int64, we're doing something wrong ...
+_promote_type(x...) = promote_type(x...)
+_promote_type(x::Type{T}...) where {T <: Integer} = Int32
+_promote_type(x::Type{Int}...) = Int
+
+function distance_generic(
+    a::A,
+    b::B
+) where {N, TA, TB, A <: Euclidean{N, TA}, B <: Euclidean{N, TB}}
+    T = _promote_type(TA, TB)
+    s = zero(T)
+
+    @fastmath @simd for i in 1:N
+        @inbounds ca = convert(T, a[i])
+        @inbounds cb = convert(T, b[i])
+        s += (ca - cb) ^2
+    end
+    return s
 end
 

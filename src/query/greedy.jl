@@ -118,12 +118,19 @@ end
 
 function pushcandidate!(greedy::GreedySearch, vertex)
     visited!(greedy, vertex)
+    @unpack best, best_unvisited = greedy
 
     # Since we have not yet visited this vertex, we have to add it both to `best` and
     # `best_unvisited`,
-    push!(greedy.best, vertex)
-    push!(greedy.best_unvisited, vertex)
-    #maybe_prefetch(greedy, vertex)
+    push!(best, vertex)
+    push!(best_unvisited, vertex)
+
+    # This vertex is a candidate for prefetching if we pushed it right to the front of
+    # the queue.
+    if getid(unsafe_peek(greedy)) == getid(vertex)
+        maybe_prefetch(greedy, vertex)
+    end
+
     return nothing
 end
 

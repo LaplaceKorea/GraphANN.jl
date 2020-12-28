@@ -161,19 +161,22 @@ maybe_round(::Type{T}, i::AbstractFloat) where {T <: Integer} = round(T, i)
 maybe_round(::Type{T}) where {T} = i -> maybe_round(T, i)
 maybe_round(::Type{T}, i::Euclidean) where {T} = map(maybe_round(T), i)
 
-function lloyds!(
-    centroids::AbstractVector{T},
-    data::AbstractVector{T};
+function lloyds(
+    centroids::AbstractVector{<:Euclidean{N,T}},
+    data::AbstractVector{<:Euclidean{N,U}};
     max_iterations = 10,
     tol = 1E-4,
     batchsize = 1024,
-) where {T}
+) where {N,T,U}
     # As thread local storage, keep track of the nearest centroids computed so far.
     tls = ThreadLocal([CurrentMinimum() for _ in 1:batchsize])
 
+    # Convert centroids to a Float32 representation during computation.
+    centroids = convert.(Euclidean{N,Float32}, centroids)
+
     # Accumulate points assigned to this center so far.
     # Control access with a lock.
-    integrated_points = fill(zeroas(Float64, T), length(centroids))
+    integrated_points = fill(zero(Euclidean{N,Float64}), length(centroids))
     locks = [Base.Threads.SpinLock() for _ in 1:length(centroids)]
     points_per_center = zeros(Int, length(centroids))
 
@@ -199,7 +202,11 @@ function lloyds!(
 
         # All cells have been integrated, compute new centroids
         new_centroids = map(integrated_points, points_per_center) do ip, ppc
-            return ppc == 0 ? rand(data) : (ip / ppc)
+            if ppc == 0
+                return convert(Euclidean{N,Float32}, rand(data))
+            else
+                return ip / ppc
+            end
         end
 
         # Reset for new iteration
@@ -210,7 +217,7 @@ function lloyds!(
         movement = sum(sum.(new_centroids .- centroids))
         total = sum(sum, centroids)
 
-        centroids .= maybe_round.(eltype(T), new_centroids)
+        centroids .= new_centroids
 
         # Exit condition
         relative_movement = abs(movement / total)
