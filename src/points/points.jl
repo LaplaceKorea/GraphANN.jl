@@ -15,9 +15,6 @@ import SIMD
 using StaticArrays
 import UnPack: @unpack
 
-export SIMDLanes
-include("simd.jl")
-
 export Euclidean
 include("euclidean.jl")
 

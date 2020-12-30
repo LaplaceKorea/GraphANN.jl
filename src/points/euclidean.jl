@@ -259,15 +259,11 @@ end
 _IO.vecs_reshape(::Type{<:Euclidean}, v, dim) = v
 
 #####
-##### Deprecated
+##### -- Deprecated
 #####
 
 # Generic fallback for computing distance between to similar-sized Euclidean points with
 # a different numeric type.
-#
-# The generic fallback when using integet datapoints is an Int64, to avoid any potential
-# issues with overflow.
-# If we overflow an Int64, we're doing something wrong ...
 _promote_type(x...) = promote_type(x...)
 _promote_type(x::Type{T}...) where {T <: Integer} = Int32
 _promote_type(x::Type{Int}...) = Int
