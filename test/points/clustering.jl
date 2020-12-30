@@ -21,7 +21,7 @@ function test_clustering(data)
     @test sqrt(initial_cost) < origin_cost
 
     # Refine using Lloyd's algorithm
-    GraphANN._Quantization.lloyds!(
+    centroids = GraphANN._Quantization.lloyds(
         centroids,
         data;
         max_iterations = 50,

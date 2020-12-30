@@ -6,7 +6,7 @@ using .._Graphs
 using .._Points
 
 # Special imports
-import .._Points.deconstruct
+import .._Points.cast
 
 # deps
 import LightGraphs

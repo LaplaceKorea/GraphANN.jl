@@ -27,7 +27,7 @@ Base.length(::Type{<:Euclidean{N}}) where {N} = N
 Base.eltype(::Euclidean{N,T}) where {N,T} = T
 Base.eltype(::Type{Euclidean{N,T}}) where {N,T} = T
 
-@inline Base.getindex(x::Euclidean, i) = getindex(x.vals, i)
+Base.@propagate_inbounds @inline Base.getindex(x::Euclidean, i) = getindex(x.vals, i)
 
 # Use scalar behavior for broadcasting
 Base.broadcastable(x::Euclidean) = (x,)
@@ -45,11 +45,6 @@ function Base.convert(::Type{Euclidean{N,T}}, x::Euclidean{N,U}) where {N,T,U}
     return map(i -> convert(T, i), x)
 end
 
-@generated function Base.merge(x::NTuple{K, <:Euclidean{N}}) where {K,N}
-    exprs = [:(x[$i][$j]) for j in 1:N, i in 1:K] |> vec
-    return :(Euclidean(($(exprs...),)))
-end
-
 #####
 ##### SIMD Promotion and Stuff
 #####
@@ -57,46 +52,79 @@ end
 const SIMDType{N,T} = Union{Euclidean{N,T}, SIMD.Vec{N,T}}
 
 struct Sentinel{A,B} end
-simd_type(::Type{A}, ::Type{B}) where {A,B} = Sentinel{A,B}()
-simd_type(::Type{Float32}, ::Type{UInt8}) = (16, Float32)
-simd_type(::Type{Float32}, ::Type{Float32}) = (16, Float32)
-simd_type(::Type{UInt8}, ::Type{UInt8}) = (32, Int16)
-simd_type(::Type{UInt8}, ::Type{Int16}) = (32, Int16)
+distance_parameters(::Type{A}, ::Type{B}) where {A,B} = Sentinel{A,B}()
+distance_parameters(::Type{Float32}, ::Type{UInt8}) = (16, Float32)
+distance_parameters(::Type{Float32}, ::Type{Float32}) = (16, Float32)
+distance_parameters(::Type{UInt8}, ::Type{UInt8}) = (32, Int16)
+distance_parameters(::Type{UInt8}, ::Type{Int16}) = (32, Int16)
 
 accum_type(::Type{T}) where {T <: SIMD.Vec} = T
 accum_type(::Type{SIMD.Vec{32, Int16}}) = SIMD.Vec{16,Int32}
 
-_simd_select(::Sentinel, x) = x
-_simd_select(x, ::Sentinel) = x
-_simd_select(x::T, y::T) where {T} = x
+distance_select(::Sentinel, x) = x
+distance_select(x, ::Sentinel) = x
+distance_select(x::T, y::T) where {T} = x
 
-function _simd_select(::Sentinel{A,B}, ::Sentinel{B,A}) where {A,B}
-    error("Define `simd_type` for types $A and $B")
+function distance_select(::Sentinel{A,B}, ::Sentinel{B,A}) where {A,B}
+    throw(ArgumentError("Define `distance_parameters` for types $A and $B"))
 end
 
-promote_simd(::A, ::B) where {A <: Euclidean, B <: Euclidean} = promote_simd(A, B)
-function promote_simd(
+distance_type(::A, ::B) where {A <: Euclidean, B <: Euclidean} = distance_type(A, B)
+function distance_type(
     ::Type{<:SIMDType{<:Any,A}},
     ::Type{<:SIMDType{<:Any,B}}
 ) where {A, B}
-    N, T = _simd_select(simd_type(A, B), simd_type(B, A))
+    # TODO: Maybe add in the option to select smaller AVX vectors to help speed up
+    # short vector computations.
+    N, T = distance_select(distance_parameters(A, B), distance_parameters(B, A))
     return SIMD.Vec{N,T}
 end
 
-struct SIMDWrap{V,K,N,T}
+#####
+##### Eager Conversion
+#####
+
+struct EagerWrap{V,K,N,T}
     vectors::NTuple{K,SIMD.Vec{N,T}}
 end
-SIMDWrap{V}(x::NTuple{K,SIMD.Vec{N,T}}) where {V,K,N,T} = SIMDWrap{V,K,N,T}(x)
+EagerWrap{V}(x::NTuple{K,SIMD.Vec{N,T}}) where {V,K,N,T} = EagerWrap{V,K,N,T}(x)
 
-Base.@propagate_inbounds function Base.getindex(x::SIMDWrap{V}, i) where {V}
+function EagerWrap{SIMD.Vec{N1,T1}}(x::Euclidean{N2,T2}) where {N1,T1,N2,T2}
+    # Convert `x` into a collection of appropriately sized vectors
+    vectors = cast(SIMD.Vec{N1,T2}, x)
+    return EagerWrap{SIMD.Vec{N1,T1}}(vectors)
+end
+
+Base.@propagate_inbounds function Base.getindex(x::EagerWrap{V}, i) where {V}
     return convert(V, x.vectors[i])
 end
-Base.length(::SIMDWrap{K}) where {K} = K
 
-function simd_wrap(::Type{SIMD.Vec{N1,T1}}, x::Euclidean{N2,T2}) where {N1,T1,N2,T2}
-    # Convert `x` into a collection of appropriately sized vectors
-    vectors = deconstruct(SIMD.Vec{N1,T2}, x)
-    return SIMDWrap{SIMD.Vec{N1,T1}}(vectors)
+Base.@propagate_inbounds function Base.getindex(x::EagerWrap{SIMD.Vec{N,T},<:Any,N,T}) where {N,T}
+    return x.vectors[i]
+end
+
+Base.length(::EagerWrap{V,K}) where {V,K} = K
+
+#####
+##### Lazy Conversion
+#####
+
+struct LazyWrap{V <: SIMD.Vec, N, T}
+    val::Euclidean{N,T}
+end
+
+LazyWrap{V}(val::Euclidean{N,T}) where {V,N,T} = LazyWrap{V,N,T}(val)
+
+function Base.getindex(x::LazyWrap{V}, i) where {N,T,V <: SIMD.Vec{N,T}}
+    return convert(V, _getindex(x, N * (i - 1)))
+end
+
+@generated function _getindex(x::LazyWrap{V}, i) where {N, T, V <: SIMD.Vec{N,T}}
+    inds = [:(@inbounds(v[i + $j])) for j in 1:N]
+    return quote
+        v = _Points.unwrap(x.val)
+        SIMD.Vec(($(inds...),))
+    end
 end
 
 #####
@@ -106,7 +134,7 @@ end
 # Ideally, the generated code for this should be a no-op, it's just awkward because
 # Julia doesn't really have a "bitcast" function ...
 # This also has the benefit of allowing us to do lazy zero padding if necessary.
-function _deconstruct_impl(f, N::Integer, S::Integer, ::Type{T}) where {T}
+function _cast_impl(f, N::Integer, S::Integer, ::Type{T}) where {T}
     num_tuples = ceil(Int, N / S)
     exprs = map(1:num_tuples) do i
         inds = map(1:S) do j
@@ -119,12 +147,12 @@ function _deconstruct_impl(f, N::Integer, S::Integer, ::Type{T}) where {T}
     return :(($(exprs...),))
 end
 
-@generated function deconstruct(::Type{Euclidean{S,T}}, x::Euclidean{N,T}) where {S,T,N}
-    _deconstruct_impl(Euclidean{S,T}, N, S, T)
+@generated function cast(::Type{Euclidean{S,T}}, x::Euclidean{N,T}) where {S,T,N}
+    _cast_impl(Euclidean{S,T}, N, S, T)
 end
 
-@generated function deconstruct(::Type{SIMD.Vec{S,T}}, x::Euclidean{N,T}) where {S,T,N}
-    _deconstruct_impl(SIMD.Vec{S,T}, N, S, T)
+@generated function cast(::Type{SIMD.Vec{S,T}}, x::Euclidean{N,T}) where {S,T,N}
+    _cast_impl(SIMD.Vec{S,T}, N, S, T)
 end
 
 #####
@@ -132,11 +160,11 @@ end
 #####
 
 function _Base.distance(a::A, b::B) where {A <: Euclidean, B <: Euclidean}
-    T = promote_simd(A, B)
-    return distance(simd_wrap(T, a), simd_wrap(T, b))
+    T = distance_type(A, B)
+    return distance(EagerWrap{T}(a), EagerWrap{T}(b))
 end
 
-function _Base.distance(a::SIMDWrap{V,K}, b::SIMDWrap{V,K}) where {V, K}
+function _Base.distance(a::EagerWrap{V,K}, b::EagerWrap{V,K}) where {V, K}
     Base.@_inline_meta
     s = zero(accum_type(V))
 
@@ -152,7 +180,7 @@ end
 # faster ...
 function _sum(x::SIMD.Vec{N,T}) where {N,T}
     s = zero(T)
-    @inbounds @simd for i in 1:N
+    @inbounds @fastmath for i in 1:N
         s += x[i]
     end
     return s

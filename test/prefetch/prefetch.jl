@@ -11,7 +11,7 @@
     queue1 = GraphANN._Prefetcher.SemiAtomicQueue{Int}(100)
     queue2 = GraphANN._Prefetcher.SemiAtomicQueue{Int}(100)
 
-    queues = [queue1, queue2]
+    queues = Dict(i => (queue1, queue2)[i] for i in producer_pool)
     staging = GraphANN._Prefetcher.Staging(queues)
 
     tokens_per_thread = 1000

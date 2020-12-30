@@ -4,6 +4,10 @@ donothing(x...) = nothing
 printlnstyled(x...; kw...) = printstyled(x..., "\n"; kw...)
 zero!(x) = (x .= zero(eltype(x)))
 
+# Ceiling division
+cdiv(a::Integer, b::Integer) = cdiv(promote(a, b)...)
+cdiv(a::T, b::T) where {T <: Integer} = one(T) + div(a - one(T), b)
+
 # Partially applied function
 struct Map{F}
     f::F

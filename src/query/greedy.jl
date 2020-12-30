@@ -72,7 +72,7 @@ function GreedySearch(search_list_size; prefetch_queue = nothing)
 end
 
 # Base prefetching on the existence of a non-nothing element in the prefetch queue
-hasprefetching(::GreedySearch{<:Any,Nothing}) = NoPrefetching()
+hasprefetching(::GreedySearch{<:AbstractSet, Nothing}) = NoPrefetching()
 hasprefetching(::GreedySearch) = HasPrefetching()
 
 # Prepare for another run.

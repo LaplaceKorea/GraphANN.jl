@@ -67,8 +67,8 @@ function bruteforce_search(
     num_neighbors::Int = 100;
     groupsize = 32,
     savefile = nothing,
-    metric = distance,
-) where {T}
+    metric::F = distance,
+) where {F}
     # Allocate max heaps for each
     # One for each column in the queries matrix
     _heaps = [BoundedMaxHeap{Neighbor}(num_neighbors) for _ in 1:groupsize]

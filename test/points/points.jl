@@ -4,9 +4,9 @@
     @test size(lanes) == (8, length(data))
 
     for i in eachindex(data)
-        # The resulting tuple `dd` from `deconstruct` should have 8 `Vec{16,Float32}`
+        # The resulting tuple `dd` from `cast` should have 8 `Vec{16,Float32}`
         # elements.
-        dd = GraphANN._Points.deconstruct(SIMD.Vec{16,Float32}, data[i])
+        dd = GraphANN._Points.cast(SIMD.Vec{16,Float32}, data[i])
         @test length(dd) == 8
         for j in 1:length(dd)
             # Use `===` because `==` defaults to elementwise comparison.

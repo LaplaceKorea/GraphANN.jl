@@ -13,18 +13,14 @@ end
 
 # Type Parameters
 # N - size(self.centroids, 2) - The number of centroids in this clustering.
-# V - The element type of the wrapped dataset.
 # T - The element type of the centroid types.
-struct PQTable{N,V,T}
-    # The data that we're quantizing
-    data::Vector{V}
-
+struct PQTable{N,T}
     # Centroids - one for each partition of the data space
     centroids::Matrix{T}
 end
 
-function PQTable{N}(data::Vector{V}, centroids::Matrix{T}) where {N,V,T}
-    return PQTable{N,V,T}(data, centroids)
+function PQTable{N}(centroids::Matrix{T}) where {N,V,T}
+    return PQTable{N,T}(centroids)
 end
 
 # TODO: Work on making inference work better here.
@@ -34,18 +30,18 @@ function PQTable{N}(data::Vector{Euclidean{M,T}}, num_centroids::Integer) where 
     # `_valdiv` will error if `N` does not divide the data size.
     partition_size = exact_div(M, N)
     centroids = ntuple(Val(N)) do i
-        _data = getindex.(deconstruct.(Euclidean{partition_size,T}, data), i)
+        _data = getindex.(cast.(Euclidean{partition_size,T}, data), i)
         centroids = choose_centroids(
             _data,
             num_centroids;
             num_iterations = 10,
-            oversample = 5
+            oversample = 10
         )
-        return lloyds(centroids, _data; max_iterations = 100)
+        return lloyds(centroids, _data; max_iterations = 100, tol = 1E-5)
     end
 
     centroids = reduce(hcat, centroids)
-    return PQTable{N}(data, centroids)
+    return PQTable{N}(centroids)
 end
 encoded_length(::PQTable{N}) where {N} = N
 
@@ -77,12 +73,12 @@ end
 unsafe_encode!(ptr::Ptr, encoder, x) = _unsafe_encode_fallback!(ptr, encoder, x)
 function _unsafe_encode_fallback!(
     ptr::Ptr{U},
-    table::PQTable{N,V,T},
-    x::V
-) where {U <: Unsigned, N, V <: Euclidean, T}
+    table::PQTable{N,T},
+    x
+) where {U <: Unsigned, N, T}
     @unpack centroids = table
 
-    dx = deconstruct(Euclidean{length(T),eltype(x)}, x)
+    dx = cast(Euclidean{length(T),eltype(x)}, x)
     for i in 1:N
         current_minimum = CurrentMinimum()
         for (index, centroid) in enumerate(view(centroids, :, i))
@@ -109,9 +105,9 @@ end
 
 # Assymetric Distance Computation
 # Generic entry point.
-function (table::PQTable{N,V,T})(a::V, b::NTuple{N, <:Integer}) where {N,T,V}
-    return compute_distance_fallback(table, a, b)
-end
+#function (table::PQTable{N,T})(a, b::NTuple{N, <:Integer}) where {N,T,V}
+#    return compute_distance_fallback(table, a, b)
+#end
 
 # Default distance computations
 compute_distance_fallback(table, a, b) = distance(a, decode(table, b))
@@ -149,23 +145,22 @@ Base.getindex(graph::PQGraph, i) = graph.spans[i]
 # Could implement a generic fallback, but in practice it ends up being so slow that it's
 # not particularly useful anyways.
 function PQGraph{T}(
-    pqtable::PQTable{N},
-    graph::UniDirectedGraph{<:Any, <:DenseAdjacencyList};
+    encoder,
+    graph::UniDirectedGraph{<:Any, <:DenseAdjacencyList},
+    data::AbstractVector;
     allocator = stdallocator,
-    code_type::Type{U} = UInt8,
-    encoder = pqtable,
-) where {N,T,U}
+) where {T,U}
     # Pre-allocate destination
+    N = encoded_length(encoder)
     raw = allocator(NTuple{N,T}, LightGraphs.ne(graph))
 
     # Since this method is specialized on using a DenseAdjacencyList, we can take
     # advantage of the underlying representation of the adjacency list being a contiguous
     # vector to parallelize the edge translation.
     @unpack storage = fadj(graph)
-    @unpack data = pqtable
-    dynamic_thread(eachindex(storage), 32) do i
+    dynamic_thread(eachindex(storage), 1024) do i
         v = storage[i]
-        unsafe_encode!(convert(Ptr{U}, pointer(raw, i)), encoder, data[v])
+        unsafe_encode!(Ptr{T}(pointer(raw, i)), encoder, data[v])
     end
 
     # Now that the raw storage has been computed, we just need to construct the
