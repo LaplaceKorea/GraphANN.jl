@@ -66,7 +66,7 @@ function binned(table::PQTable{K, T}) where {K, T <: BinCompatibleTypes}
     original_length = centroid_length * num_partitions
     points_per_cacheline = _per_cacheline(T)
     centroids_per_cacheline = div(points_per_cacheline, centroid_length)
-    num_cachelines = div(original_length, centroids_per_cacheline)
+    num_cachelines = div(num_partitions, centroids_per_cacheline)
     data_type = eltype(T)
 
     # Sanity Checks
@@ -93,7 +93,7 @@ function binned(table::PQTable{K, T}) where {K, T <: BinCompatibleTypes}
         stop = centroids_per_cacheline * cacheline
         range = start:stop
 
-        for (lane_offset, partition_number) in range, centroid in 1:num_centroids
+        for (lane_offset, partition_number) in enumerate(range), centroid in 1:num_centroids
             lanes[lane_offset, centroid] = centroids[centroid, partition_number]
         end
         return dest
@@ -102,10 +102,10 @@ function binned(table::PQTable{K, T}) where {K, T <: BinCompatibleTypes}
     return BinnedPQCentroids{
         num_cachelines,           # Number of Macro Groups - each group expands to a cache line.
         centroids_per_cacheline,  # Number of centroids packed in a group.
-        points_per_cacheline      # Number of data points in a group.
-        data_type                 # Data encoding format.
+        points_per_cacheline,     # Number of data points in a group.
+        data_type,                # Data encoding format.
     }(
-        (packed_ventroids...,)
+        (packed_centroids...,)
     )
 end
 Base.getindex(c::BinnedPQCentroids, i) = c.centroids[i]
@@ -197,7 +197,7 @@ end
     return :(reduce(+, ($(exprs...),)))
 end
 
-valtuple(start, step, stop) = tuple((start - 1):step:(stop - 1))
+valtuple(start, step, stop) = tuple((start - 1):step:(stop - 1)...)
 
 #####
 ##### Distance Computations
