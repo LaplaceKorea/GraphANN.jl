@@ -8,11 +8,13 @@ struct Euclidean{N,T}
 end
 
 unwrap(x::Euclidean) = x.vals
+unwrap(x::SIMD.Vec) = x
 Base.Tuple(x::Euclidean) = Tuple(unwrap(x))
 
 Euclidean{N,T}() where {N,T} = Euclidean(@SVector zeros(T, N))
 Euclidean{N,T}(vals::NTuple{N,T}) where {N,T} = Euclidean(SVector{N,T}(vals))
 Euclidean(vals::NTuple{N,T}) where {N,T} = Euclidean{N,T}(vals)
+Euclidean(vec::SIMD.Vec) = Euclidean(Tuple(vec))
 
  _Base.zeroas(::Type{T}, ::Type{Euclidean{N,U}}) where {T,N,U} = Euclidean{N,T}()
  _Base.zeroas(::Type{T}, x::E) where {T, E <: Euclidean} = zeroas(T, E)
@@ -26,6 +28,7 @@ Base.length(::Euclidean{N}) where {N} = N
 Base.length(::Type{<:Euclidean{N}}) where {N} = N
 Base.eltype(::Euclidean{N,T}) where {N,T} = T
 Base.eltype(::Type{Euclidean{N,T}}) where {N,T} = T
+Base.transpose(x::Euclidean) = x
 
 Base.@propagate_inbounds @inline Base.getindex(x::Euclidean, i) = getindex(x.vals, i)
 
@@ -40,10 +43,16 @@ Base.:-(x::Euclidean...) = map(-, x...)
 Base.iterate(x::Euclidean, s...) = iterate(unwrap(x), s...)
 
 Base.convert(::Type{SIMD.Vec{N,T}}, x::Euclidean{N,T}) where {N,T} = SIMD.Vec{N,T}(Tuple(x))
+function Base.convert(::Type{SIMD.Vec{N,T1}}, x::Euclidean{N,T2}) where {N, T1, T2}
+    return convert(SIMD.Vec{N,T1}, convert(SIMD.Vec{N,T2}, x))
+end
 Base.convert(::Type{Euclidean{N,T}}, x::Euclidean{N,T}) where {N,T} = x
 function Base.convert(::Type{Euclidean{N,T}}, x::Euclidean{N,U}) where {N,T,U}
     return map(i -> convert(T, i), x)
 end
+
+_merge(x, y...) = (Tuple(x)..., _merge(y...)...)
+_merge(x) = Tuple(x)
 
 #####
 ##### SIMD Promotion and Stuff
@@ -70,6 +79,7 @@ function distance_select(::Sentinel{A,B}, ::Sentinel{B,A}) where {A,B}
 end
 
 distance_type(::A, ::B) where {A <: Euclidean, B <: Euclidean} = distance_type(A, B)
+distance_type(::Type{T}) where {T <: SIMDType} = distance_type(T, T)
 function distance_type(
     ::Type{<:SIMDType{<:Any,A}},
     ::Type{<:SIMDType{<:Any,B}}
@@ -78,6 +88,58 @@ function distance_type(
     # short vector computations.
     N, T = distance_select(distance_parameters(A, B), distance_parameters(B, A))
     return SIMD.Vec{N,T}
+end
+
+#####
+##### Packed SIMD
+#####
+
+# Pack `K` Euclideans into a single `Vec`
+struct Packed{K, E <: Euclidean, V <: SIMD.Vec}
+    repr::V
+end
+Packed(e::Euclidean...) = Packed(e)
+function Packed(e::NTuple{K,Euclidean{N,T}}) where {K,N,T}
+    V = SIMD.Vec{K * N, T}
+    return Packed{K, Euclidean{N,T}, V}(V(_merge(e...)))
+end
+
+Base.length(::Type{<:Packed{K}}) where {K} = K
+Base.length(x::P) where {P <: Packed} = length(P)
+distance_type(::Type{<:Packed{<:Any,<:Any,V}}) where {V} = distance_type(V)
+Base.transpose(x::Packed) = x
+
+unwrap(x::Packed) = x.repr
+function _Base.distance(A::P, B::P) where {K, E, V, P <: Packed{K, E, V}}
+    Base.@_inline_meta
+    # Figure out the correct promotion type
+    promote_type = distance_type(P)
+    a = convert(promote_type, unwrap(A))
+    b = convert(promote_type, unwrap(B))
+    accumulator = square(a - b)
+    return squish(Val(K), accumulator)
+end
+
+# Convenience setter
+function set!(
+    A::AbstractArray{Packed{K,E,V},N1},
+    v::E,
+    ind::CartesianIndex{N2}
+) where {K,E,V,N1,N2}
+    @assert N2 == N1 + 1
+    off, i, j = Tuple(ind)
+    ptr = pointer(A, size(A, 1) * (j-1) + i) + (off-1) * sizeof(E)
+    unsafe_store!(Ptr{E}(ptr), v)
+end
+
+function Base.get(
+    A::AbstractArray{Packed{K,E,V},N1},
+    ind::CartesianIndex{N2}
+) where {K,E,V,N1,N2}
+    @assert N2 == N1 + 1
+    off, i, j = Tuple(ind)
+    ptr = pointer(A, size(A, 1) * (j-1) + i) + (off-1) * sizeof(E)
+    return unsafe_load(Ptr{E}(ptr))
 end
 
 #####
@@ -109,22 +171,44 @@ Base.length(::EagerWrap{V,K}) where {V,K} = K
 ##### Lazy Conversion
 #####
 
-struct LazyWrap{V <: SIMD.Vec, N, T}
-    val::Euclidean{N,T}
+struct LazyWrap{V <: SIMDType, E <: SIMDType}
+    val::E
 end
 
-LazyWrap{V}(val::Euclidean{N,T}) where {V,N,T} = LazyWrap{V,N,T}(val)
+LazyWrap{V}(val::E) where {V,E} = LazyWrap{V,E}(val)
 
-function Base.getindex(x::LazyWrap{V}, i) where {N,T,V <: SIMD.Vec{N,T}}
+function Base.getindex(x::LazyWrap{V}, i) where {N,T,V <: SIMDType{N,T}}
     return convert(V, _getindex(x, N * (i - 1)))
 end
 
-@generated function _getindex(x::LazyWrap{V}, i) where {N, T, V <: SIMD.Vec{N,T}}
+@generated function _getindex(x::LazyWrap{V}, i) where {N, T, V <: SIMDType{N,T}}
     inds = [:(@inbounds(v[i + $j])) for j in 1:N]
     return quote
         v = _Points.unwrap(x.val)
-        SIMD.Vec(($(inds...),))
+        V(($(inds...),))
     end
+end
+
+#####
+##### Lazy Conversion for Arrays
+#####
+
+struct LazyArrayWrap{V <: SIMDType, N, T} <: AbstractMatrix{V}
+    val::Vector{Euclidean{N,T}}
+end
+
+Base.size(x::LazyArrayWrap{V,N}) where {V,N} = (div(N, length(V)), length(x.val))
+
+function LazyArrayWrap{V}(x::Vector{Euclidean{N,T}}) where {V <: SIMDType, N, T}
+    return LazyArrayWrap{V,N,T}(x)
+end
+
+function Base.getindex(x::LazyArrayWrap{V,N,T}, I::Vararg{Int, 2}) where {NV, V <: SIMDType{NV}, N, T}
+    @boundscheck checkbounds(x, I...)
+    @unpack val = x
+
+    ptr = Ptr{Euclidean{NV,T}}(pointer(val, I[2])) + (I[1] - 1) * sizeof(SIMD.Vec{N,T})
+    return convert(V, unsafe_load(ptr))
 end
 
 #####
@@ -205,6 +289,24 @@ function _Base.prefetch(A::AbstractVector{Euclidean{N,T}}, i, f::F = _Base.prefe
     end
     return nothing
 end
+
+#####
+##### Cache Line Reduction
+#####
+
+@generated function squish(::Val{N}, cacheline::SIMD.Vec{S,T}) where {N,S,T}
+    step = div(S,N)
+    exprs = map(1:step) do i
+        tup = valtuple(i, step, S)
+        :(SIMD.shufflevector(cacheline, Val($tup)))
+    end
+    return quote
+        #Base.@_inline_meta
+        reduce(+, ($(exprs...),))
+    end
+end
+
+valtuple(start, step, stop) = tuple((start - 1):step:(stop - 1)...)
 
 #####
 ##### Specialize for UInt8

@@ -3,6 +3,7 @@ safe_maximum(f::F, itr, default = 0) where {F} = isempty(itr) ? default : maximu
 donothing(x...) = nothing
 printlnstyled(x...; kw...) = printstyled(x..., "\n"; kw...)
 zero!(x) = (x .= zero(eltype(x)))
+typemax!(x) = (x .= typemax(eltype(x)))
 
 # Ceiling division
 cdiv(a::Integer, b::Integer) = cdiv(promote(a, b)...)
@@ -214,3 +215,19 @@ Base.iterate(x::BatchedRange, s = 1)  = s > length(x) ? nothing : (x[s], s+1)
 # a `UnitRange` when it encloses a `UnitRange`.
 subrange(range::OrdinalRange, start, stop) = range[start]:step(range):range[stop]
 subrange(range::AbstractUnitRange, start, stop) = range[start]:range[stop]
+
+#####
+##### Debug Utils
+#####
+
+export @ttime
+macro ttime(expr)
+    expr = esc(expr)
+    return quote
+        if Threads.threadid() == 1
+            @time $expr
+        else
+            $expr
+        end
+    end
+end

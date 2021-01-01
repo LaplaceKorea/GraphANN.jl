@@ -1,46 +1,17 @@
 force_store!(ptr::Ptr{T}, x::T) where {T} = unsafe_store!(ptr, x)
 force_store!(ptr::Ptr{T}, x::U) where {T,U} = force_store!(Ptr{U}(ptr), x)
 
-# Specializations for Euclidean Points
-# Refactored layout of PQ Centroids as follows
-#
-# Assume:
-# - We have a 16D vector with elemets of type T
-# - PQ vector sizes are 4D
-# - We have 5 centroids per partition.
-# - The memory layout will the be as follows
-#
-#             <------- N ------->
-#                 +----G----+
-#                 |         |
-#                 ∨         ∨           Memory order
-#                R0        R1
-#        C0 || T T T T | T T T T ||       -----> Primary
-#        C1 || T T T T | T T T T ||       |
-#   +--> C2 || T T T T | T T T T ||       |
-#   |    C3 || T T T T | T T T T ||       ∨
-#   |    C4 || T T T T | T T T T ||   Seconday
-#   |
-#   K
-#   |            R2        R3
-#   |    C0 || T T T T | T T T T ||
-#   |    C1 || T T T T | T T T T ||
-#   +--> C2 || T T T T | T T T T ||
-#        C3 || T T T T | T T T T ||
-#        C4 || T T T T | T T T T ||
-#
-# The goal here is to group common numbered centroids contiguously in memory so we can do
-# multiple distance computations in parallel, updating min indexes in parallel as well.
-#
-# Since we want to take advantage of features like AVX-512, we may need to group multiple
-# centroids together into a single cache line.
-#
-# The sub-grouping parameter `G` will keep track of the actual sub-dimension of the PQ.
-struct BinnedPQCentroids{K,G,N,T}
-    centroids::NTuple{K, Vector{SIMD.Vec{N,T}}}
+#####
+##### Specialize for Euclidean
+#####
+
+# When we can stuff multiple centroids on a single cacheline, use `Packed` to represent
+# this, allowing us to compute multiple matchings at a time.
+struct BinnedPQCentroids{K, P <: Packed}
+    centroids::NTuple{K, Vector{P}}
 end
 
-encoded_length(::BinnedPQCentroids{K, G}) where {K, G} = K*G
+encoded_length(::BinnedPQCentroids{K, P}) where {K, P} = K * length(P)
 
 const BinCompatibleTypes = Union{
     Euclidean{4,UInt8},
@@ -67,46 +38,24 @@ function binned(table::PQTable{K, T}) where {K, T <: BinCompatibleTypes}
     points_per_cacheline = _per_cacheline(T)
     centroids_per_cacheline = div(points_per_cacheline, centroid_length)
     num_cachelines = div(num_partitions, centroids_per_cacheline)
-    data_type = eltype(T)
 
     # Sanity Checks
     # Make sure we can stuff this into an even number of AVX-512 vectors.
     @assert iszero(mod(original_length, centroids_per_cacheline))
     @assert num_partitions == size(centroids, 2)
 
-    # Here, we define two different types.
-    # - `store_type` is the packed SIMD representation, storing multiple centroids
-    # per cache line.
-    # - `move_type` is a SIMD vector for a single centroid vector. This type should be
-    # strictly smaller than `store_type` above and is used to pack centroid data into
-    # their corresponding locations in the packed representation.
-    store_type = SIMD.Vec{points_per_cacheline, data_type}
-    move_type = eltype(centroids)
-
-    packed_centroids = map(1:num_cachelines) do cacheline
-        dest = Vector{store_type}(undef, num_centroids)
-
-        # To help with the packing, temporarily
-        lanes = reinterpret(move_type, dest) |> (x -> reshape(x, centroids_per_cacheline, :))
-
+    packed_centroids = ntuple(Val(num_cachelines)) do cacheline
         start = centroids_per_cacheline * (cacheline - 1) + 1
         stop = centroids_per_cacheline * cacheline
         range = start:stop
 
-        for (lane_offset, partition_number) in enumerate(range), centroid in 1:num_centroids
-            lanes[lane_offset, centroid] = centroids[centroid, partition_number]
+        return map(1:num_centroids) do centroid
+            vals = [centroids[centroid, partition_number] for partition_number in range]
+            Packed(vals...)
         end
-        return dest
     end
 
-    return BinnedPQCentroids{
-        num_cachelines,           # Number of Macro Groups - each group expands to a cache line.
-        centroids_per_cacheline,  # Number of centroids packed in a group.
-        points_per_cacheline,     # Number of data points in a group.
-        data_type,                # Data encoding format.
-    }(
-        (packed_centroids...,)
-    )
+    return BinnedPQCentroids(packed_centroids)
 end
 Base.getindex(c::BinnedPQCentroids, i) = c.centroids[i]
 
@@ -120,10 +69,10 @@ Base.getindex(c::BinnedPQCentroids, i) = c.centroids[i]
 # Stage 1: Deconstruction
 function unsafe_encode!(
     ptr::Ptr,
-    centroids::BinnedPQCentroids{<:Any,<:Any,N,T},
+    centroids::BinnedPQCentroids{<:Any,P},
     x::E
-) where {N,T,E <: Euclidean}
-    U = _Points.distance_type(E, SIMD.Vec{N,T})
+) where {P,E <: Euclidean}
+    U = _Points.distance_type(E, _Points.distance_type(P))
     return unsafe_encode!(
         ptr,
         centroids,
@@ -133,52 +82,47 @@ end
 
 # Stage 2-3: Promotion and storing
 function unsafe_encode!(
-    ptr::Ptr{P},
-    centroids::BinnedPQCentroids{SLICES, GROUPS_PER_SLICE, N, T},
+    ptr::Ptr{U},
+    centroids::BinnedPQCentroids{SLICES, P},
     x::_Points.EagerWrap,
-) where {P, SLICES, GROUPS_PER_SLICE, N, T}
+) where {U, SLICES, P}
     for slice in 1:SLICES
         # Compute the partial result for this slice.
         partial_encoding = partial_encode(
-            Val(GROUPS_PER_SLICE),
             centroids[slice],
-            x[slice],
+            P(x[slice]),
         )
 
         # Store to pointer
-        converted_encoding = convert.(P, partial_encoding)
+        converted_encoding = convert.(U, partial_encoding)
         force_store!(ptr, converted_encoding)
         ptr += sizeof(converted_encoding)
     end
 end
 
 function partial_encode(
-    ::Val{NUM_GROUPS},
-    centroids::Vector{V1},
-    x::V2,
-) where {NUM_GROUPS, V1 <: SIMD.Vec, V2 <: SIMD.Vec}
+    centroids::Vector{P},
+    x::P,
+) where {K, E, V, P <: Packed{K,E,V}}
     # Unlikely sad path.
     index_type = Int32
     num_centroids = length(centroids)
     num_centroids > typemax(index_type) && error("Vector is too long!")
 
-    promote_type = _Points.distance_type(V1, V2)
+    promote_type = _Points.distance_type(V)
     distance_type = eltype(_Points.accum_type(promote_type))
 
     # Keep track of one per group
-    minimum_distances = SIMD.Vec{NUM_GROUPS, distance_type}(typemax(distance_type))
-    minimum_indices = zero(SIMD.Vec{NUM_GROUPS, index_type})
+    minimum_distances = SIMD.Vec{K, distance_type}(typemax(distance_type))
+    minimum_indices = zero(SIMD.Vec{K, index_type})
 
-    _x = convert(promote_type, x)
     for i in 1:num_centroids
-        c = @inbounds convert(promote_type, centroids[i])
-        z = _Points.square(c - _x)
-        current_distances = _reduce(Val(NUM_GROUPS), z)
+        current_distances = distance(x, centroids[i])
 
         # Create a SIMD mask based on which distances are lower than the minimum distances
         # so far.
         mask = current_distances < minimum_distances
-        index_update = SIMD.Vec{NUM_GROUPS, index_type}(i - 1)
+        index_update = SIMD.Vec{K, index_type}(i - 1)
 
         # Update
         minimum_indices = SIMD.vifelse(mask, index_update, minimum_indices)
@@ -186,18 +130,6 @@ function partial_encode(
     end
     return Tuple(minimum_indices)
 end
-
-# TODO: Move this into "euclidean.jl"?
-@generated function _reduce(::Val{N}, cacheline::SIMD.Vec{S,T}) where {N,S,T}
-    step = div(S,N)
-    exprs = map(1:step) do i
-        tup = valtuple(i, step, S)
-        :(SIMD.shufflevector(cacheline, Val($tup)))
-    end
-    return :(reduce(+, ($(exprs...),)))
-end
-
-valtuple(start, step, stop) = tuple((start - 1):step:(stop - 1)...)
 
 #####
 ##### Distance Computations

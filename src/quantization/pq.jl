@@ -20,6 +20,13 @@ struct PQTable{N,T}
 end
 
 function PQTable{N}(centroids::Matrix{T}) where {N,V,T}
+    if size(centroids, 2) != N
+        err = ArgumentError("""
+        Centroid matrix for PQTable with $N partitions must have $N columns.
+        Instead, it has $(size(centroids, 2)) columns!
+        """)
+        throw(err)
+    end
     return PQTable{N,T}(centroids)
 end
 
@@ -80,15 +87,18 @@ function _unsafe_encode_fallback!(
 
     dx = cast(Euclidean{length(T),eltype(x)}, x)
     for i in 1:N
-        current_minimum = CurrentMinimum()
+        min_index = 0
+        min_distance = typemax(Float32)
+
         for (index, centroid) in enumerate(view(centroids, :, i))
-            candidate = CurrentMinimum(distance(dx[i], centroid), index)
-            if candidate < current_minimum
-                current_minimum = candidate
+            new_distance = distance(dx[i], centroid)
+            if new_distance < min_distance
+                min_distance = new_distance
+                min_index = index
             end
         end
 
-        val = U(current_minimum.index - 1)
+        val = U(min_index - 1)
         unsafe_store!(ptr, val)
         ptr += sizeof(val)
     end

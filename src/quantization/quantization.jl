@@ -6,7 +6,7 @@ using .._Graphs
 using .._Points
 
 # Special imports
-import .._Points.cast
+import .._Points: cast, squish, LazyWrap, LazyArrayWrap, Packed, set!
 
 # deps
 import LightGraphs
@@ -18,6 +18,7 @@ import UnPack: @unpack
 
 # Product Quantization
 export PQTable, PQGraph
+export encode
 include("clustering.jl")
 include("pq.jl")
 include("pq_euclidean.jl")
