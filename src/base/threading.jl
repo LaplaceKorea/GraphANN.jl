@@ -126,7 +126,7 @@ function ThreadLocal(pool::ThreadPool, values::T) where {T}
     )
 end
 
-Base.getindex(t::ThreadLocal) = t.values[Threads.threadid()]
+Base.getindex(t::ThreadLocal, i::Integer = Threads.threadid()) = t.values[i]
 Base.setindex!(t::ThreadLocal, v) = (t.values[Threads.threadid()] = v)
 getall(t::ThreadLocal) = collect(values(t.values))
 getpool(t::ThreadLocal) = t.pool

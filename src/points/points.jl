@@ -1,6 +1,5 @@
 module _Points
 
-
 # local deps
 using .._Base
 using .._Graphs

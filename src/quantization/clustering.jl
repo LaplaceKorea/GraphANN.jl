@@ -115,7 +115,9 @@ function choose_centroids(
     end
 
     compute_cost!(costs, data, centroids_sets)
-    total_cost = map(row -> sum(x -> convert(Int64, x), row), eachrow(costs))
+    total_costs = Vector{Int64}(undef, size(costs, 1))
+    sumcosts!(total_costs, costs)
+
     samples_per_iteration = ceil(Int, num_centroids * oversample / num_iterations)
 
     # Display updates
@@ -127,19 +129,14 @@ function choose_centroids(
     #ProgressMeter.@showprogress 1 for _iter in 1:num_iterations
     for _iter in 1:num_iterations
         # Independent sampling of the dataset
-        # Need to pull the `let` trick because Julia's struggling with the capturing
-        # of `total_cost` in the closure below.
-        let total_cost = total_cost
-            dynamic_thread(1:size(data, 2), 1024) do i
-                for partition in partitions
-                    # Sample this datum proportionally with its current cost
-                    partition_total = total_cost[partition]
-                    sample_probability = samples_per_iteration * costs[partition, i] / partition_total
-                    if rand() < sample_probability
-                        push!(local_centroids[][partition], data[partition, i])
-                    end
-                end
-            end
+        dynamic_thread(1:size(data, 2), 1024) do i
+            @inbounds process_partition(
+                local_centroids[],
+                view(data, :, i),
+                view(costs, :, i),
+                total_costs,
+                samples_per_iteration,
+            )
         end
 
         # Update current list of centroids
@@ -151,6 +148,7 @@ function choose_centroids(
 
         # Recompute total cost
         compute_cost!(costs, data, centroids_sets)
+        sumcosts!(total_costs, costs)
     end
 
     # Choose the final candidates from this collection.
@@ -164,23 +162,63 @@ function choose_centroids(
     return reduce(hcat, refined)
 end
 
+function sumcosts!(
+    total_costs::AbstractVector{T},
+    individual_costs::AbstractMatrix
+) where {T}
+    # Size check
+    if length(total_costs) != size(individual_costs, 1)
+        throw(ArgumentError("""
+        The length of argument `total_costs` must be the same the `size(individual_costs, 1)`.
+        Instead, they are $(length(total_costs)) and $(size(individual_costs, 1)) respectively.
+        """))
+    end
+    zero!(total_costs)
+    tls = ThreadLocal(zeros(T, length(total_costs)))
+
+    # Locally accumulate per thread.
+    dynamic_thread(1:size(individual_costs, 2), 1024) do j
+        local_costs = tls[]
+        @inbounds for i in eachindex(local_costs)
+            local_costs[i] += convert(T, individual_costs[i, j])
+        end
+    end
+
+    # Aggregate across threads.
+    total_costs .= sum(getall(tls))
+    return total_costs
+end
+
+function process_partition(
+    centroids,
+    samples::AbstractVector,
+    costs::AbstractVector,
+    total_costs::AbstractVector,
+    adjustment::Number,
+)
+    for i in eachindex(samples)
+        sample_probability = adjustment * costs[i] / total_costs[i]
+        if rand() < sample_probability
+            push!(centroids[i], samples[i])
+        end
+    end
+end
+
 function compute_cost!(
     costs::AbstractMatrix,
     data::LazyArrayWrap{Euclidean{N,T}, S, U},
     centroid_sets::AbstractVector{<:AbstractSet};
     worksize = 1024,
 ) where {N,T,S,U}
-    num_partitions = div(S, N)
-    partitions = 1:num_partitions
+    partitions = 1:size(data, 1)
 
     dynamic_thread(batched(1:size(data, 2), worksize)) do range
         # Initialize costs
         typemax!(view(costs, partitions, range))
-
         for (partition, centroids) in enumerate(centroid_sets)
-            for centroid in centroids, i in range
-                @inbounds datum = data[partition, i]
-                @inbounds costs[partition, i] = min(
+            @inbounds for centroid in centroids, i in range
+                datum = data[partition, i]
+                costs[partition, i] = min(
                     costs[partition, i],
                     distance(datum, centroid),
                 )
@@ -190,6 +228,8 @@ function compute_cost!(
     return costs
 end
 
+# function refine(
+#     costs::AbstractMatrix,
 
 #####
 ##### Batched `lloyds` algorithm.
@@ -277,8 +317,6 @@ function lloyds!(
             ppc = points_per_center[i]
             if !iszero(ppc)
                 new_centroid = integrated_points[i] / ppc
-                #old_centroid = get(centroids, i)
-                #@show sum(new_centroid - old_centroid)
                 set!(centroids, new_centroid, i)
             end
         end

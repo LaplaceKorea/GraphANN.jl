@@ -1,7 +1,3 @@
-# @generated utilities
-_syms(n::Integer) = [Symbol("z$i") for i in 1:n]
-_genindex(num_vectors, i) = [:(x[$j][$i]) for j in 1:num_vectors]
-
 # Points using the euclidean distances metric
 struct Euclidean{N,T}
     vals::SVector{N,T}
@@ -231,11 +227,11 @@ function _cast_impl(f, N::Integer, S::Integer, ::Type{T}) where {T}
     return :(($(exprs...),))
 end
 
-@generated function cast(::Type{Euclidean{S,T}}, x::Euclidean{N,T}) where {S,T,N}
+@generated function cast(::Type{Euclidean{S,T}}, x::SIMDType{N,T}) where {S,T,N}
     _cast_impl(Euclidean{S,T}, N, S, T)
 end
 
-@generated function cast(::Type{SIMD.Vec{S,T}}, x::Euclidean{N,T}) where {S,T,N}
+@generated function cast(::Type{SIMD.Vec{S,T}}, x::SIMDType{N,T}) where {S,T,N}
     _cast_impl(SIMD.Vec{S,T}, N, S, T)
 end
 
@@ -293,6 +289,11 @@ end
 #####
 ##### Cache Line Reduction
 #####
+
+# function squish(::Val{N}, cacheline::SIMD.Vec{S,T}) where {N,S,T}
+#     v = cast(SIMD.Vec{div(S,N),T}, cacheline)
+#     return SIMD.Vec(map(_sum, v))
+# end
 
 @generated function squish(::Val{N}, cacheline::SIMD.Vec{S,T}) where {N,S,T}
     step = div(S,N)
@@ -359,29 +360,4 @@ function _IO.addto!(v::Vector{Euclidean{N,T}}, index, buf::AbstractVector{T}) wh
 end
 
 _IO.vecs_reshape(::Type{<:Euclidean}, v, dim) = v
-
-#####
-##### -- Deprecated
-#####
-
-# Generic fallback for computing distance between to similar-sized Euclidean points with
-# a different numeric type.
-_promote_type(x...) = promote_type(x...)
-_promote_type(x::Type{T}...) where {T <: Integer} = Int32
-_promote_type(x::Type{Int}...) = Int
-
-function distance_generic(
-    a::A,
-    b::B
-) where {N, TA, TB, A <: Euclidean{N, TA}, B <: Euclidean{N, TB}}
-    T = _promote_type(TA, TB)
-    s = zero(T)
-
-    @fastmath @simd for i in 1:N
-        @inbounds ca = convert(T, a[i])
-        @inbounds cb = convert(T, b[i])
-        s += (ca - cb) ^2
-    end
-    return s
-end
 

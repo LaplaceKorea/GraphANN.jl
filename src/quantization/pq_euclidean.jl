@@ -62,7 +62,7 @@ Base.getindex(c::BinnedPQCentroids, i) = c.centroids[i]
 # Type conversion pipeline.
 #
 # 1. Split argument `x` into a tuple of SIMD.Vec sized pieces.
-# 2. Call `_sub_encode` on each cacheline(ish) sized chunk, promoting the slices of `x`
+# 2. Call `partial_encode` on each cacheline(ish) sized chunk, promoting the slices of `x`
 #    to the correct type.
 # 3. Sequentially store results to the destination pointer.
 
@@ -100,6 +100,7 @@ function unsafe_encode!(
     end
 end
 
+# TODO: Reformulate using `CurrentMinimum`..
 function partial_encode(
     centroids::Vector{P},
     x::P,
@@ -113,22 +114,12 @@ function partial_encode(
     distance_type = eltype(_Points.accum_type(promote_type))
 
     # Keep track of one per group
-    minimum_distances = SIMD.Vec{K, distance_type}(typemax(distance_type))
-    minimum_indices = zero(SIMD.Vec{K, index_type})
-
+    minimum = CurrentMinimum{K, distance_type}()
     for i in 1:num_centroids
         current_distances = distance(x, centroids[i])
-
-        # Create a SIMD mask based on which distances are lower than the minimum distances
-        # so far.
-        mask = current_distances < minimum_distances
-        index_update = SIMD.Vec{K, index_type}(i - 1)
-
-        # Update
-        minimum_indices = SIMD.vifelse(mask, index_update, minimum_indices)
-        minimum_distances = SIMD.vifelse(mask, current_distances, minimum_distances)
+        minimum = update(minimum, current_distances, i - 1)
     end
-    return Tuple(minimum_indices)
+    return Tuple(minimum.index)
 end
 
 #####
