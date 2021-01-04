@@ -101,7 +101,6 @@ function choose_centroids(
     partitions = 1:num_partitions
 
     # One cost per data point for each partition.
-    # Use Float32 to save on space.
     costs = Matrix{Int32}(undef, size(data))
 
     # Centroids chosend for each partiton.
@@ -228,6 +227,76 @@ function compute_cost!(
     return costs
 end
 
+#####
+##### Round 3 - Here We Go!
+#####
+
+struct PackedCentroids{K,E,V}
+    # Centroids stored in a transposed form.
+    centroids::Matrix{Packed{K,E,V}}
+    # Is the corresponding entry in `centroids` valid?
+    masks::Matrix{SIMD.Vec{K,Bool}}
+    # How many centroids are selected for each partition.
+    lengths::Vector{Int}
+end
+
+function PackedCentroids{E}(
+    num_partitions::Integer,
+    centroids_per_partition::Integer
+) where {N,E <: Euclidean{N,Float32}}
+    # This is pretty hacky at the moment, but the idea is to first allocate initialize
+    # the space we need, then reinterpret and collect.
+    # Since the amount of memory occupied by the centroids should be pretty low, we don't
+    # have much overhead in unnecessarily copying this data around.
+    raw = zeros(Euclidean{N,Float32}, num_partitions, centroids_per_partition)
+    K = div(16, N)
+    centroids = raw |>
+        x -> reinterpret(Packed{K, Euclidean{N,Float32}, SIMD.Vec{16,Float32}}, x) |>
+        collect
+
+    masks = zeros(SIMD.Vec{K,Bool}, size(centroids))
+    lengths = zeros(Int, num_partitions)
+    return PackedCentroids{K,E,SIMD.Vec{16,Float32}}(centroids, masks, lengths)
+end
+
+Base.size(x::PackedCentroids) = size(x.centroids)
+Base.getindex(x::PackedCentroids, i...) = getindex(x.centroids, i...)
+Base.get(x::PackedCentroids, i...) = get(x.centroids, i...)
+getmask(x::PackedCentroids, i...) = getindex(x.masks, i...)
+
+function Base.push!(x::PackedCentroids{K,E}, v::E, offset, group) where {K,E}
+    @assert 1 <= offset <= K
+    @unpack centroids, masks, lengths = x
+    # Insert this data point in the correct location
+    partition = (group - 1) * K + offset
+    horizontal_index = lengths[partition] + 1
+
+    # Insert new data point
+    _Points.set!(centroids, v, offset, group, horizontal_index)
+
+    # Update masks to indicate that this slot is filled.
+    new_bit = SIMD.Vec(ntuple(i -> (i == offset), Val(K)))
+    masks[group, horizontal_index] |= new_bit
+    lengths[partition] = horizontal_index
+    return nothing
+end
+
+function _choose_centroids(
+    data::LazyArrayWrap{Euclidean{N,T}, S, U},
+    num_centroids::Integer;
+    num_iterations = 2,
+    oversample = 1.3,
+) where {T,N,S,U}
+    num_partitions = div(S,N)
+    partitions = 1:num_partitions
+
+    # One cost per data point for each partition.
+    # This is currently specialized to use `Int32` distances ... but we'll need to add
+    # support for using `Float32` when we get ready to do `Deep1B`.
+    costs = Matrix{Int32}(undef, size(data))
+
+
+end
 # function refine(
 #     costs::AbstractMatrix,
 
@@ -332,6 +401,7 @@ function findcenters!(
     current_minimums::AbstractVector{C},
     centroids_transposed::AbstractMatrix{P},
     data::AbstractVector,
+    masks = nothing,
 ) where {C <: CurrentMinimum, P <: Packed}
     #data = view(data, :, col)
     # Do we have the correct number of partitions?
@@ -345,6 +415,12 @@ function findcenters!(
             # Wrap this partition of the datapoint in a `Packed` representation.
             centroids = centroids_transposed[i, j]
             d = distance(centroids, P(data[i]))
+            # TODO - this is a hack fow now ...
+            # If a mask set is provided, than only grab the computed distances for which
+            # the distance is set.
+            if masks !== nothing
+                d = SIMD.vifelse(masks[i, j], d, current_minimums[i].distance)
+            end
             current_minimums[i] = update(current_minimums[i], d, j)
         end
     end

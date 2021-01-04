@@ -24,6 +24,8 @@ Base.length(::Euclidean{N}) where {N} = N
 Base.length(::Type{<:Euclidean{N}}) where {N} = N
 Base.eltype(::Euclidean{N,T}) where {N,T} = T
 Base.eltype(::Type{Euclidean{N,T}}) where {N,T} = T
+# Need to define transpose for `Euclidean` to that transpose works on arrays of `Euclidean`.
+# This is because `transpose` is recursive.
 Base.transpose(x::Euclidean) = x
 
 Base.@propagate_inbounds @inline Base.getindex(x::Euclidean, i) = getindex(x.vals, i)
@@ -117,23 +119,29 @@ function _Base.distance(A::P, B::P) where {K, E, V, P <: Packed{K, E, V}}
 end
 
 # Convenience setter
+set!(A::AbstractArray{<:Packed}, v, I::CartesianIndex) = set!(A, v, Tuple(I))
+set!(A::AbstractArray{<:Packed}, v, I::Integer...) = set!(A, v, I)
 function set!(
     A::AbstractArray{Packed{K,E,V},N1},
     v::E,
-    ind::CartesianIndex{N2}
+    I::NTuple{N2,Int}
 ) where {K,E,V,N1,N2}
     @assert N2 == N1 + 1
-    off, i, j = Tuple(ind)
+    # Destructure tuple
+    off, i, j = I
     ptr = pointer(A, size(A, 1) * (j-1) + i) + (off-1) * sizeof(E)
     unsafe_store!(Ptr{E}(ptr), v)
 end
 
+Base.get(A::AbstractArray{<:Packed}, I::CartesianIndex) = get(A, Tuple(I))
+Base.get(A::AbstractArray{<:Packed}, I::Integer...) = get(A, I)
 function Base.get(
     A::AbstractArray{Packed{K,E,V},N1},
-    ind::CartesianIndex{N2}
+    I::NTuple{N2,Int}
 ) where {K,E,V,N1,N2}
     @assert N2 == N1 + 1
-    off, i, j = Tuple(ind)
+    # Destructure tuple
+    off, i, j = I
     ptr = pointer(A, size(A, 1) * (j-1) + i) + (off-1) * sizeof(E)
     return unsafe_load(Ptr{E}(ptr))
 end
@@ -142,7 +150,7 @@ end
 ##### Eager Conversion
 #####
 
-struct EagerWrap{V,K,N,T}
+struct EagerWrap{V <: SIMDType,K,N,T}
     vectors::NTuple{K,SIMD.Vec{N,T}}
 end
 EagerWrap{V}(x::NTuple{K,SIMD.Vec{N,T}}) where {V,K,N,T} = EagerWrap{V,K,N,T}(x)
@@ -157,6 +165,8 @@ Base.@propagate_inbounds function Base.getindex(x::EagerWrap{V}, i) where {V}
     return convert(V, x.vectors[i])
 end
 
+# Non-converting indexing.
+# Probably don't need this ...
 Base.@propagate_inbounds function Base.getindex(x::EagerWrap{SIMD.Vec{N,T},<:Any,N,T}) where {N,T}
     return x.vectors[i]
 end
@@ -289,11 +299,6 @@ end
 #####
 ##### Cache Line Reduction
 #####
-
-# function squish(::Val{N}, cacheline::SIMD.Vec{S,T}) where {N,S,T}
-#     v = cast(SIMD.Vec{div(S,N),T}, cacheline)
-#     return SIMD.Vec(map(_sum, v))
-# end
 
 @generated function squish(::Val{N}, cacheline::SIMD.Vec{S,T}) where {N,S,T}
     step = div(S,N)
