@@ -15,7 +15,6 @@ import ProgressMeter
 import SIMD
 import UnPack: @unpack
 
-
 # Product Quantization
 export PQTable, PQGraph
 export encode

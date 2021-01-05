@@ -88,6 +88,13 @@ function distance_type(
     return SIMD.Vec{N,T}
 end
 
+# How do we pack these items.
+# Default definition.
+packed_type(::Type{<:Euclidean{<:Any,T}}) where {T} = SIMD.Vec{div(64,sizeof(T)),T}
+
+# specializations
+packed_type(::Type{<:Euclidean{<:Any,UInt8}}) = SIMD.Vec{32,UInt8}
+
 #####
 ##### Packed SIMD
 #####
@@ -200,10 +207,11 @@ end
 #####
 
 struct LazyArrayWrap{V <: SIMDType, N, T} <: AbstractMatrix{V}
-    val::Vector{Euclidean{N,T}}
+    parent::Vector{Euclidean{N,T}}
 end
 
-Base.size(x::LazyArrayWrap{V,N}) where {V,N} = (div(N, length(V)), length(x.val))
+Base.size(x::LazyArrayWrap{V,N}) where {V,N} = (div(N, length(V)), length(x.parent))
+Base.parent(x::LazyArrayWrap) = x.parent
 
 function LazyArrayWrap{V}(x::Vector{Euclidean{N,T}}) where {V <: SIMDType, N, T}
     return LazyArrayWrap{V,N,T}(x)
@@ -211,9 +219,9 @@ end
 
 function Base.getindex(x::LazyArrayWrap{V,N,T}, I::Vararg{Int, 2}) where {NV, V <: SIMDType{NV}, N, T}
     @boundscheck checkbounds(x, I...)
-    @unpack val = x
+    @unpack parent = x
 
-    ptr = Ptr{Euclidean{NV,T}}(pointer(val, I[2])) + (I[1] - 1) * sizeof(SIMD.Vec{N,T})
+    ptr = Ptr{Euclidean{NV,T}}(pointer(parent, I[2])) + (I[1] - 1) * sizeof(SIMD.Vec{N,T})
     return convert(V, unsafe_load(ptr))
 end
 

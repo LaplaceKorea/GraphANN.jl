@@ -2,65 +2,7 @@
 ##### Kmeans Clustering
 #####
 
-# Compute the individual distances squared between a dataset and a collection of centroids.
-function compute_cost!(
-    costs::AbstractVector{T},
-    data,
-    centroids;
-    worksize = 1024
-) where {T}
-    # Here, the worksize i
-    dynamic_thread(batched(eachindex(data), worksize)) do range
-        # Initialize this range of costs.
-        for i in range
-            costs[i] = typemax(eltype(costs))
-        end
-
-       # Compute minimum in a batched manner.
-        for centroid in centroids, i in range
-            @inbounds datum = data[i]
-            @inbounds costs[i] = min(costs[i], distance(datum, centroid))
-        end
-    end
-    return costs
-end
-
-# This is basically an implementation of kmeans++, means to run on the reduced number
-# of clusters computed by `choose_centroids`.
-function refine(data::AbstractVector, num_centroids)
-    # Choose the first centroid at random.
-    costs = Vector{Int32}(undef, length(data))
-    centroids = Vector{eltype(data)}()
-    push!(centroids, data[rand(1:length(data))])
-
-    while length(centroids) < num_centroids
-        # Choose the next centroid based on the its distance from the current set of
-        # centroids.
-        compute_cost!(costs, data, centroids)
-        total_cost = sum(costs)
-
-        # The strategy we use is to generate a random number uniformly between 0 and 1.
-        # Then, we move through the `costs` vector, accumulating results as we go until
-        # we find the first point where the accumulated value is greater than the
-        # threshold.
-        #
-        # This is the point we choose.
-        threshold = rand()
-        accumulator = zero(threshold)
-        index = 0
-        while index <= length(data) && accumulator < threshold
-            index += 1
-            accumulator += costs[index] / total_cost
-        end
-        push!(centroids, data[index])
-    end
-    return centroids
-end
-
-#####
-##### Lloyd's algorithm
-#####
-
+# Helper structs
 struct CurrentMinimum{N,T}
     distance::SIMD.Vec{N,T}
     index::SIMD.Vec{N,Int32}
@@ -84,82 +26,238 @@ function update(x::CurrentMinimum{N,T}, d::SIMD.Vec{N,T}, i::Integer) where {N,T
 end
 
 #####
-##### Round 2 - FIGHT!
+##### Compacted representation for centroids.
 #####
 
-# Do the clustering in parallel because it's REALLY slow to do one partition at a time.
-# Choose initial centroids based on k-means++
-# https://en.wikipedia.org/wiki/K-means
-# http://vldb.org/pvldb/vol5/p622_bahmanbahmani_vldb2012.pdf
+# Often, the number of points per centroids is much smaller than a cacheline (and thus
+# AVX512 vector size.
+#
+# To improve computation speed, we group multiple partitions together on a single cacheline
+# and compute multiple distances in parallel.
+struct PackedCentroids{K,E,V}
+    # Centroids stored in a transposed form.
+    centroids::Matrix{Packed{K,E,V}}
+    # Is the corresponding entry in `centroids` valid?
+    masks::Matrix{SIMD.Vec{K,Bool}}
+    # How many centroids are selected for each partition.
+    lengths::Vector{Int}
+end
+
+function PackedCentroids{E,V}(
+    num_partitions::Integer,
+    centroids_per_partition::Integer
+) where {E <: Euclidean, V <: SIMD.Vec}
+    # This is pretty hacky at the moment, but the idea is to first allocate initialize
+    # the space we need, then reinterpret and collect.
+    # Since the amount of memory occupied by the centroids should be pretty low, we don't
+    # have much overhead in unnecessarily copying this data around.
+    K = exact_div(length(V), length(E))
+    num_groups = exact_div(num_partitions, K)
+    raw = zeros(V, num_groups, centroids_per_partition)
+    centroids = raw |>
+        x -> reinterpret(Packed{K, E, V}, x) |>
+        collect
+
+    masks = zeros(SIMD.Vec{K,Bool}, size(centroids))
+    lengths = zeros(Int, num_partitions)
+    return PackedCentroids{K,E,V}(centroids, masks, lengths)
+end
+
+Base.size(x::PackedCentroids) = size(x.centroids)
+Base.size(x::PackedCentroids, i::Integer) = size(x.centroids, i)
+fullsize(x::PackedCentroids{K}) where {K} = (K * size(x, 1), size(x, 2))
+
+Base.eltype(x::PackedCentroids{K,E,V}) where {K,E,V} = Packed{K,E,V}
+Base.getindex(x::PackedCentroids, i...) = getindex(x.centroids, i...)
+Base.get(x::PackedCentroids, i...) = get(x.centroids, i...)
+getmask(x::PackedCentroids, i...) = getindex(x.masks, i...)
+maxlength(x::PackedCentroids) = maximum(x.lengths)
+lengthof(x::PackedCentroids, i::Integer) = getindex(x.lengths, i)
+
+function Base.push!(x::PackedCentroids{K,E}, v::E, offset, group) where {K,E}
+    @assert 1 <= offset <= K
+    @unpack centroids, masks, lengths = x
+    # Insert this data point in the correct location
+    partition = (group - 1) * K + offset
+    horizontal_index = lengths[partition] + 1
+    horizontal_index > size(x, 2) && return nothing
+
+    # Insert new data point
+    _Points.set!(centroids, v, offset, group, horizontal_index)
+
+    # Update masks to indicate that this slot is filled.
+    # Need to do a little dance with constructing a `SIMD.Vec` from a tuple.
+    new_bit = SIMD.Vec(ntuple(i -> (i == offset), Val(K)))
+    masks[group, horizontal_index] |= new_bit
+    lengths[partition] = horizontal_index
+    return nothing
+end
+
+#####
+##### Entry Point
+#####
+
 function choose_centroids(
-    data::LazyArrayWrap{Euclidean{N,T}, S, U},
+    centroids_per_partition::Integer,
+    data::Vector{Euclidean{N,T}},
     num_centroids::Integer;
     num_iterations = 2,
     oversample = 1.3,
 ) where {T,N,S,U}
-    num_partitions = div(S,N)
+    # What is the centroid type
+    centroid_type = Euclidean{centroids_per_partition,T}
+    packed_type = _Points.packed_type(centroid_type)
+    num_partitions = exact_div(N, length(centroid_type))
+
+    # Wrap the data in the correct view type
+    data_wrapped = LazyArrayWrap{packed_type}(data)
+
+    # Create a packed representation for the centroids
+    centroids = PackedCentroids{centroid_type, packed_type}(
+        num_partitions,
+        ceil(Int, num_centroids * oversample)
+    )
+
+    # Inner function to handle any type instability at this upper level.
+    choose_centroids!(
+        centroids,
+        data_wrapped,
+        num_iterations,
+    )
+
+    return centroids
+end
+
+function choose_centroids!(
+    packed_centroids::PackedCentroids{K,E,V},
+    data::LazyArrayWrap,
+    num_iterations::Integer,
+) where {K,E,V}
+    @show Tuple{typeof(packed_centroids), typeof(data), typeof(num_iterations)}
+
+    # Hoist up a bunch of useful constants
+    # -- types
+    P = Packed{K,E,V}
+
+    # -- values
+    num_centroids = size(packed_centroids, 2)
+    num_groups = size(packed_centroids, 1)
+    offsets = 1:K
+    num_partitions = num_groups * K
     partitions = 1:num_partitions
+    data_as_partitions = LazyArrayWrap{E}(parent(data))
+    samples_per_iteration = ceil(Int, num_centroids / num_iterations)
 
-    # One cost per data point for each partition.
-    costs = Matrix{Int32}(undef, size(data))
+    # Create a cost per centroid.
+    #costs = Matrix{Int32}(undef, num_partitions, size(data, 2))
+    costs = zeros(Int32, num_partitions, size(data, 2))
+    total_costs = Vector{Int64}(undef, num_partitions)
+    tls = ThreadLocal(;
+        current_minimums = [CurrentMinimum{K,Int32}() for _ in 1:num_groups],
+        local_centroids = [Set{E}() for _ in 1:num_partitions],
+    )
 
-    # Centroids chosend for each partiton.
-    # Make the centroid have the same type as that yielded by the LazyWrap.
-    centroids_sets = [Set{Euclidean{N,T}}() for _ in partitions]
-
-    # Choose the initial centroid uniformly at random from the dataset
-    for (partition, centroids) in enumerate(centroids_sets)
-        # Select a random entry in the data and pull out the corresponding
-        push!(centroids, rand(view(data, partition, :)))
+    # Initialize centroids randomly
+    for group in 1:num_groups, offset in 1:K
+        # Since `data` is wrapped in a wider type, we need to use `LazyWrap` to
+        # convert to the actual centroid type.
+        partition = K * (group - 1) + offset
+        centroid = rand(view(data_as_partitions, partition, :))
+        push!(packed_centroids, centroid, offset, group)
     end
 
-    compute_cost!(costs, data, centroids_sets)
-    total_costs = Vector{Int64}(undef, size(costs, 1))
-    sumcosts!(total_costs, costs)
-
-    samples_per_iteration = ceil(Int, num_centroids * oversample / num_iterations)
-
-    # Display updates
-    printstyled("Number of Iterations: "; color = :green, bold = :true)
-    println(num_iterations)
-
-    # Keep local centroids for each partition
-    local_centroids = ThreadLocal([Set{Euclidean{N,T}}() for _ in 1:num_partitions])
-    #ProgressMeter.@showprogress 1 for _iter in 1:num_iterations
-    for _iter in 1:num_iterations
-        # Independent sampling of the dataset
+    for iter in 1:num_iterations
+        # Step 1 - Compute the costs for all data points.
+        maxind = maxlength(packed_centroids)
         dynamic_thread(1:size(data, 2), 1024) do i
-            @inbounds process_partition(
-                local_centroids[],
+            @unpack current_minimums = tls[]
+            @unpack centroids, masks = packed_centroids
+
+            # Find the closest centroids.
+            findcenters!(
+                current_minimums,
+                centroids,
                 view(data, :, i),
+                maxind,
+                masks,
+            )
+
+            # Update the costs matrix
+            updatecosts!(view(costs, :, i), current_minimums)
+        end
+
+        # Step 2 - total up the costs per centroid.
+        sumcosts!(total_costs, costs)
+        @show sum(total_costs)
+
+        # Step 3 - Choose more centroids.
+        dynamic_thread(1:size(data, 2), 1024) do i
+        #for i in 1:size(data, 2)
+            @unpack local_centroids = tls[]
+            @inbounds process_partition(
+                local_centroids,
+                view(data_as_partitions, :, i),
                 view(costs, :, i),
                 total_costs,
                 samples_per_iteration,
             )
         end
 
-        # Update current list of centroids
-        for local_centroid_sets in getall(local_centroids)
-            for (centroids, local_centroids) in zip(centroids_sets, local_centroid_sets)
-                union!(centroids, local_centroids)
+        # Step 4 - Union all centroids and update
+        for thread_local in getall(tls)
+            for group in 1:num_groups, offset in offsets
+                partition = K * (group - 1) + offset
+                new_centroids = thread_local.local_centroids[partition]
+                for new_centroid in new_centroids
+                    push!(packed_centroids, new_centroid, offset, group)
+                end
+                empty!(new_centroids)
             end
         end
-
-        # Recompute total cost
-        compute_cost!(costs, data, centroids_sets)
-        sumcosts!(total_costs, costs)
     end
-
-    # Choose the final candidates from this collection.
-    printstyled("Finished initial run with "; color = :green, bold = true)
-    print(length.(centroids_sets))
-    printlnstyled(" centroids."; color = :green, bold = true)
-
-    refined = map(centroids_sets) do centroids
-        refine(collect(centroids), num_centroids)
-    end
-    return reduce(hcat, refined)
+    return packed_centroids
 end
+
+function findcenters!(
+    current_minimums::AbstractVector{C},
+    centroids_transposed::AbstractMatrix{P},
+    data::AbstractVector,
+    maxind = size(centroids_transposed, 2),
+    masks = nothing,
+) where {C <: CurrentMinimum, P <: Packed}
+    # Do we have the correct number of partitions?
+    @assert size(data, 1) == size(centroids_transposed, 1)
+
+    # Reset minimums
+    current_minimums .= C()
+    for j in 1:maxind
+        @inbounds for i in 1:size(centroids_transposed, 1)
+            # Wrap this partition of the datapoint in a `Packed` representation.
+            centroids = centroids_transposed[i, j]
+            d = distance(centroids, P(data[i]))
+            # TODO - this is a hack fow now ...
+            # If a mask set is provided, than only grab the computed distances for which
+            # the distance is set.
+            if masks !== nothing
+                d = SIMD.vifelse(masks[i, j], d, current_minimums[i].distance)
+            end
+            current_minimums[i] = update(current_minimums[i], d, j)
+        end
+    end
+end
+
+function updatecosts!(
+    costs::AbstractVector,
+    current_minimums::AbstractVector{C},
+) where {K, C <: CurrentMinimum{K}}
+    @assert length(costs) == K * length(current_minimums)
+    for (i, minimums) in enumerate(current_minimums)
+        for (j, cost) in enumerate(Tuple(minimums.distance))
+            costs[K * (i-1) + j] = cost
+        end
+    end
+end
+
 
 function sumcosts!(
     total_costs::AbstractVector{T},
@@ -203,102 +301,121 @@ function process_partition(
     end
 end
 
-function compute_cost!(
-    costs::AbstractMatrix,
-    data::LazyArrayWrap{Euclidean{N,T}, S, U},
-    centroid_sets::AbstractVector{<:AbstractSet};
-    worksize = 1024,
-) where {N,T,S,U}
-    partitions = 1:size(data, 1)
+# Refinement - essentially kmeans++
+function refine(x::PackedCentroids{K,E,V}, y::LazyArrayWrap{V}, args...) where {K,E,V}
+    return refine(x, LazyArrayWrap{E}(parent(y)), args...)
+end
 
-    dynamic_thread(batched(1:size(data, 2), worksize)) do range
-        # Initialize costs
-        typemax!(view(costs, partitions, range))
-        for (partition, centroids) in enumerate(centroid_sets)
-            @inbounds for centroid in centroids, i in range
-                datum = data[partition, i]
-                costs[partition, i] = min(
-                    costs[partition, i],
-                    distance(datum, centroid),
-                )
+function refine(x::PackedCentroids{K,E}, y::AbstractVector, args...) where {K,E}
+    return refine(x, LazyArrayWrap{E}(y), args...)
+end
+
+function refine(
+    packed_centroids::PackedCentroids{K,E,V},
+    data::LazyArrayWrap{E},
+    num_centroids::Integer
+) where {K,E,V}
+    data_as_partitions = LazyArrayWrap{E}(parent(data))
+    final_centroids = Array{E}(undef, num_centroids, size(data,1))
+    unpacked_centroids = reinterpret(E, packed_centroids.centroids)
+
+    # First - determine how many points are assigned to each centroid.
+    weights = counts_per_centroid(packed_centroids, data)
+    dynamic_thread(1:size(data, 1)) do partition
+        centroids_in_partition = lengthof(packed_centroids, partition)
+
+        # Construct a bunch of views to pass to the final `refine` function.
+        # Since this function is fairly light weight, we don't spend a whole lot of time
+        # optimizing it.
+        refine!(
+            view(final_centroids, :, partition),
+            view(unpacked_centroids, partition, 1:centroids_in_partition),
+            view(weights, partition, 1:centroids_in_partition),
+        )
+    end
+    return final_centroids
+end
+
+function counts_per_centroid(
+    packed_centroids::PackedCentroids{K,E,V},
+    data::LazyArrayWrap{E}
+) where {K,E,V}
+    return counts_per_centroid(packed_centroids, LazyArrayWrap{V}(parent(data)))
+end
+
+function counts_per_centroid(
+    packed_centroids::PackedCentroids{K,E,V},
+    data::LazyArrayWrap{V},
+) where {K,E,V}
+    num_groups = size(packed_centroids, 1)
+    tls = ThreadLocal(;
+        minimums = [CurrentMinimum{K,Int32}() for _ in 1:num_groups],
+        counts = zeros(Int, fullsize(packed_centroids))
+    )
+
+    maxind = maxlength(packed_centroids)
+    dynamic_thread(1:size(data, 2), 1024) do i
+        @unpack minimums, counts = tls[]
+        @unpack centroids, masks = packed_centroids
+        findcenters!(minimums, centroids, view(data, :, i), maxind, masks)
+
+        # Accumulate counts
+        for (group, mins) in enumerate(minimums)
+            for (offset, index) in enumerate(Tuple(mins.index))
+                # If this is a valid entry, than accumulate the counts.
+                if masks[group, index][offset] == true
+                    partition = K * (group - 1) + offset
+                    counts[partition, index] += 1
+                end
             end
         end
     end
-    return costs
+
+    # Accumulate results across all threads.
+    return sum(x -> x.counts, getall(tls))
 end
 
-#####
-##### Round 3 - Here We Go!
-#####
+function refine!(
+    final_centroids::AbstractVector{E},
+    centroids::AbstractVector{E},
+    weights::AbstractVector,
+) where {N, T, E <: Euclidean{N,T}}
+    costs = Vector{Float32}(undef, length(centroids))
+    num_centroids = length(final_centroids)
 
-struct PackedCentroids{K,E,V}
-    # Centroids stored in a transposed form.
-    centroids::Matrix{Packed{K,E,V}}
-    # Is the corresponding entry in `centroids` valid?
-    masks::Matrix{SIMD.Vec{K,Bool}}
-    # How many centroids are selected for each partition.
-    lengths::Vector{Int}
-end
+    # Select a random centroid to begin with.
+    centroids_found = 1
+    final_centroids[centroids_found] = rand(centroids)
+    while centroids_found < num_centroids
+        # Compute minimum costs
+        for i in eachindex(centroids)
+            costs[i] = minimum(
+                x -> weights[i] * distance(centroids[i], x),
+                view(final_centroids, 1:centroids_found),
+            )
+        end
+        total_cost = sum(costs)
 
-function PackedCentroids{E}(
-    num_partitions::Integer,
-    centroids_per_partition::Integer
-) where {N,E <: Euclidean{N,Float32}}
-    # This is pretty hacky at the moment, but the idea is to first allocate initialize
-    # the space we need, then reinterpret and collect.
-    # Since the amount of memory occupied by the centroids should be pretty low, we don't
-    # have much overhead in unnecessarily copying this data around.
-    raw = zeros(Euclidean{N,Float32}, num_partitions, centroids_per_partition)
-    K = div(16, N)
-    centroids = raw |>
-        x -> reinterpret(Packed{K, Euclidean{N,Float32}, SIMD.Vec{16,Float32}}, x) |>
-        collect
+        # The strategy we use is to generate a random number uniformly between 0 and 1.
+        # Then, we move through the `costs` vector, accumulating results as we go until
+        # we find the first point where the accumulated value is greater than the
+        # threshold.
+        #
+        # This is the point we choose.
+        threshold = rand()
+        accumulator = zero(threshold)
+        index = 0
+        while index <= length(centroids) && accumulator < threshold
+            index += 1
+            accumulator += costs[index] / total_cost
+        end
 
-    masks = zeros(SIMD.Vec{K,Bool}, size(centroids))
-    lengths = zeros(Int, num_partitions)
-    return PackedCentroids{K,E,SIMD.Vec{16,Float32}}(centroids, masks, lengths)
-end
-
-Base.size(x::PackedCentroids) = size(x.centroids)
-Base.getindex(x::PackedCentroids, i...) = getindex(x.centroids, i...)
-Base.get(x::PackedCentroids, i...) = get(x.centroids, i...)
-getmask(x::PackedCentroids, i...) = getindex(x.masks, i...)
-
-function Base.push!(x::PackedCentroids{K,E}, v::E, offset, group) where {K,E}
-    @assert 1 <= offset <= K
-    @unpack centroids, masks, lengths = x
-    # Insert this data point in the correct location
-    partition = (group - 1) * K + offset
-    horizontal_index = lengths[partition] + 1
-
-    # Insert new data point
-    _Points.set!(centroids, v, offset, group, horizontal_index)
-
-    # Update masks to indicate that this slot is filled.
-    new_bit = SIMD.Vec(ntuple(i -> (i == offset), Val(K)))
-    masks[group, horizontal_index] |= new_bit
-    lengths[partition] = horizontal_index
+        centroids_found += 1
+        final_centroids[centroids_found] = centroids[index]
+    end
     return nothing
 end
 
-function _choose_centroids(
-    data::LazyArrayWrap{Euclidean{N,T}, S, U},
-    num_centroids::Integer;
-    num_iterations = 2,
-    oversample = 1.3,
-) where {T,N,S,U}
-    num_partitions = div(S,N)
-    partitions = 1:num_partitions
-
-    # One cost per data point for each partition.
-    # This is currently specialized to use `Int32` distances ... but we'll need to add
-    # support for using `Float32` when we get ready to do `Deep1B`.
-    costs = Matrix{Int32}(undef, size(data))
-
-
-end
-# function refine(
-#     costs::AbstractMatrix,
 
 #####
 ##### Batched `lloyds` algorithm.
@@ -395,35 +512,6 @@ function lloyds!(
         foreach(x -> zero!(x.points_per_center), getall(tls))
     end
     return tls
-end
-
-function findcenters!(
-    current_minimums::AbstractVector{C},
-    centroids_transposed::AbstractMatrix{P},
-    data::AbstractVector,
-    masks = nothing,
-) where {C <: CurrentMinimum, P <: Packed}
-    #data = view(data, :, col)
-    # Do we have the correct number of partitions?
-    #@assert size(data, 1) == size(centroids_transposed, 1)
-    num_partitions = size(centroids_transposed, 1)
-
-    # Reset minimums
-    current_minimums .= C()
-    for j in 1:size(centroids_transposed, 2)
-        @inbounds for i in 1:size(centroids_transposed, 1)
-            # Wrap this partition of the datapoint in a `Packed` representation.
-            centroids = centroids_transposed[i, j]
-            d = distance(centroids, P(data[i]))
-            # TODO - this is a hack fow now ...
-            # If a mask set is provided, than only grab the computed distances for which
-            # the distance is set.
-            if masks !== nothing
-                d = SIMD.vifelse(masks[i, j], d, current_minimums[i].distance)
-            end
-            current_minimums[i] = update(current_minimums[i], d, j)
-        end
-    end
 end
 
 function updatelocal!(
