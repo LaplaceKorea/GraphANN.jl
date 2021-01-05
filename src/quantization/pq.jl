@@ -168,10 +168,16 @@ function PQGraph{T}(
     # advantage of the underlying representation of the adjacency list being a contiguous
     # vector to parallelize the edge translation.
     @unpack storage = fadj(graph)
-    dynamic_thread(eachindex(storage), 1024) do i
-        v = storage[i]
-        unsafe_encode!(Ptr{T}(pointer(raw, i)), encoder, data[v])
+    meter = ProgressMeter.Progress(length(storage), 1, "Translating Adjacency Lists ... ")
+    batchsize = 2048
+    dynamic_thread(batched(eachindex(storage), batchsize)) do range
+        for i in range
+            v = storage[i]
+            unsafe_encode!(Ptr{T}(pointer(raw, i)), encoder, data[v])
+        end
+        ProgressMeter.next!(meter; step = batchsize)
     end
+    ProgressMeter.finish!(meter)
 
     # Now that the raw storage has been computed, we just need to construct the
     # Spans encoding each region.

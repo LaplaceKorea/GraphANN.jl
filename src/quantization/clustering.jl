@@ -476,6 +476,9 @@ function lloyds!(
     num_groups = size(centroids, 1)
     num_centroids = size(centroids, 2)
     num_partitions = K * num_groups
+    # Recast the data array along partition boundaries to facilitate selecting
+    # new centroids if needed.
+    data_as_partitions = LazyArrayWrap{E}(parent(data))
 
     # Allocate thread local storage
     tls = ThreadLocal(;
@@ -495,13 +498,21 @@ function lloyds!(
         # Now that we've accumulated everything on each thread, we have several things to do.
         # 1. Accumulate integrator values and points-per-center for each centroid.
         # 2. Update centroids to be at the center of their region.
-        # 3. (TODO) repick centroids that have no assignments.
+        # 3. Repick centroids that have no assignments.
         integrated_points = mapreduce(x -> x.integrators, (x,y) -> x .+ y, getall(tls))
         points_per_center = mapreduce(x -> x.points_per_center, +, getall(tls))
 
         for i in CartesianIndices(integrated_points)
             ppc = points_per_center[i]
-            if !iszero(ppc)
+            # If no points are assigned to this centroid, then repick the centroid.
+            if iszero(ppc)
+                offset, group, centroid_number = Tuple(i)
+                partition = K * (group - 1) + offset
+                data_view = view(data_as_partitions, partition, :)
+                set!(centroids, rand(data_view), i)
+            # Otherwise, shift the centroid to be the median of all the points assigned
+            # to it.
+            else
                 new_centroid = integrated_points[i] / ppc
                 set!(centroids, new_centroid, i)
             end

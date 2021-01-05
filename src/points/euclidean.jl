@@ -309,13 +309,23 @@ end
 #####
 
 @generated function squish(::Val{N}, cacheline::SIMD.Vec{S,T}) where {N,S,T}
+    # Optimization - if we're just going to sum across the whole vector, then just do
+    # that to avoid any kind of expensive reduction.
+    if N == 1
+        return quote
+            Base.@_inline_meta
+            SIMD.Vec(_sum(cacheline))
+        end
+    end
+
+    # Otherwise, build up a reduction tree.
     step = div(S,N)
     exprs = map(1:step) do i
         tup = valtuple(i, step, S)
         :(SIMD.shufflevector(cacheline, Val($tup)))
     end
     return quote
-        #Base.@_inline_meta
+        Base.@_inline_meta
         reduce(+, ($(exprs...),))
     end
 end

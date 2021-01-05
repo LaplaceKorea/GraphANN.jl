@@ -8,9 +8,9 @@ end
 struct PMAllocator
     path::String
 end
+
 (f::PMAllocator)(type, dims...) = pmallocator(type, f.path, dims...)
 pmallocator(path::AbstractString) = PMAllocator(path)
-
 
 const COUNT = Threads.Atomic{Int}(0)
 mmap_prefix() = "graphann_mmap_"
