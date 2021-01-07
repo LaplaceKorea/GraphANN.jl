@@ -105,8 +105,9 @@ function _unsafe_encode_fallback!(
 end
 
 # Compute distance for a vector of data points.
-function encode(::Type{U}, encoder, x::AbstractVector) where {U}
-    data = Vector{NTuple{encoded_length(encoder),U}}(undef, length(x))
+function encode(::Type{U}, encoder, x::AbstractVector; allocator = stdallocator) where {U}
+    N = encoded_length(encoder)
+    data = allocator(NTuple{N,U}, length(x))
     dynamic_thread(eachindex(data)) do i
         unsafe_encode!(Ptr{U}(pointer(data, i)), encoder, x[i])
     end
@@ -162,6 +163,7 @@ function PQGraph{T}(
 ) where {T,U}
     # Pre-allocate destination
     N = encoded_length(encoder)
+    encoded_data = encode(T, encoder, data; allocator = allocator)
     raw = allocator(NTuple{N,T}, LightGraphs.ne(graph))
 
     # Since this method is specialized on using a DenseAdjacencyList, we can take
@@ -169,11 +171,10 @@ function PQGraph{T}(
     # vector to parallelize the edge translation.
     @unpack storage = fadj(graph)
     meter = ProgressMeter.Progress(length(storage), 1, "Translating Adjacency Lists ... ")
-    batchsize = 2048
+    batchsize = 16384
     dynamic_thread(batched(eachindex(storage), batchsize)) do range
         for i in range
-            v = storage[i]
-            unsafe_encode!(Ptr{T}(pointer(raw, i)), encoder, data[v])
+            @inbounds raw[i] = encoded_data[storage[i]]
         end
         ProgressMeter.next!(meter; step = batchsize)
     end

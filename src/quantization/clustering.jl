@@ -45,7 +45,7 @@ end
 
 function PackedCentroids{E,V}(
     num_partitions::Integer,
-    centroids_per_partition::Integer
+    partition_size::Integer
 ) where {E <: Euclidean, V <: SIMD.Vec}
     # This is pretty hacky at the moment, but the idea is to first allocate initialize
     # the space we need, then reinterpret and collect.
@@ -53,7 +53,7 @@ function PackedCentroids{E,V}(
     # have much overhead in unnecessarily copying this data around.
     K = exact_div(length(V), length(E))
     num_groups = exact_div(num_partitions, K)
-    raw = zeros(V, num_groups, centroids_per_partition)
+    raw = zeros(V, num_groups, partition_size)
     centroids = raw |>
         x -> reinterpret(Packed{K, E, V}, x) |>
         collect
@@ -61,6 +61,14 @@ function PackedCentroids{E,V}(
     masks = zeros(SIMD.Vec{K,Bool}, size(centroids))
     lengths = zeros(Int, num_partitions)
     return PackedCentroids{K,E,V}(centroids, masks, lengths)
+end
+
+function PackedCentroids{V}(centroids::AbstractMatrix{E}) where {E <: Euclidean, V <: SIMD.Vec}
+    K = exact_div(length(V), length(E))
+    packed_centroids = collect(reinterpret(Packed{K,E,V}, transpose(centroids)))
+    masks = ones(SIMD.Vec{K,Bool}, size(packed_centroids))
+    lengths = fill(size(centroids, 1), size(centroids, 2))
+    return PackedCentroids{K,E,V}(packed_centroids, masks, lengths)
 end
 
 Base.size(x::PackedCentroids) = size(x.centroids)
@@ -97,15 +105,36 @@ end
 ##### Entry Point
 #####
 
+"""
+    choose_centroids(data::Vector{Euclidean}, partition_size, num_centroids; [kw...])
+
+Logically partition `data` into partitions each with dimension `partition_size`
+for product quantization and select `num_centroids` initial centroids for each
+partition intelligently from `data`.
+
+Result is a `Matrix{Euclidean{partition_size}}` with partitions corresponding to
+columns. That is, entry `(a, b)` is the `ath` centroid for partiton `b`.
+
+Implementation Details: Centroids are chosen using the kmeans∥ algorithm.
+
+**Keywords**:
+- `num_iterations`: Number of times centroids are selected based on residual calculations.
+    Increasing this number should increase the quality of the centroids chosen.
+    Default: `3`.
+
+- `oversample`: The kmeans∥ algorithm works by selecting more than the desired number
+    of centroids and refining. This parameter controles approximately how many
+    more centroids than `num_centroids` are selected. Default: `1.3`.
+"""
 function choose_centroids(
-    centroids_per_partition::Integer,
     data::Vector{Euclidean{N,T}},
+    partition_size::Integer,
     num_centroids::Integer;
-    num_iterations = 2,
+    num_iterations = 3,
     oversample = 1.3,
 ) where {T,N,S,U}
     # What is the centroid type
-    centroid_type = Euclidean{centroids_per_partition,T}
+    centroid_type = Euclidean{partition_size,T}
     packed_type = _Points.packed_type(centroid_type)
     num_partitions = exact_div(N, length(centroid_type))
 
@@ -128,16 +157,38 @@ function choose_centroids(
     return centroids
 end
 
+const NoWidenTypes = Union{Float64,Int64,UInt64}
+maybe_widen(::Type{T}) where {T} = widen(T)
+maybe_widen(::Type{T}) where {T <: NoWidenTypes} = T
+
+# Inner method for `choose_centroids`.
+# Results are updated inplace in the `packed_centroids` struct.
+# Data types such as `PackedCentroids` and `LazyArrayWrap` are chosen to allow centroids
+# for multiple partitions to be chosen in parallel by packing multiple partitions together
+# on the same cache line (and thus AVX-512 operation).
+#
+# Description of type parameters:
+# * K: The number of partitions that are grouped together.
+#   In other words, how many `E`s fit into a `V`.
+#
+# * E: The logical data type packed together. `K` instanes of `E` are packed together into
+#   a single `V`.
+#
+# * V: A type capable of holding multipel `E`. Often, this will be something like a
+#   `SIMD.Vec{16,Float32}` representing an entire cache line.
 function choose_centroids!(
     packed_centroids::PackedCentroids{K,E,V},
     data::LazyArrayWrap,
     num_iterations::Integer,
 ) where {K,E,V}
-    @show Tuple{typeof(packed_centroids), typeof(data), typeof(num_iterations)}
+    #@show Tuple{typeof(packed_centroids), typeof(data), typeof(num_iterations)}
 
     # Hoist up a bunch of useful constants
     # -- types
     P = Packed{K,E,V}
+    distance_type = _Points.distance_type(V)
+    accum_type = _Points.accum_type(distance_type)
+    cost_type = eltype(accum_type)
 
     # -- values
     num_centroids = size(packed_centroids, 2)
@@ -145,15 +196,24 @@ function choose_centroids!(
     offsets = 1:K
     num_partitions = num_groups * K
     partitions = 1:num_partitions
-    data_as_partitions = LazyArrayWrap{E}(parent(data))
     samples_per_iteration = ceil(Int, num_centroids / num_iterations)
+    # Allow potential access to `data` on the `E` level of granularity.
+    data_as_partitions = LazyArrayWrap{E}(parent(data))
 
     # Create a cost per centroid.
-    #costs = Matrix{Int32}(undef, num_partitions, size(data, 2))
-    costs = zeros(Int32, num_partitions, size(data, 2))
-    total_costs = Vector{Int64}(undef, num_partitions)
+    costs = zeros(cost_type, num_partitions, size(data, 2))
+    total_costs = Vector{maybe_widen(cost_type)}(undef, num_partitions)
+
+    # Description:
+    # - current_minimums: Vectorized distance/index pairs for each group in
+    #   `packed_centroids`. Basically, each index in the outer array corresponds to a `V`
+    #   in `packed_centroids` while each inner index in the `CurrentMinimum` corresponds
+    #   to an `E`.
+    #
+    # - local_centroids: New centroids chosen by each thread to be aggregated at the
+    #   end of an iteration.
     tls = ThreadLocal(;
-        current_minimums = [CurrentMinimum{K,Int32}() for _ in 1:num_groups],
+        current_minimums = [CurrentMinimum{K,cost_type}() for _ in 1:num_groups],
         local_centroids = [Set{E}() for _ in 1:num_partitions],
     )
 
@@ -183,16 +243,19 @@ function choose_centroids!(
             )
 
             # Update the costs matrix
+            # Each thread owns the column in `costs` that it is writing to, so there is
+            # no need for synchronization.
             updatecosts!(view(costs, :, i), current_minimums)
         end
 
         # Step 2 - total up the costs per centroid.
+        # This needs to be parallelized by the `sumcosts!` kernel in order to run in a
+        # resonable amount of time.
         sumcosts!(total_costs, costs)
         @show sum(total_costs)
 
         # Step 3 - Choose more centroids.
         dynamic_thread(1:size(data, 2), 1024) do i
-        #for i in 1:size(data, 2)
             @unpack local_centroids = tls[]
             @inbounds process_partition(
                 local_centroids,
@@ -218,6 +281,11 @@ function choose_centroids!(
     return packed_centroids
 end
 
+"""
+    findcenters!(current_minimums, centroids_transposed, data, [maxind, [masks]])
+
+
+"""
 function findcenters!(
     current_minimums::AbstractVector{C},
     centroids_transposed::AbstractMatrix{P},
@@ -257,7 +325,6 @@ function updatecosts!(
         end
     end
 end
-
 
 function sumcosts!(
     total_costs::AbstractVector{T},
@@ -348,8 +415,10 @@ function counts_per_centroid(
     data::LazyArrayWrap{V},
 ) where {K,E,V}
     num_groups = size(packed_centroids, 1)
+    distance_type = _Points.distance_type(V)
+    accum_type = _Points.accum_type(distance_type)
     tls = ThreadLocal(;
-        minimums = [CurrentMinimum{K,Int32}() for _ in 1:num_groups],
+        minimums = [CurrentMinimum{K,eltype(accum_type)}() for _ in 1:num_groups],
         counts = zeros(Int, fullsize(packed_centroids))
     )
 
@@ -479,6 +548,7 @@ function lloyds!(
     # Recast the data array along partition boundaries to facilitate selecting
     # new centroids if needed.
     data_as_partitions = LazyArrayWrap{E}(parent(data))
+    most_populated_centroids = zeros(Int32, K, num_groups)
 
     # Allocate thread local storage
     tls = ThreadLocal(;
@@ -501,6 +571,14 @@ function lloyds!(
         # 3. Repick centroids that have no assignments.
         integrated_points = mapreduce(x -> x.integrators, (x,y) -> x .+ y, getall(tls))
         points_per_center = mapreduce(x -> x.points_per_center, +, getall(tls))
+
+        # Find the most populated centroids for each partition.
+        # If we ever need to repick centroids - then try to break up the most populated
+        # clusters.
+        for group in 1:num_groups, offset in 1:K
+            _, index = findmin(view(points_per_center, offset, group, :))
+            most_populated_centroids[offset, group] = index
+        end
 
         for i in CartesianIndices(integrated_points)
             ppc = points_per_center[i]

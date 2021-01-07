@@ -291,19 +291,6 @@ function square_accum(x::SIMD.Vec{32,Int16}, y::SIMD.Vec{16,Int32})
     return vnni_accumulate(y, x, x)
 end
 
-# Prefetching
-function _Base.prefetch(A::AbstractVector{Euclidean{N,T}}, i, f::F = _Base.prefetch) where {N,T,F}
-    # Need to prefetch the entire vector
-    # Compute how many cache lines are needed.
-    # Divide the number of bytes by 64 to get cache lines.
-    cache_lines = (N * sizeof(T)) >> 6
-    ptr = pointer(A, i)
-    for i in 1:cache_lines
-        f(ptr + 64 * (i-1))
-    end
-    return nothing
-end
-
 #####
 ##### Cache Line Reduction
 #####

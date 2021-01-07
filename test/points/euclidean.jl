@@ -106,7 +106,7 @@ raw(x::GraphANN.Euclidean) = x.vals
     @test iszero(t[1][31])
     @test iszero(t[1][32])
 
-    # Now - time to test that SIMDWrap is doing its job.
+    # Now - time to test that EagerWrap is doing its job.
     # The strategy is this:
     #
     # 1. Construct some tuples of UInt8
@@ -118,8 +118,8 @@ raw(x::GraphANN.Euclidean) = x.vals
     x = GraphANN.Euclidean((a..., b..., c..., d...,))
     @test isa(x, GraphANN.Euclidean{128,UInt8})
 
-    sx = GraphANN._Points.simd_wrap(SIMD.Vec{32,Float32}, x)
-    @test isa(sx, GraphANN._Points.SIMDWrap)
+    sx = GraphANN._Points.EagerWrap{SIMD.Vec{32,Float32}}(x)
+    @test isa(sx, GraphANN._Points.EagerWrap)
     @test length(sx) == div(128, 32)
     @test length(sx[1]) == 32
     @test eltype(sx[1]) == Float32

@@ -23,7 +23,9 @@
 end
 
 @testset "Testing PackedCentroids" begin
-    x = GraphANN._Quantization.PackedCentroids{GraphANN.Euclidean{4,Float32}}(32, 16)
+    E = GraphANN.Euclidean{4,Float32}
+    V = SIMD.Vec{16,Float32}
+    x = GraphANN._Quantization.PackedCentroids{E,V}(32, 16)
 
     # With vector sizes of 4, we can pack 4 together in a cache line.
     # Thus, the size of the resulting packed representation should be one-quarter the size.
@@ -70,3 +72,53 @@ end
     @test get(x, 4, 5, 1) === e
     @test x.masks[5, 1] === SIMD.Vec(false, false, false, true)
 end
+
+@testset "Misc Clustering Tests" begin
+    maybe_widen = GraphANN._Quantization.maybe_widen
+    @test maybe_widen(UInt8)  == widen(UInt8)
+    @test maybe_widen(UInt16) == widen(UInt16)
+    @test maybe_widen(UInt32) == widen(UInt32)
+    @test maybe_widen(UInt64) == UInt64
+
+    @test maybe_widen(Float32) == Float64
+    @test maybe_widen(Float64) == Float64
+
+    @test maybe_widen(Int32) == Int64
+    @test maybe_widen(Int64) == Int64
+end
+
+# @testset "End to End Clustering" begin
+#     # As always - load up our test dataset.
+#     # Also, make sure the code paths work the same whether we are using `Float32` or
+#     # `UInt8`
+#     data_f32 = GraphANN.load_vecs(GraphANN.Euclidean{128,Float32}, dataset_path)
+#     data_u8 = map(x -> convert(GraphANN.Euclidean{128,UInt8}, x), data)
+#     alldata = (data_f32, data_u8)
+#
+#     # Range over partition size and number of centroids
+#     # TODO: Get 2 working ...
+#     partition_sizes = [4, 8, 16]
+#     num_centroids_range = [256, 512, 1024]
+#
+#     # First order of business - make sure that our process of selecting initial centroids
+#     # is better than choosing initial centroids randomly.
+#     for data in alldata, partition_size in partition_sizes, num_centroids in num_centroids_range
+#         # Initial centroid selection, results in more centroids than asked for.
+#         # Need to refine the centroids to actually get the corret number.
+#         centroids = GraphANN._Quantization.choose_centroids(
+#             data,
+#             partition_size,
+#             num_centroids,
+#         )
+#
+#         refined_centroids = GraphANN._Quantization.refine(
+#             centroids,
+#             data,
+#             num_centroids,
+#         )
+#
+#         # Now that we have the refined centroids, compute the initial cost of this
+#         # clustering.
+#
+#     end
+# end

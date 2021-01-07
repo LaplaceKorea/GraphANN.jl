@@ -86,7 +86,7 @@ end
 @testset "Testing Index" begin
     # Load the dataset into memory
     dataset = GraphANN.load_vecs(GraphANN.Euclidean{128,Float32}, dataset_path)::Vector{GraphANN.Euclidean{128,Float32}}
-    dataset_u8 = GraphANN._Quantization.maybe_round.(UInt8, dataset)
+    dataset_u8 = map(x -> convert(GraphANN.Euclidean{128,UInt8}, x), dataset)
 
     # Index generation using both Float32 and UInt8
     meta = test_index(dataset)
@@ -100,7 +100,6 @@ end
 
     # Now that we have a functioning graph, make sure the various serialization and
     # deserialization methods work.
-
     mktempdir(@__DIR__) do dir
         function graphs_equal(a, b)
             @test vertices(a) == vertices(b)

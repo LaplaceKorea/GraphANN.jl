@@ -14,10 +14,6 @@ using .._Graphs
 import LightGraphs
 import UnPack: @unpack, @pack!
 
-# Many of the pieces that make up the prefetcher implementations are wrapped in inner
-# modules.
-#
-# This is done to help avoid polluting the main namespace.
 include("atomic.jl")
 include("queue.jl"); import .Queue: SemiAtomicQueue, commit!, consume!
 
@@ -59,9 +55,19 @@ function prefetch_wrap(
 end
 
 #####
-##### Implementation
+##### Staging
 #####
 
+# The staging area is a struct that synchronized between the query threads and the prefetch
+# threads.
+#
+# Query threads write to the staging area using queues, one per query thread.
+# Furthermore, the query threads own the write side of these queues, so are free to write
+# whenever they want.
+#
+# On the other hand, all prefetch threads share the read side of the queues, which is
+# protected by a single lock that much be held in order to modify the read state of any
+# queue.
 mutable struct Staging{T}
     # One queue for each query thread.
     # Keep track of a current index so we can access this vector in a round-robin manner.
@@ -146,11 +152,8 @@ function prefetch_loop(prefetcher::PrefetchRunner, meta::MetaGraph)
 
         # Try to prefetch each data item into the LLC
         # Hopefully doesn't cause eviction if the data is in someone else's L2 ...
-        #if !isempty(worklist)
-        #    push!(worklist_lengths, length(worklist))
-        #end
         for u in worklist, v in LightGraphs.outneighbors(graph, u)
-            prefetch(data, v)#, prefetch_llc)
+            prefetch(data, v, prefetch_llc)
         end
     end
 

@@ -187,6 +187,19 @@ function unsafe_prefetch(x::AbstractVector{T}, i, len) where {T}
     end
 end
 
+function prefetch(A::AbstractVector{T}, i, f::F = _Base.prefetch) where {T,F}
+    # Need to prefetch the entire vector
+    # Compute how many cache lines are needed.
+    # Divide the number of bytes by 64 to get cache lines.
+    cache_lines = sizeof(T) >> 6
+    ptr = pointer(A, i)
+    for i in 1:cache_lines
+        f(ptr + 64 * (i-1))
+    end
+    return nothing
+end
+
+
 #####
 ##### BatchedRange
 #####
