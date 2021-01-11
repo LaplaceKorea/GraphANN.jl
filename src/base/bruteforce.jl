@@ -2,6 +2,9 @@
 ##### Bounded Max Heap
 #####
 
+# TODO: Saving is currently broken because the `save_vecs` function is stored in _IO instead
+# of _Base.
+
 struct BoundedMaxHeap{H}
     heap::H
     bound::Int

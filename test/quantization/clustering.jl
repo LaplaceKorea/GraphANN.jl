@@ -1,3 +1,17 @@
+@testset "Misc Clustering Tests" begin
+    maybe_widen = GraphANN._Quantization.maybe_widen
+    @test maybe_widen(UInt8)  == widen(UInt8)
+    @test maybe_widen(UInt16) == widen(UInt16)
+    @test maybe_widen(UInt32) == widen(UInt32)
+    @test maybe_widen(UInt64) == UInt64
+
+    @test maybe_widen(Float32) == Float64
+    @test maybe_widen(Float64) == Float64
+
+    @test maybe_widen(Int32) == Int64
+    @test maybe_widen(Int64) == Int64
+end
+
 @testset "Testing CurrentMinimum" begin
     # Test `CurrentMinimum`
     x = GraphANN._Quantization.CurrentMinimum{2,Float32}()
@@ -73,52 +87,93 @@ end
     @test x.masks[5, 1] === SIMD.Vec(false, false, false, true)
 end
 
-@testset "Misc Clustering Tests" begin
-    maybe_widen = GraphANN._Quantization.maybe_widen
-    @test maybe_widen(UInt8)  == widen(UInt8)
-    @test maybe_widen(UInt16) == widen(UInt16)
-    @test maybe_widen(UInt32) == widen(UInt32)
-    @test maybe_widen(UInt64) == UInt64
+@testset "End to End Clustering" begin
+    # Hoist some things for clarity.
+    # -- types
+    Euclidean = GraphANN.Euclidean
+    LazyArrayWrap = GraphANN._Points.LazyArrayWrap
+    PackedCentroids = GraphANN._Quantization.PackedCentroids
 
-    @test maybe_widen(Float32) == Float64
-    @test maybe_widen(Float64) == Float64
+    # -- functions
+    _packed_type = GraphANN._Points.packed_type
+    choose_centroids = GraphANN._Quantization.choose_centroids
+    refine = GraphANN._Quantization.refine
+    computecosts! = GraphANN._Quantization.computecosts!
+    lloyds = GraphANN._Quantization.lloyds
 
-    @test maybe_widen(Int32) == Int64
-    @test maybe_widen(Int64) == Int64
+    # As always - load up our test dataset.
+    # Also, make sure the code paths work the same whether we are using `Float32` or
+    # `UInt8`
+    data_f32 = GraphANN.load_vecs(Euclidean{128,Float32}, dataset_path)
+    data_u8 = map(x -> convert(Euclidean{128,UInt8}, x), data_f32)
+    alldata = (data_f32, data_u8)
+
+    # Range over partition size and number of centroids
+    # TODO: Get 2 working ...
+    partition_sizes = [4, 8]
+    num_centroids_range = [256, 512]
+
+    # First order of business - make sure that our process of selecting initial centroids
+    # is better than choosing initial centroids randomly.
+    for data in alldata, partition_size in partition_sizes, num_centroids in num_centroids_range
+        # As is the theme with all this clustering stuff, hoist up some useful named values.
+        num_partitions = div(128, partition_size)
+        T = eltype(eltype(data))
+        centroid_type = Euclidean{partition_size, T}
+        packed_type = _packed_type(centroid_type)
+        cost_type = GraphANN._Points.cost_type(eltype(data))
+
+        # TODO: There has to be a better way of getting this type ...
+
+        # Display what we're currently working so people watching the test process know
+        # what's going on.
+        @show T partition_size num_centroids
+        println()
+
+        # Initial centroid selection, results in more centroids than asked for.
+        # Need to refine the centroids to actually get the corret number.
+        centroids = choose_centroids(data, partition_size, num_centroids)
+        refined_centroids = refine(centroids, data, num_centroids)
+
+        # Now that we have the refined centroids, compute the initial cost of this
+        # clustering.
+        @show size(refined_centroids)
+        @show typeof(refined_centroids)
+
+        costs = zeros(cost_type, num_partitions, length(data))
+        packed_centroids = PackedCentroids{packed_type}(refined_centroids)
+        data_wrapped = LazyArrayWrap{packed_type}(data)
+        computecosts!(costs, packed_centroids, data_wrapped)
+
+        costs_chosen_sum = sum.(eachrow(costs))
+
+        # Now, randomly select centroids - we should always do better.
+        data_partitions = LazyArrayWrap{centroid_type}(data)
+        centroids_random = [
+            rand(view(data_partitions, i, :)) for _ in 1:num_centroids, i in 1:num_partitions
+        ]
+        packed_centroids = PackedCentroids{packed_type}(centroids_random)
+        computecosts!(costs, packed_centroids, data_wrapped)
+        costs_random_sum = sum.(eachrow(costs))
+
+        # As said above - the residuals for each partition when we use the kmeans∥
+        # algorithm should always be less than if we just chose the centroids at random.
+        #
+        # Otherwise, out implementation of the algorithm sucks!
+        for (a, b) in zip(costs_chosen_sum, costs_random_sum)
+            @test a < b
+        end
+
+        # Now that we know we have a pretty good initial clustering, run Lloyd's algorithm!
+        # Since lloyd's algorithm monotonically decreases the residuals - the final
+        # results must be strictly better than the refined centroids.
+        final_centroids = lloyds(refined_centroids, data; num_iterations = 10)
+        @show size(final_centroids)
+        @show typeof(final_centroids)
+        computecosts!(costs, PackedCentroids{packed_type}(final_centroids), data_wrapped)
+        costs_final_sum = sum.(eachrow(costs))
+        for (a, b) in zip(costs_final_sum, costs_chosen_sum)
+            @test a < b
+        end
+    end
 end
-
-# @testset "End to End Clustering" begin
-#     # As always - load up our test dataset.
-#     # Also, make sure the code paths work the same whether we are using `Float32` or
-#     # `UInt8`
-#     data_f32 = GraphANN.load_vecs(GraphANN.Euclidean{128,Float32}, dataset_path)
-#     data_u8 = map(x -> convert(GraphANN.Euclidean{128,UInt8}, x), data)
-#     alldata = (data_f32, data_u8)
-#
-#     # Range over partition size and number of centroids
-#     # TODO: Get 2 working ...
-#     partition_sizes = [4, 8, 16]
-#     num_centroids_range = [256, 512, 1024]
-#
-#     # First order of business - make sure that our process of selecting initial centroids
-#     # is better than choosing initial centroids randomly.
-#     for data in alldata, partition_size in partition_sizes, num_centroids in num_centroids_range
-#         # Initial centroid selection, results in more centroids than asked for.
-#         # Need to refine the centroids to actually get the corret number.
-#         centroids = GraphANN._Quantization.choose_centroids(
-#             data,
-#             partition_size,
-#             num_centroids,
-#         )
-#
-#         refined_centroids = GraphANN._Quantization.refine(
-#             centroids,
-#             data,
-#             num_centroids,
-#         )
-#
-#         # Now that we have the refined centroids, compute the initial cost of this
-#         # clustering.
-#
-#     end
-# end

@@ -152,7 +152,7 @@ function (table::PQTable{K, Euclidean{N1,T1}})(
     for i in 1:K
         @inbounds _a = da[i]
         # TODO: Properly handle conversion
-        @inbounds _b = convert(promote_type, centroids[b[i] + one(I), i])
+        @inbounds _b = convert(promote_type, centroids[maybe_widen(b[i]) + one(maybe_widen(I)), i])
         z = _a - _b
         accumulator = _Points.square_accum(z, accumulator)
     end

@@ -68,6 +68,11 @@ distance_parameters(::Type{UInt8}, ::Type{Int16}) = (32, Int16)
 accum_type(::Type{T}) where {T <: SIMD.Vec} = T
 accum_type(::Type{SIMD.Vec{32, Int16}}) = SIMD.Vec{16,Int32}
 
+# Not the most elegant thing in the world.
+# The main idea behind this function is that we need to know the correct type to initialize
+# arrays holding distances ...
+cost_type(::Type{T}) where {T <: SIMDType} = eltype(accum_type(distance_type(T)))
+
 distance_select(::Sentinel, x) = x
 distance_select(x, ::Sentinel) = x
 distance_select(x::T, y::T) where {T} = x
@@ -128,28 +133,30 @@ end
 # Convenience setter
 set!(A::AbstractArray{<:Packed}, v, I::CartesianIndex) = set!(A, v, Tuple(I))
 set!(A::AbstractArray{<:Packed}, v, I::Integer...) = set!(A, v, I)
-function set!(
+Base.@propagate_inbounds function set!(
     A::AbstractArray{Packed{K,E,V},N1},
     v::E,
     I::NTuple{N2,Int}
 ) where {K,E,V,N1,N2}
     @assert N2 == N1 + 1
     # Destructure tuple
-    off, i, j = I
-    ptr = pointer(A, size(A, 1) * (j-1) + i) + (off-1) * sizeof(E)
+    offset = I[1]
+    i = LinearIndices(A)[CartesianIndex(Base.tail(I)...)]
+    ptr = pointer(A, i) + (offset-1) * sizeof(E)
     unsafe_store!(Ptr{E}(ptr), v)
 end
 
 Base.get(A::AbstractArray{<:Packed}, I::CartesianIndex) = get(A, Tuple(I))
 Base.get(A::AbstractArray{<:Packed}, I::Integer...) = get(A, I)
-function Base.get(
+Base.@propagate_inbounds function Base.get(
     A::AbstractArray{Packed{K,E,V},N1},
     I::NTuple{N2,Int}
 ) where {K,E,V,N1,N2}
     @assert N2 == N1 + 1
     # Destructure tuple
-    off, i, j = I
-    ptr = pointer(A, size(A, 1) * (j-1) + i) + (off-1) * sizeof(E)
+    offset = I[1]
+    i = LinearIndices(A)[CartesianIndex(Base.tail(I)...)]
+    ptr = pointer(A, i) + (offset-1) * sizeof(E)
     return unsafe_load(Ptr{E}(ptr))
 end
 
@@ -190,6 +197,8 @@ end
 
 LazyWrap{V}(val::E) where {V,E} = LazyWrap{V,E}(val)
 
+Base.length(x::LazyWrap{V,E}) where {V,E} = div(length(E), length(V))
+
 function Base.getindex(x::LazyWrap{V}, i) where {N,T,V <: SIMDType{N,T}}
     return convert(V, _getindex(x, N * (i - 1)))
 end
@@ -220,8 +229,7 @@ end
 function Base.getindex(x::LazyArrayWrap{V,N,T}, I::Vararg{Int, 2}) where {NV, V <: SIMDType{NV}, N, T}
     @boundscheck checkbounds(x, I...)
     @unpack parent = x
-
-    ptr = Ptr{Euclidean{NV,T}}(pointer(parent, I[2])) + (I[1] - 1) * sizeof(SIMD.Vec{N,T})
+    ptr = Ptr{Euclidean{NV,T}}(pointer(parent, I[2])) + (I[1] - 1) * sizeof(SIMD.Vec{NV,T})
     return convert(V, unsafe_load(ptr))
 end
 
@@ -298,6 +306,7 @@ end
 @generated function squish(::Val{N}, cacheline::SIMD.Vec{S,T}) where {N,S,T}
     # Optimization - if we're just going to sum across the whole vector, then just do
     # that to avoid any kind of expensive reduction.
+    # In practice, this is much faster.
     if N == 1
         return quote
             Base.@_inline_meta
@@ -323,38 +332,80 @@ valtuple(start, step, stop) = tuple((start - 1):step:(stop - 1)...)
 ##### Specialize for UInt8
 #####
 
-function vnni_accumulate(
-    x::SIMD.Vec{16,Int32},
-    a::SIMD.Vec{32,Int16},
-    b::SIMD.Vec{32,Int16},
-)
-    Base.@_inline_meta
-
-    # Use LLVM call to directly insert the assembly instruction.
-    # Don't worry about the conversion from <32 x i16> to <16 x i32>.
-    # For some reason, the signature of the LLVM instrinsic wants <16 x i32>, but it's
-    # treated correctly by the hardware ...
-    #
-    # This may be related to C++ AVX intrinsic datatypes being element type agnostic.
-    decl = "declare <16 x i32> @llvm.x86.avx512.vpdpwssd.512(<16 x i32>, <16 x i32>, <16 x i32>) #1"
-    s = """
-        %a1 = bitcast <32 x i16> %1 to <16 x i32>
-        %a2 = bitcast <32 x i16> %2 to <16 x i32>
-
-        %val = tail call <16 x i32> @llvm.x86.avx512.vpdpwssd.512(<16 x i32> %0, <16 x i32> %a1, <16 x i32> %a2) #3
-        ret <16 x i32> %val
-        """
-
-    # SIMD.Vec's wrap around SIMD.LVec, which Julia knows how to pass correctly to LLVM
-    # as raw LLVM vectors.
-    x = Base.llvmcall(
-        (decl, s),
-        SIMD.LVec{16,Int32},
-        Tuple{SIMD.LVec{16,Int32}, SIMD.LVec{32,Int16}, SIMD.LVec{32,Int16}},
-        x.data, a.data, b.data,
+@static if VERSION >= v"1.6.0-beta1"
+    function vnni_accumulate(
+        x::SIMD.Vec{16,Int32},
+        a::SIMD.Vec{32,Int16},
+        b::SIMD.Vec{32,Int16},
     )
+        Base.@_inline_meta
 
-    return SIMD.Vec(x)
+        # Use LLVM call to directly insert the assembly instruction.
+        # Don't worry about the conversion from <32 x i16> to <16 x i32>.
+        # For some reason, the signature of the LLVM instrinsic wants <16 x i32>, but it's
+        # treated correctly by the hardware ...
+        #
+        # This may be related to C++ AVX intrinsic datatypes being element type agnostic.
+        s = """
+            declare <16 x i32> @llvm.x86.avx512.vpdpwssd.512(<16 x i32>, <16 x i32>, <16 x i32>) #0
+
+            define <16 x i32> @entry(<16 x i32>, <32 x i16>, <32 x i16>) #0 {
+            top:
+                %a1 = bitcast <32 x i16> %1 to <16 x i32>
+                %a2 = bitcast <32 x i16> %2 to <16 x i32>
+
+                %val = tail call <16 x i32> @llvm.x86.avx512.vpdpwssd.512(<16 x i32> %0, <16 x i32> %a1, <16 x i32> %a2) #3
+                ret <16 x i32> %val
+            }
+
+            attributes #0 = { alwaysinline }
+            """
+
+        # SIMD.Vec's wrap around SIMD.LVec, which Julia knows how to pass correctly to LLVM
+        # as raw LLVM vectors.
+        x = Base.llvmcall(
+            (s, "entry"),
+            SIMD.LVec{16,Int32},
+            Tuple{SIMD.LVec{16,Int32}, SIMD.LVec{32,Int16}, SIMD.LVec{32,Int16}},
+            x.data, a.data, b.data,
+        )
+
+        return SIMD.Vec(x)
+    end
+else
+    function vnni_accumulate(
+        x::SIMD.Vec{16,Int32},
+        a::SIMD.Vec{32,Int16},
+        b::SIMD.Vec{32,Int16},
+    )
+        Base.@_inline_meta
+
+        # Use LLVM call to directly insert the assembly instruction.
+        # Don't worry about the conversion from <32 x i16> to <16 x i32>.
+        # For some reason, the signature of the LLVM instrinsic wants <16 x i32>, but it's
+        # treated correctly by the hardware ...
+        #
+        # This may be related to C++ AVX intrinsic datatypes being element type agnostic.
+        decl = "declare <16 x i32> @llvm.x86.avx512.vpdpwssd.512(<16 x i32>, <16 x i32>, <16 x i32>) #1"
+        s = """
+            %a1 = bitcast <32 x i16> %1 to <16 x i32>
+            %a2 = bitcast <32 x i16> %2 to <16 x i32>
+
+            %val = tail call <16 x i32> @llvm.x86.avx512.vpdpwssd.512(<16 x i32> %0, <16 x i32> %a1, <16 x i32> %a2) #3
+            ret <16 x i32> %val
+            """
+
+        # SIMD.Vec's wrap around SIMD.LVec, which Julia knows how to pass correctly to LLVM
+        # as raw LLVM vectors.
+        x = Base.llvmcall(
+            (decl, s),
+            SIMD.LVec{16,Int32},
+            Tuple{SIMD.LVec{16,Int32}, SIMD.LVec{32,Int16}, SIMD.LVec{32,Int16}},
+            x.data, a.data, b.data,
+        )
+
+        return SIMD.Vec(x)
+    end
 end
 
 #####

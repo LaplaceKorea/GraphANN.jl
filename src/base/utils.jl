@@ -150,32 +150,74 @@ end
 # prefetch - into L1?
 # prefetch1 - into L2
 # prefetch2 - into LLC
-function prefetch(ptr::Ptr)
-    Base.@_inline_meta
-    Base.llvmcall(raw"""
-        %val = inttoptr i64 %0 to i8*
-        call void asm sideeffect "prefetch $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
-        ret void
-        """,
-        Cvoid,
-        Tuple{Ptr{Cvoid}},
-        Ptr{Cvoid}(ptr),
-    )
-    return nothing
-end
 
-function prefetch_llc(ptr::Ptr)
-    Base.@_inline_meta
-    Base.llvmcall(raw"""
-        %val = inttoptr i64 %0 to i8*
-        call void asm sideeffect "prefetcht1 $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
-        ret void
-        """,
-        Cvoid,
-        Tuple{Ptr{Cvoid}},
-        Ptr{Cvoid}(ptr),
-    )
-    return nothing
+# NOTE: The convention for LLVMCALL changes in Version 1.6
+@static if VERSION >= v"1.6.0-beta1"
+    function prefetch(ptr::Ptr)
+        Base.@_inline_meta
+        Base.llvmcall((raw"""
+            define void @entry(i64) #0 {
+            top:
+                %val = inttoptr i64 %0 to i8*
+                call void asm sideeffect "prefetch $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
+                ret void
+            }
+
+            attributes #0 = { alwaysinline }
+            """, "entry"),
+            Cvoid,
+            Tuple{Ptr{Cvoid}},
+            Ptr{Cvoid}(ptr),
+        )
+        return nothing
+    end
+
+    function prefetch_llc(ptr::Ptr)
+        Base.@_inline_meta
+        Base.llvmcall((raw"""
+            define void @entry(i64) #0 {
+            top:
+                %val = inttoptr i64 %0 to i8*
+                call void asm sideeffect "prefetcht1 $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
+                ret void
+            }
+
+            attributes #0 = { alwaysinline }
+            """, "entry"),
+            Cvoid,
+            Tuple{Ptr{Cvoid}},
+            Ptr{Cvoid}(ptr),
+        )
+        return nothing
+    end
+else
+    function prefetch(ptr::Ptr)
+        Base.@_inline_meta
+        Base.llvmcall(raw"""
+            %val = inttoptr i64 %0 to i8*
+            call void asm sideeffect "prefetch $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
+            ret void
+            """,
+            Cvoid,
+            Tuple{Ptr{Cvoid}},
+            Ptr{Cvoid}(ptr),
+        )
+        return nothing
+    end
+
+    function prefetch_llc(ptr::Ptr)
+        Base.@_inline_meta
+        Base.llvmcall(raw"""
+            %val = inttoptr i64 %0 to i8*
+            call void asm sideeffect "prefetcht1 $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
+            ret void
+            """,
+            Cvoid,
+            Tuple{Ptr{Cvoid}},
+            Ptr{Cvoid}(ptr),
+        )
+        return nothing
+    end
 end
 
 function unsafe_prefetch(x::AbstractVector{T}, i, len) where {T}

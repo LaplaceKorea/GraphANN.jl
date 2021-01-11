@@ -86,6 +86,8 @@ function Base.push!(x::PackedCentroids{K,E}, v::E, offset, group) where {K,E}
     @assert 1 <= offset <= K
     @unpack centroids, masks, lengths = x
     # Insert this data point in the correct location
+    # If the full number of data points have already been added to this partition, then
+    # do nothing because we can't increase the size of the underlying matrix.
     partition = (group - 1) * K + offset
     horizontal_index = lengths[partition] + 1
     horizontal_index > size(x, 2) && return nothing
@@ -157,10 +159,6 @@ function choose_centroids(
     return centroids
 end
 
-const NoWidenTypes = Union{Float64,Int64,UInt64}
-maybe_widen(::Type{T}) where {T} = widen(T)
-maybe_widen(::Type{T}) where {T <: NoWidenTypes} = T
-
 # Inner method for `choose_centroids`.
 # Results are updated inplace in the `packed_centroids` struct.
 # Data types such as `PackedCentroids` and `LazyArrayWrap` are chosen to allow centroids
@@ -228,31 +226,13 @@ function choose_centroids!(
 
     for iter in 1:num_iterations
         # Step 1 - Compute the costs for all data points.
-        maxind = maxlength(packed_centroids)
-        dynamic_thread(1:size(data, 2), 1024) do i
-            @unpack current_minimums = tls[]
-            @unpack centroids, masks = packed_centroids
-
-            # Find the closest centroids.
-            findcenters!(
-                current_minimums,
-                centroids,
-                view(data, :, i),
-                maxind,
-                masks,
-            )
-
-            # Update the costs matrix
-            # Each thread owns the column in `costs` that it is writing to, so there is
-            # no need for synchronization.
-            updatecosts!(view(costs, :, i), current_minimums)
-        end
+        computecosts!(costs, packed_centroids, data, tls)
 
         # Step 2 - total up the costs per centroid.
         # This needs to be parallelized by the `sumcosts!` kernel in order to run in a
         # resonable amount of time.
         sumcosts!(total_costs, costs)
-        @show sum(total_costs)
+        #@show sum(total_costs)
 
         # Step 3 - Choose more centroids.
         dynamic_thread(1:size(data, 2), 1024) do i
@@ -279,6 +259,51 @@ function choose_centroids!(
         end
     end
     return packed_centroids
+end
+
+# Automatically build the necessary thread local storage to facilitate testing.
+function computecosts!(
+    costs::AbstractMatrix,
+    packed_centroids::PackedCentroids{K},
+    data::LazyArrayWrap,
+) where {K}
+    num_groups = size(packed_centroids, 1)
+    tls = ThreadLocal(;
+        current_minimums = [CurrentMinimum{K,eltype(costs)}() for _ in 1:num_groups],
+    )
+
+    computecosts!(costs, packed_centroids, data, tls)
+end
+
+function computecosts!(
+    costs::AbstractMatrix,
+    packed_centroids::PackedCentroids{K},
+    data::LazyArrayWrap,
+    tls::ThreadLocal,
+) where {K}
+    # Sanity check on data sizes.
+    @assert size(packed_centroids, 1) == size(data, 1)
+    @assert size(data, 2) == size(costs, 2)
+
+    maxind = maxlength(packed_centroids)
+    dynamic_thread(1:size(data, 2), 1024) do i
+        @unpack current_minimums = tls[]
+        @unpack centroids, masks = packed_centroids
+
+        # Find the closest centroids.
+        findcenters!(
+            current_minimums,
+            centroids,
+            view(data, :, i),
+            maxind,
+            masks,
+        )
+
+        # Update the costs matrix
+        # Each thread owns the column in `costs` that it is writing to, so there is
+        # no need for synchronization.
+        updatecosts!(view(costs, :, i), current_minimums)
+    end
 end
 
 """
@@ -318,10 +343,10 @@ function updatecosts!(
     costs::AbstractVector,
     current_minimums::AbstractVector{C},
 ) where {K, C <: CurrentMinimum{K}}
-    @assert length(costs) == K * length(current_minimums)
-    for (i, minimums) in enumerate(current_minimums)
-        for (j, cost) in enumerate(Tuple(minimums.distance))
-            costs[K * (i-1) + j] = cost
+    #@assert length(costs) == K * length(current_minimums)
+    for (i, minimums) in pairs(current_minimums)
+        for (j, cost) in pairs(Tuple(minimums.distance))
+            @inbounds costs[K * (i-1) + j] = cost
         end
     end
 end
@@ -485,7 +510,6 @@ function refine!(
     return nothing
 end
 
-
 #####
 ##### Batched `lloyds` algorithm.
 #####
@@ -513,8 +537,8 @@ function lloyds(
 
     # Unwrap the centroids and return.
     return packed_centroids |>
-        transpose |>
         x -> reinterpret(Euclidean{N,Float32}, x) |>
+        transpose |>
         x -> reshape(x, size(centroids)) |>
         collect
 end
@@ -538,10 +562,10 @@ end
 #
 #
 function lloyds!(
-    centroids::AbstractMatrix{<:Packed{K,E}},
-    data::LazyArrayWrap;
+    centroids::AbstractMatrix{Packed{K,E,V}},
+    data::LazyArrayWrap{V};
     num_iterations = 1,
-) where {K,E}
+) where {K,E,V}
     num_groups = size(centroids, 1)
     num_centroids = size(centroids, 2)
     num_partitions = K * num_groups
@@ -560,8 +584,10 @@ function lloyds!(
     for iter in 1:num_iterations
         @time dynamic_thread(1:size(data, 2), 1024) do i
             threadlocal = tls[]
+            @unpack current_minimums = threadlocal
+
             v = view(data, :, i)
-            findcenters!(threadlocal.current_minimums, centroids, v)
+            findcenters!(current_minimums, centroids, v)
             updatelocal!(E, threadlocal, v)
         end
 
@@ -569,19 +595,20 @@ function lloyds!(
         # 1. Accumulate integrator values and points-per-center for each centroid.
         # 2. Update centroids to be at the center of their region.
         # 3. Repick centroids that have no assignments.
-        integrated_points = mapreduce(x -> x.integrators, (x,y) -> x .+ y, getall(tls))
+        integrated_points = mapreduce(x -> x.integrators, +, getall(tls))
         points_per_center = mapreduce(x -> x.points_per_center, +, getall(tls))
 
         # Find the most populated centroids for each partition.
         # If we ever need to repick centroids - then try to break up the most populated
         # clusters.
-        for group in 1:num_groups, offset in 1:K
-            _, index = findmin(view(points_per_center, offset, group, :))
-            most_populated_centroids[offset, group] = index
-        end
+        # for group in 1:num_groups, offset in 1:K
+        #     _, index = findmin(view(points_per_center, offset, group, :))
+        #     most_populated_centroids[offset, group] = index
+        # end
 
         for i in CartesianIndices(integrated_points)
             ppc = points_per_center[i]
+
             # If no points are assigned to this centroid, then repick the centroid.
             if iszero(ppc)
                 offset, group, centroid_number = Tuple(i)
@@ -611,10 +638,8 @@ function updatelocal!(
     @unpack current_minimums, integrators, points_per_center = threadlocal
     for (group, minimums) in enumerate(current_minimums)
         slice = LazyWrap{E}(data[group])
-        assignments = minimums.index
 
-        for subgroup in 1:length(minimums)
-            assignment = assignments[subgroup]
+        for (subgroup, assignment) in enumerate(Tuple(minimums.index))
             integrators[subgroup, group, assignment] += slice[subgroup]
             points_per_center[subgroup, group, assignment] += 1
         end
