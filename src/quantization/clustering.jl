@@ -63,7 +63,9 @@ function PackedCentroids{E,V}(
     return PackedCentroids{K,E,V}(centroids, masks, lengths)
 end
 
-function PackedCentroids{V}(centroids::AbstractMatrix{E}) where {E <: Euclidean, V <: SIMD.Vec}
+function PackedCentroids{V}(
+    centroids::AbstractMatrix{E}
+) where {T, E <: Euclidean{<:Any,T}, V <: SIMD.Vec{<:Any,T}}
     K = exact_div(length(V), length(E))
     packed_centroids = collect(reinterpret(Packed{K,E,V}, transpose(centroids)))
     masks = ones(SIMD.Vec{K,Bool}, size(packed_centroids))
@@ -582,7 +584,7 @@ function lloyds!(
     )
 
     for iter in 1:num_iterations
-        @time dynamic_thread(1:size(data, 2), 1024) do i
+        dynamic_thread(1:size(data, 2), 1024) do i
             threadlocal = tls[]
             @unpack current_minimums = threadlocal
 

@@ -81,7 +81,7 @@ function Base.iterate(x::Pruner, i = 1)
     while (i <= length(x) && ispruned(x, i))
         i += 1
     end
-    return i > length(x) ? nothing : (x.items[i], (i + 1))
+    return i > length(x) ? nothing : (@inbounds(x.items[i]), (i + 1))
 end
 
 # Mark entries as pruned according to some function `F`.
@@ -205,6 +205,16 @@ function neighbor_updates!(
     alpha::AbstractFloat,
     target_degree::Integer
 )
+    # @show Tuple{
+    #     typeof(nextlist),
+    #     typeof(candidates),
+    #     typeof(vertex),
+    #     typeof(meta),
+    #     typeof(pruner),
+    #     typeof(alpha),
+    #     typeof(target_degree),
+    # }
+    # error()
     # Destructure some parameters
     @unpack graph, data = meta
 
@@ -386,7 +396,6 @@ function generate_index(
     #for i in 1:2
     for i in 1:2
         _parameters = (i == 1) ? onealpha(parameters) : parameters
-
         _generate_index(
             meta,
             _parameters,

@@ -137,9 +137,6 @@ end
 
         # Now that we have the refined centroids, compute the initial cost of this
         # clustering.
-        @show size(refined_centroids)
-        @show typeof(refined_centroids)
-
         costs = zeros(cost_type, num_partitions, length(data))
         packed_centroids = PackedCentroids{packed_type}(refined_centroids)
         data_wrapped = LazyArrayWrap{packed_type}(data)
@@ -168,9 +165,19 @@ end
         # Since lloyd's algorithm monotonically decreases the residuals - the final
         # results must be strictly better than the refined centroids.
         final_centroids = lloyds(refined_centroids, data; num_iterations = 10)
-        @show size(final_centroids)
-        @show typeof(final_centroids)
-        computecosts!(costs, PackedCentroids{packed_type}(final_centroids), data_wrapped)
+        new_packed_type = _packed_type(eltype(final_centroids))
+        new_data_wrapped = LazyArrayWrap{new_packed_type}(data)
+
+        costs = zeros(
+            GraphANN._Points.cost_type(eltype(final_centroids)),
+            num_partitions,
+            length(data),
+        )
+        computecosts!(
+            costs,
+            PackedCentroids{new_packed_type}(final_centroids),
+            new_data_wrapped,
+        )
         costs_final_sum = sum.(eachrow(costs))
         for (a, b) in zip(costs_final_sum, costs_chosen_sum)
             @test a < b

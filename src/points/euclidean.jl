@@ -107,6 +107,11 @@ packed_type(::Type{<:Euclidean{<:Any,UInt8}}) = SIMD.Vec{32,UInt8}
 # Pack `K` Euclideans into a single `Vec`
 struct Packed{K, E <: Euclidean, V <: SIMD.Vec}
     repr::V
+
+    # Inner constructor that only accepts packing if `E` and `V` have the same eltype.
+    function Packed{K,E,V}(repr::V) where {K, T, E <: Euclidean{<:Any,T}, V <: SIMD.Vec{<:Any,T}}
+        return new{K,E,V}(repr)
+    end
 end
 Packed(e::Euclidean...) = Packed(e)
 function Packed(e::NTuple{K,Euclidean{N,T}}) where {K,N,T}

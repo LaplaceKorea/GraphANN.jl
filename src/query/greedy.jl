@@ -346,7 +346,7 @@ function latency_callbacks()
     times = UInt64[]
     prequery = () -> push!(times, time_ns())
     postquery = () -> times[end] = time_ns() - times[end]
-    return times, GreedyCallbacks(; prequery, postquery)
+    return (latencies = times, callbacks = GreedyCallbacks(; prequery, postquery))
 end
 
 function latency_mt_callbacks()
@@ -356,6 +356,6 @@ function latency_mt_callbacks()
         _times = times[]
         _times[end] = time_ns() - _times[end]
     end
-    return times, GreedyCallbacks(; prequery, postquery)
+    return (latencies = times, callbacks = GreedyCallbacks(; prequery, postquery))
 end
 
