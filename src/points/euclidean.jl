@@ -12,8 +12,8 @@ Euclidean{N,T}(vals::NTuple{N,T}) where {N,T} = Euclidean(SVector{N,T}(vals))
 Euclidean(vals::NTuple{N,T}) where {N,T} = Euclidean{N,T}(vals)
 Euclidean(vec::SIMD.Vec) = Euclidean(Tuple(vec))
 
- _Base.zeroas(::Type{T}, ::Type{Euclidean{N,U}}) where {T,N,U} = Euclidean{N,T}()
- _Base.zeroas(::Type{T}, x::E) where {T, E <: Euclidean} = zeroas(T, E)
+_Base.zeroas(::Type{T}, ::Type{Euclidean{N,U}}) where {T,N,U} = Euclidean{N,T}()
+_Base.zeroas(::Type{T}, x::E) where {T, E <: Euclidean} = zeroas(T, E)
 Base.zero(::E) where {E <: Euclidean} = zero(E)
 Base.zero(::Type{Euclidean{N,T}}) where {N,T} = Euclidean{N,T}()
 

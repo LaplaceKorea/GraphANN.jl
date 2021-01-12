@@ -10,6 +10,7 @@ using Statistics
 # deps
 using DataFrames
 using DataStructures
+using Query
 
 import PrettyTables
 import UnPack: @unpack, @pack!
@@ -26,5 +27,6 @@ include("index.jl")
 include("query.jl")
 include("clustering.jl")
 include("test.jl")
+include("dump.jl")
 
 end # module

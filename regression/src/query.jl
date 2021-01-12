@@ -46,12 +46,37 @@ function cb_stats(x::GraphANN.ThreadLocal, cb::LatencyCallbacks)
 end
 
 # Dispatch Rules - Algorithm Construction
-function make_algo(windowsize::Integer, ::SingleThread, ::NoPrefetching, x...)
-    return GraphANN.GreedySearch(windowsize)
+start_prefetching(meta, ::NoPrefetching) = nothing
+function start_prefetching(meta, ::WithPrefetching)
+    GraphANN._Prefetcher.start(meta)
+    sleep(0.01)
 end
 
-function make_algo(windowsize::Integer, ::MultiThread, ::NoPrefetching, x...)
-    return GraphANN.ThreadLocal(GraphANN.GreedySearch(windowsize))
+stop_prefetching(meta, ::NoPrefetching) = nothing
+function stop_prefetching(meta, ::WithPrefetching)
+    sleep(0.01)
+    GraphANN._Prefetcher.stop(meta)
+end
+
+const MetaGraph = GraphANN.MetaGraph
+function make_algo(windowsize::Integer, ::SingleThread, ::NoPrefetching, meta::MetaGraph)
+    return GraphANN.GreedySearch(windowsize), meta
+end
+
+function make_algo(windowsize::Integer, ::MultiThread, ::NoPrefetching, meta::MetaGraph)
+    return GraphANN.ThreadLocal(GraphANN.GreedySearch(windowsize)), meta
+end
+
+function make_algo(windowsize::Integer, ::SingleThread, ::WithPrefetching, meta::MetaGraph)
+    query_pool = GraphANN.ThreadPool(1:1)
+    prefetch_pool = GraphANN.ThreadPool(2:2)
+    prefetched_meta = GraphANN._Prefetcher.prefetch_wrap(meta, query_pool, prefetch_pool)
+    algo = GraphANN.GreedySearch(
+        windowsize;
+        prefetch_queue = GraphANN._Prefetcher.getqueue(prefetched_meta),
+    )
+
+    return algo, prefetched_meta
 end
 
 # -- Query top level
@@ -79,7 +104,7 @@ function query(
     closure = function(windowsize::Integer)
         # Even though we might ask for single threaded latency, here we use multithreading
         # just to make convergencde a little faster.
-        algo = make_algo(windowsize, MultiThread(), NoPrefetching())
+        algo, meta = make_algo(windowsize, MultiThread(), NoPrefetching(), meta)
         ids = GraphANN.searchall(algo, meta, start, queries; num_neighbors = num_neighbors)
         return mean(GraphANN.recall(groundtruth, ids))
     end
@@ -93,27 +118,38 @@ function query(
     callback_tuple = get_callbacks(callbacks, threading)
 
     for (target, windowsize) in zip(target_accuracies, windowsizes)
-        algo = make_algo(windowsize, threading, prefetching)
+        # Note - the MetaGraph may NOT be modified if prefetching is disabled.
+        # However, if prefetching IS enabled, then the MetaGraph will be modified.
+        algo, modified_meta = make_algo(windowsize, threading, prefetching, meta)
 
         # Warmup Round
         f = () -> GraphANN.searchall(
             algo,
-            meta,
+            modified_meta,
             start,
             queries;
             num_neighbors = num_neighbors,
             callbacks = callback_tuple.callbacks,
         )
-        reset!(callback_tuple, callbacks)
 
+        reset!(callback_tuple, callbacks)
+        start_prefetching(modified_meta, prefetching)
         ids = f()
+        stop_prefetching(modified_meta, prefetching)
+
         recall = mean(GraphANN.recall(groundtruth, ids))
 
         # The query run!
         # Run the `repeated` function once to force precompilaion.
+        start_prefetching(modified_meta, prefetching)
         repeated(f, num_loops)
+        stop_prefetching(modified_meta, prefetching)
         reset!(callback_tuple, callbacks)
+
+        start_prefetching(modified_meta, prefetching)
         stats = @timed repeated(f, num_loops)
+        stop_prefetching(modified_meta, prefetching)
+
         qps = (num_loops * length(queries)) / stats.time
 
         # Make an entry in the record
