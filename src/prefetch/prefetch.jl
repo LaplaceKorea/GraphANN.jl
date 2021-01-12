@@ -28,14 +28,15 @@ getqueue(A::PrefetchedMeta) = getqueue(A.prefetcher)
 Base.getindex(A::PrefetchedMeta, i...) = getindex(A.meta, i...)
 
 function start(A::PrefetchedMeta; kw...)
-    reset!(A.prefetcher)
-    start(A.prefetcher, MetaGraph(A.graph, A.data); kw...)
+    if isrunning(A.prefetcher)
+        printstyled("Not relaunching prefetcher.\n"; color = :green, bold = true)
+    else
+        start(A.prefetcher, MetaGraph(A.graph, A.data); kw...)
+    end
+    return nothing
 end
 
-function stop(A::PrefetchedMeta)
-    stop!(A.prefetcher)
-    wait(A.prefetcher)
-end
+stop(A::PrefetchedMeta) = stop!(A.prefetcher)
 
 function prefetch_wrap(
     meta::MetaGraph,
@@ -144,8 +145,6 @@ function prefetch_loop(prefetcher::PrefetchRunner, meta::MetaGraph)
     @unpack staging, worklist, stop, tryfor = prefetcher
     @unpack data, graph = meta
 
-    #worklist_lengths = Int[]
-
     while !stop[]
         # Gather incoming ids
         acquire!(staging, worklist, tryfor)
@@ -156,8 +155,6 @@ function prefetch_loop(prefetcher::PrefetchRunner, meta::MetaGraph)
             prefetch(data, v, prefetch_llc)
         end
     end
-
-    #@show worklist_lengths
     return nothing
 end
 
@@ -195,10 +192,15 @@ function Prefetcher{U}(thread_pool::ThreadPool, staging::Staging) where {U}
     )
 end
 
+isrunning(p::Prefetcher) = (p.tasks !== nothing)
 getqueue(p::Prefetcher) = getqueue(p.staging)
-stop!(p::Prefetcher) = foreach(i -> i[] = true, values(p.stop_signals))
+function stop!(p::Prefetcher)
+    foreach(i -> i[] = true, values(p.stop_signals))
+    wait(values(p.tasks))
+    reset!(p)
+    p.tasks = nothing
+end
 reset!(p::Prefetcher) = foreach(i -> i[] = false, values(p.stop_signals))
-Base.wait(p::Prefetcher) = wait(values(p.tasks))
 
 function start(prefetcher::Prefetcher, meta; tryfor = 100)
     @unpack thread_pool, staging, worklists, stop_signals = prefetcher
