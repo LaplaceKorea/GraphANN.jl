@@ -161,13 +161,13 @@ function __test_query(record::Record)
 end
 
 function test_query(record::Record)
-    #sets = [Sift1M(), Sift10M(), Sift100M()]
-    #threadings = [MultiThread(), SingleThread()]
-    #prefetchings = [NoPrefetching(), WithPrefetching()]
+    sets = [Sift1M(), Sift10M(), Sift100M()]
+    threadings = [MultiThread(), SingleThread()]
+    prefetchings = [NoPrefetching(), WithPrefetching()]
 
-    sets = [Sift1M(), Sift10M()]
-    threadings = [SingleThread()]
-    prefetchings = [WithPrefetching()]
+    #sets = [Sift1M(), Sift10M()]
+    #threadings = [SingleThread()]
+    #prefetchings = [WithPrefetching()]
     neighbor_sets = [1,5,10]
 
     iter = Iterators.product(neighbor_sets, prefetchings, threadings)
