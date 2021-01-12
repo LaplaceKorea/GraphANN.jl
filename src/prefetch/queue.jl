@@ -30,9 +30,10 @@ end
 # For convenience I guess.
 const SAQ = SemiAtomicQueue
 
-# Going through `getindex` requires acquire semantics.
-# By using this strategically, we can avoid the need for these (hopefully)
-unsafe_get(x::Atomic) = x.value
+# Originally, I thought it would be save to use the underlying value directly using `x.value`.
+# However, there seems to be a race condition somewhere that would creep up, so now we're
+# trying to use the semantic access.
+unsafe_get(x::Atomic) = x[]
 capacity(x::SAQ) = length(x.buffer)
 
 #####
