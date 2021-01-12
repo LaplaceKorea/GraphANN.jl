@@ -38,7 +38,9 @@ function cluster(record, dataset::Dataset, clustering::Clustering; saveprefix = 
 
     if saveprefix !== nothing
         savename = "pq_$(clustering.partition_size)x$(clustering.num_centroids).jls"
-        savepath = joinpath(SCRATCH, saveprefix, savename)
+        savedir = joinpath(SCRATCH, saveprefix)
+        !ispath(savedir) && mkpath(savedir)
+        savepath = joinpath(savedir, savename)
         serialize(savepath, finalcentroids)
     else
         savename = nothing

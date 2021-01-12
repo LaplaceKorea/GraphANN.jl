@@ -13,25 +13,33 @@ maxlines(::Sift10M) = 10_000_000
 maxlines(::Sift100M) = 100_000_000
 maxlines(::Sift1B) = 1_000_000_000
 
-groundtruth(::Sift1M) = "sift1m_groundtruth.ivecs"
-groundtruth(::Sift10M) = "sift10m_groundtruth.ivecs"
-groundtruth(::Sift100M) = "sift100m_groundtruth.ivecs"
-groundtruth(::Sift1B) = "sift1b_groundtruth.ivecs"
+#groundtruth(::Sift1M) = "sift1m_groundtruth.ivecs"
+#groundtruth(::Sift10M) = "sift10m_groundtruth.ivecs"
+#groundtruth(::Sift100M) = "sift100m_groundtruth.ivecs"
+#groundtruth(::Sift1B) = "sift1b_groundtruth.ivecs"
 
-name(::Sift1M) == "sift1m"
-name(::Sift10M) == "sift10m"
-name(::Sift100M) == "sift100m"
-name(::Sift1B) == "sift1b"
+groundtruth(::Sift1M) = "idx_1M.ivecs"
+groundtruth(::Sift10M) = "idx_10M.ivecs"
+groundtruth(::Sift100M) = "idx_100M.ivecs"
+groundtruth(::Sift1B) = "idx_1000M.ivecs"
+
+name(::Sift1M) = "sift1m"
+name(::Sift10M) = "sift10m"
+name(::Sift100M) = "sift100m"
+name(::Sift1B) = "sift1b"
 
 graphpath(sift::AbstractSift) = joinpath(SCRATCH, "$(name(sift)).index")
 
 function get_dataset(sift::AbstractSift, allocator = default_allocator(sift))
     return Dataset(;
-        path = "/home/stg/bigann_base.bvecs",
+        path = "/backup/data/sift1B/bigann_base.bvecs",
+        groundtruth = joinpath("/backup/data/sift1B/gnd", groundtruth(sift)),
+        queries = "/backup/data/sift1B/bigann_query.bvecs",
+        #path = "/home/stg/bigann_base.bvecs",
         eltype = GraphANN.Euclidean{128,UInt8},
         maxlines = maxlines(sift),
-        groundtruth = joinpath("/home/stg/projects/sift_versions", groundtruth(sift)),
-        queries = "/home/stg/projects/sift_versions/queries.bvecs",
+        #groundtruth = joinpath("/home/stg/projects/sift_versions", groundtruth(sift)),
+        #queries = "/home/stg/projects/sift_versions/queries.bvecs",
     )
 end
 
@@ -189,7 +197,8 @@ function __test_clustering(record::Record)
 end
 
 function test_clustering(record::Record)
-    sets = [Sift1M(), Sift10M, Sift100M()]
+    #sets = [Sift1M(), Sift10M(), Sift100M()]
+    sets = [Sift10M(), Sift100M()]
     clusterings = [
         Clustering(partition_size = 8, num_centroids = 256),
         Clustering(partition_size = 8, num_centroids = 512),
@@ -198,9 +207,9 @@ function test_clustering(record::Record)
     ]
 
     for set in sets
-        dataset = get_dataset(set, allocator = GraphANN.stdallocator)
+        dataset = get_dataset(set, GraphANN.stdallocator)
         for clustering in clusterings
-            cluster(record, dataset, clustering; prefix = name(set))
+            cluster(record, dataset, clustering; saveprefix = name(set))
         end
     end
 end
