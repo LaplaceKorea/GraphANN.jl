@@ -16,7 +16,7 @@ import UnPack: @unpack, @pack!
 
 const SRCDIR = @__DIR__
 const PKGDIR = dirname(SRCDIR)
-const SCRATCH = joinpath(SRCDIR, "data")
+const SCRATCH = joinpath(PKGDIR, "data")
 
 makescratch() = ispath(SCRATCH) || mkpath(SCRATCH)
 

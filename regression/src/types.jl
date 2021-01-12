@@ -20,10 +20,9 @@ function save(record::Record)
 end
 
 lower(x) = x
-function Base.push!(record::Record, row; cols = :union)
-    row = Dict(key => lower(value) for (key, value) in pairs(row))
-    return push!(record.df, row; cols = cols)
-end
+lower(x::AbstractDict) = lowerdict(x)
+lowerdict(x) = Dict(key => lower(value) for (key, value) in pairs(x))
+Base.push!(record::Record, row; cols = :union) = push!(record.df, lowerdict(row); cols = cols)
 
 # Overloads for lowering some GraphANN types
 lower(::typeof(GraphANN.stdallocator)) = "DRAM"
