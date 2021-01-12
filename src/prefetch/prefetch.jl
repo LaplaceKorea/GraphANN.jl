@@ -14,7 +14,6 @@ using .._Graphs
 import LightGraphs
 import UnPack: @unpack, @pack!
 
-include("atomic.jl")
 include("queue.jl"); import .Queue: SemiAtomicQueue, commit!, consume!
 
 # Behaves like a metagraph, but provides prefetching as well!
@@ -34,7 +33,6 @@ end
 
 function stop(A::PrefetchedMeta)
     stop!(A.prefetcher)
-    wait(A.prefetcher)
 end
 
 function prefetch_wrap(
