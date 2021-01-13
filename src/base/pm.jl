@@ -38,3 +38,4 @@ function pmmap(::Type{T}, dir::AbstractString, dims::Integer...; rmfile = true) 
     end
     return array
 end
+

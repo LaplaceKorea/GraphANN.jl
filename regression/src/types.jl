@@ -30,7 +30,7 @@ lower(::typeof(GraphANN.stdallocator)) = "DRAM"
 lower(allocator::GraphANN._Base.PMAllocator) = "PM - $(allocator.path)"
 lower(::Type{GraphANN.Euclidean{N,T}}) where {N,T} = "Euclidean{$N,$T}"
 
-_wrap(x::Tuple) = x
+_wrap(x::Union{Tuple,Vector}) = x
 _wrap(x::Symbol) = (x,)
 exclude(::Any) = ()
 function dict(x::T; excluded = exclude(x)) where {T}
@@ -44,7 +44,19 @@ makeresult(v::AbstractVector) = SortedDict(reduce(merge, v))
 ##### Experiment Data Types
 #####
 
-Base.@kwdef mutable struct Dataset
+abstract type LazyLoader end
+
+function exclude(x::LazyLoader)
+    return [name for name in propertynames(x) if startswith(String(name), "_")]
+end
+
+function cleanup(x::LazyLoader)
+    for name in exclude(x)
+        setproperty!(x, name, nothing)
+    end
+end
+
+Base.@kwdef mutable struct Dataset <: LazyLoader
     path::String
     eltype::Type{<:GraphANN.Euclidean}
     maxlines::Union{Int,Nothing} = nothing
@@ -55,7 +67,6 @@ Base.@kwdef mutable struct Dataset
     # Memoize the dataset since it can sometime be expensive to load.
     _dataset::Any = nothing
 end
-exclude(::Dataset) = (:_dataset,)
 
 function load(dataset::Dataset)
     @unpack _dataset = dataset
@@ -82,15 +93,17 @@ load_groundtruth(dataset::Dataset) = GraphANN.load_vecs(dataset.groundtruth) .+ 
 function loadall(x::Dataset)
     return (data = load(x), queries = load_queries(x), groundtruth = load_groundtruth(x))
 end
-cleanup(x::Dataset) = (x._dataset = nothing)
 
-Base.@kwdef mutable struct Graph
+#####
+##### Graph Loader
+#####
+
+Base.@kwdef mutable struct Graph <: LazyLoader
     path::String
     graph_allocator = GraphANN.stdallocator
     # Same story as the Dataset
     _graph::Any = nothing
 end
-exclude(::Graph) = (:_graph,)
 
 function load(graph::Graph)
     @unpack _graph = graph
@@ -105,5 +118,95 @@ function load(graph::Graph)
     @pack! graph = _graph
     return _graph
 end
-cleanup(x::Graph) = (x._graph = nothing)
+
+#####
+##### Clustered Things
+#####
+
+abstract type QuantizationDistanceType end
+struct EagerDistance <: QuantizationDistanceType end
+struct LazyDistance <: QuantizationDistanceType end
+lower(x::QuantizationDistanceType) = string(typeof(x))
+
+abstract type QuantizationDistanceStrategy end
+struct EncodedData <: QuantizationDistanceStrategy end
+struct EncodedGraph <: QuantizationDistanceStrategy end
+lower(x::QuantizationDistanceStrategy) = string(typeof(x))
+
+Base.@kwdef mutable struct Quantization <: LazyLoader
+    path::String
+    num_centroids::Int
+    num_partitions::Int
+
+    encoded_data_allocator
+    pqgraph_allocator
+
+    # -- Cached Items
+    _pqtable = nothing
+    _pqtranspose = nothing
+    _encoder = nothing
+    _data_encoded = nothing
+    _pqgraph = nothing
+end
+# Lazy Loaders
+function _pqtable(q::Quantization)
+    if q._pqtable === nothing
+        centroids = deserialize(q.path)
+        @assert size(centroids, 1) == q.num_centroids
+        @assert size(centroids, 2) == q.num_partitions
+        q._pqtable = GraphANN.PQTable{size(centroids, 2)}(centroids)
+    end
+    return q._pqtable
+end
+
+function  _pqtranspose(q::Quantization)
+    if q._pqtranspose === nothing
+        pqtable = _pqtable(q)
+        q._pqtranspose = GraphANN._Quantization.PQTransposed(pqtable)
+    end
+    return q._pqtranspose
+end
+
+function _encoder(q::Quantization)
+    if q._encoder === nothing
+        pqtable = _pqtable(q)
+        q._encoder = GraphANN._Quantization.binned(q._pqtable)
+    end
+    return q._encoder
+end
+
+function _data_encoded(q::Quantization, dataset::Dataset)
+    if q._data_encoded === nothing
+        qtype = q.num_centroids <= 256 ? UInt8 : UInt16
+        encoder = _encoder(q)
+        q._data_encoded = GraphANN._Quantization.encode(
+            qtype,
+            encoder,
+            load(dataset);
+            allocator = q.encoded_data_allocator,
+        )
+    end
+    return q._data_encoded
+end
+
+function getmeta(q::Quantization, ::EncodedData, dataset::Dataset, graph::Graph)
+    return GraphANN.MetaGraph(load(graph), _data_encoded(q, dataset))
+end
+
+function getmeta(q::Quantization, ::EncodedGraph, dataset::Dataset, graph::Graph)
+    if q._pqgraph === nothing
+        qtype = q.num_centroids <= 256 ? UInt8 : UInt16
+        encoder = _encoder(q)
+        q._pqgraph = GraphANN.PQGraph{qtype}(
+            encoder,
+            load(graph),
+            load(dataset);
+            allocator = q.pqgraph_allocator,
+        )
+    end
+    return GraphANN.MetaGraph(load(graph), q._pqgraph)
+end
+
+getmetric(q::Quantization, ::EagerDistance) = _pqtranspose(q)
+getmetric(q::Quantization, ::LazyDistance) = _pqtable(q)
 

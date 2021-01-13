@@ -9,12 +9,6 @@ typemax!(x) = (x .= typemax(eltype(x)))
 cdiv(a::Integer, b::Integer) = cdiv(promote(a, b)...)
 cdiv(a::T, b::T) where {T <: Integer} = one(T) + div(a - one(T), b)
 
-# Partially applied function
-struct Map{F}
-    f::F
-end
-(f::Map)(x...) = map(f.f, x...)
-
 #####
 ##### Neighbor
 #####

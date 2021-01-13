@@ -100,3 +100,108 @@ function cluster(record, dataset::Dataset, clustering::Clustering; saveprefix = 
     push!(record, results)
     save(record)
 end
+
+#####
+##### Cluster Based Query
+#####
+
+function quantized_query(
+    record::Record,
+    quantization::Quantization,
+    dataset::Dataset,
+    graph::Graph;
+    target_accuracies = [0.95, 0.98, 0.99],
+    num_neighbors = 1,
+    num_loops = 5,
+    maxwindow = 400,
+    distance_type::QuantizationDistanceType = EagerDistance(),
+    distance_strategy::QuantizationDistanceStrategy = EncodedData(),
+)
+
+    data, queries, groundtruth = loadall(dataset)
+    start_index = GraphANN.medioid(data)
+    meta = getmeta(quantization, distance_strategy, dataset, graph)
+
+    # The start index now has to live in the encoded space.
+    start = GraphANN.StartNode(start_index, _data_encoded(quantization, dataset)[start_index])
+    metric = getmetric(quantization, distance_type)
+
+    # At the moment, I don't have a way of distributing the Eager metric ... so we kind
+    # of cheat and wrap it in a `ThreadLocal` for finding the appropriate window sizes.
+    thread_local_metric = GraphANN.ThreadLocal(metric)
+
+    # Like the normal query path - we use a memoized closure to find the appropriate window
+    # size for the requested accuracies.
+    closure = function(windowsize::Integer)
+        algo = GraphANN.ThreadLocal(GraphANN.GreedySearch(windowsize))
+
+        # Since refinement is not yet implemented, we need to use a slightly difference
+        # version to calculate recall.
+        ids = GraphANN.searchall(
+            algo,
+            meta,
+            start,
+            queries;
+            num_neighbors = windowsize,
+            metric = thread_local_metric,
+        )
+
+        return computerecall(groundtruth, ids, num_neighbors, windowsize)
+    end
+
+    memoized = memoize(closure)
+    windowsizes = map(target_accuracies) do accuracy
+        binarysearch(memoized, accuracy, 1, maxwindow)
+    end
+
+    # Now - we actually run the queries.
+    callbacks = LatencyCallbacks()
+    callback_tuple = get_callbacks(callbacks, SingleThread())
+    for (target, windowsize) in zip(target_accuracies, windowsizes)
+        algo = GraphANN.GreedySearch(windowsize)
+        f = () -> GraphANN.searchall(
+            algo,
+            meta,
+            start,
+            queries;
+            num_neighbors = windowsize,
+            callbacks = callback_tuple.callbacks,
+            metric = metric,
+        )
+
+        reset!(callback_tuple, callbacks)
+        ids = f()
+        recall = computerecall(groundtruth, ids, num_neighbors, windowsize)
+
+        # Precompile then run.
+        repeated(f, num_loops)
+        reset!(callback_tuple, callbacks)
+        stats = @timed repeated(f, num_loops)
+        qps = (num_loops * length(queries)) / stats.time
+        results = makeresult([
+            dict(stats; excluded = :value),
+            dict(dataset),
+            dict(graph),
+            dict(quantization),
+            dict(cb_stats(callback_tuple, callbacks)),
+            Dict(
+                :target_recall => target,
+                :num_neighbors => num_neighbors,
+                :windowsize => windowsize,
+                :distance_type => distance_type,
+                :distance_strategy => distance_strategy,
+                :recall => recall,
+                :maxwindow => maxwindow,
+                :start_index => start_index,
+                :qps => qps,
+                :num_loops => num_loops,
+                :num_queries => length(queries),
+                :num_threads => Threads.nthreads(),
+                :runtime => stats.time,
+            ),
+        ])
+
+        push!(record, results)
+        save(record)
+    end
+end
