@@ -10,7 +10,6 @@ using Statistics
 # deps
 using DataFrames
 using DataStructures
-#using Query
 
 import PrettyTables
 import UnPack: @unpack, @pack!

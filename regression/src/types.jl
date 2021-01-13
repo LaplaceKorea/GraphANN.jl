@@ -15,6 +15,7 @@ Base.show(io::IO, record::Record) = show(io, _transpose(record.df))
 function save(record::Record)
     mktemp() do path, io
         serialize(io, record.df)
+        close(io)
         mv(path, record.path; force = true)
     end
 end
