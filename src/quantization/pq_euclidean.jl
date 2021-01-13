@@ -126,7 +126,6 @@ end
 ##### Distance Computations
 #####
 
-# Specialize
 function (table::PQTable{K,E})(
     a::Euclidean{N,T},
     b::NTuple{K, <:Integer}
@@ -157,5 +156,81 @@ function (table::PQTable{K, Euclidean{N1,T1}})(
         accumulator = _Points.square_accum(z, accumulator)
     end
     return sum(accumulator)
+end
+
+#####
+##### Cached Distance Computation
+#####
+
+struct PQTransposed{K,E,V,U}
+    centroids_transposed::Matrix{Packed{K,E,V}}
+    cached_distances::Matrix{U}
+end
+
+function PQTransposed(pqtable::PQTable{N,E}) where {N,E <: Euclidean}
+    packed_type = _Points.packed_type(E)
+    K = exact_div(length(packed_type), length(E))
+    cost_type = _Points.cost_type(E)
+
+    @unpack centroids = pqtable
+    centroids_transposed = centroids |>
+        transpose |>
+        x -> reinterpret(Packed{K, E, packed_type}, x) |>
+        collect
+
+    cached_distances = zeros(cost_type, size(transpose(centroids)))
+    return PQTransposed(centroids_transposed, cached_distances)
+end
+
+function precompute!(pq::PQTransposed{K,E,V}, x::Euclidean) where {K,E,V}
+    precompute!(pq, LazyWrap{V}(x))
+end
+
+function precompute!(pq::PQTransposed{K,E,V}, x) where {K,E,V}
+    Base.@_inline_meta
+    @unpack centroids_transposed, cached_distances = pq
+    @inbounds for j in 1:size(centroids_transposed, 2), i in 1:size(centroids_transposed, 1)
+        centroid = centroids_transposed[i, j]
+        slice = Packed{K,E,V}(x[i])
+        d = distance(centroid, slice)
+        for k in 1:K
+            cached_distances[K * (i-1) + k, j] = d[k]
+        end
+    end
+end
+
+# Since we've cached the distances, we can simply drop the first argument.
+(pq::PQTransposed)(::Euclidean, x) = lookup(pq, x)
+
+function lookup(pq::PQTransposed{K,<:Any,<:Any,U}, x::NTuple{N, I}) where {K,U,N,I}
+    @unpack cached_distances = pq
+    s0 = zero(U)
+    s1 = zero(U)
+    s2 = zero(U)
+    s3 = zero(U)
+    i = 1
+
+    # Unroll 4 times as long as possible.
+    @inbounds while i + 3 <= N
+        j0 = Int(x[i + 0]) + 1
+        j1 = Int(x[i + 1]) + 1
+        j2 = Int(x[i + 2]) + 1
+        j3 = Int(x[i + 3]) + 1
+
+        s0 += cached_distances[i + 0, j0]
+        s1 += cached_distances[i + 1, j1]
+        s2 += cached_distances[i + 2, j2]
+        s3 += cached_distances[i + 3, j3]
+
+        i += 4
+    end
+
+    # Catch the remainders
+    @inbounds while i <= N
+        s0 += cached_distances[i, Int(x[i]) + 1]
+        i += 1
+    end
+
+    return s0 + s1 + s2 + s3
 end
 

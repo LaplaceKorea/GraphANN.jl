@@ -3,3 +3,4 @@ tags
 *.jls
 *.index
 data/
+*.csv
