@@ -24,6 +24,20 @@ Return the distance between points `x` and `y`.
 """
 function distance end
 
+"""
+    distribute_distance(x)
+
+Optional metric function. Distribute a necessary version of `x` to each thread.
+"""
+distribute_distance(x) = x
+
+"""
+    distance_prehook(metric, x)
+
+Optional metric function. Perform necessary pre-distance computations on query `x`.
+"""
+distance_prehook(metric, x) = nothing
+
 #####
 ##### Generic MetaGraph
 #####
@@ -55,6 +69,7 @@ include("pm.jl")
 export ThreadPool, ThreadLocal, TaskHandle
 export getall, getpool, allthreads, dynamic_thread, on_threads
 include("threading.jl")
+distribute_distance(x::ThreadLocal) = x[]
 
 #####
 ##### MinMaxHeap

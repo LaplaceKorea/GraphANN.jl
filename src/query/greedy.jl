@@ -287,6 +287,7 @@ function searchall(
         # -- optional telemetry
         callbacks.prequery()
 
+        _Base.distance_prehook(metric, query)
         search(algo, meta, start, query; callbacks, metric)
 
         # Copy over the results to the destination
@@ -315,6 +316,7 @@ function searchall(
     dest = Array{eltype(meta.graph),2}(undef, num_neighbors, num_queries)
 
     dynamic_thread(getpool(tls), eachindex(queries), 64) do r
+        _metric = _Base.distribute_distance(metric)
         for col in r
             query = queries[col]
             algo = tls[]
@@ -322,7 +324,8 @@ function searchall(
             # -- optional telemetry
             callbacks.prequery()
 
-            search(algo, meta, start, query; callbacks, metric)
+            _Base.distance_prehook(_metric, query)
+            search(algo, meta, start, query; callbacks = callbacks, metric = _metric)
 
             # Copy over the results to the destination
             results = destructive_extract!(algo.best, num_neighbors)

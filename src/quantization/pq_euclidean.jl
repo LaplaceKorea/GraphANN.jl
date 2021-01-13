@@ -182,7 +182,7 @@ function PQTransposed(pqtable::PQTable{N,E}) where {N,E <: Euclidean}
     return PQTransposed(centroids_transposed, cached_distances)
 end
 
-function precompute!(pq::PQTransposed{K,E,V}, x::Euclidean) where {K,E,V}
+function _Base.distance_prehook(pq::PQTransposed{K,E,V}, x::Euclidean) where {K,E,V}
     precompute!(pq, LazyWrap{V}(x))
 end
 
@@ -201,7 +201,6 @@ end
 
 # Since we've cached the distances, we can simply drop the first argument.
 (pq::PQTransposed)(::Euclidean, x) = lookup(pq, x)
-
 function lookup(pq::PQTransposed{K,<:Any,<:Any,U}, x::NTuple{N, I}) where {K,U,N,I}
     @unpack cached_distances = pq
     s0 = zero(U)

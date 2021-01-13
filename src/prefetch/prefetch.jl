@@ -194,8 +194,10 @@ end
 isrunning(p::Prefetcher) = (p.tasks !== nothing)
 getqueue(p::Prefetcher) = getqueue(p.staging)
 function stop!(p::Prefetcher)
+    printstyled("Sending Stop Signals\n"; color = :yellow, bold = true)
     foreach(i -> i[] = true, values(p.stop_signals))
     wait(values(p.tasks))
+    printstyled("Tasks Halted\n"; color = :green, bold = true)
     reset!(p)
     p.tasks = nothing
 end

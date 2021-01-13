@@ -13,16 +13,16 @@ maxlines(::Sift100M) = 100_000_000
 maxlines(::Sift1B) = 1_000_000_000
 
 # for airval
-groundtruth(::Sift1M) = "idx_1M.ivecs"
-groundtruth(::Sift10M) = "idx_10M.ivecs"
-groundtruth(::Sift100M) = "idx_100M.ivecs"
-groundtruth(::Sift1B) = "idx_1000M.ivecs"
+# groundtruth(::Sift1M) = "idx_1M.ivecs"
+# groundtruth(::Sift10M) = "idx_10M.ivecs"
+# groundtruth(::Sift100M) = "idx_100M.ivecs"
+# groundtruth(::Sift1B) = "idx_1000M.ivecs"
 
 # for air3
-# groundtruth(::Sift1M) = "sift1m_groundtruth.ivecs"
-# groundtruth(::Sift10M) = "sift10m_groundtruth.ivecs"
-# groundtruth(::Sift100M) = "sift100m_groundtruth.ivecs"
-# groundtruth(::Sift1B) = "sift1b_groundtruth.ivecs"
+groundtruth(::Sift1M) = "sift1m_groundtruth.ivecs"
+groundtruth(::Sift10M) = "sift10m_groundtruth.ivecs"
+groundtruth(::Sift100M) = "sift100m_groundtruth.ivecs"
+groundtruth(::Sift1B) = "sift1b_groundtruth.ivecs"
 
 name(::Sift1M) = "sift1m"
 name(::Sift10M) = "sift10m"
@@ -33,12 +33,12 @@ graphpath(sift::AbstractSift) = joinpath(SCRATCH, "$(name(sift)).index")
 
 function get_dataset(sift::AbstractSift, allocator = default_allocator(sift))
     return Dataset(;
-        path = "/backup/data/sift1B/bigann_base.bvecs",
-        groundtruth = joinpath("/backup/data/sift1B/gnd", groundtruth(sift)),
-        queries = "/backup/data/sift1B/bigann_query.bvecs",
-        # path = "/home/stg/bigann_base.bvecs",
-        # groundtruth = joinpath("/home/stg/projects/sift_versions", groundtruth(sift)),
-        # queries = "/home/stg/projects/sift_versions/queries.bvecs",
+        # path = "/backup/data/sift1B/bigann_base.bvecs",
+        # groundtruth = joinpath("/backup/data/sift1B/gnd", groundtruth(sift)),
+        # queries = "/backup/data/sift1B/bigann_query.bvecs",
+        path = "/home/stg/bigann_base.bvecs",
+        groundtruth = joinpath("/home/stg/projects/sift_versions", groundtruth(sift)),
+        queries = "/home/stg/projects/sift_versions/queries.bvecs",
         eltype = GraphANN.Euclidean{128,UInt8},
         maxlines = maxlines(sift),
         data_allocator = allocator,
@@ -229,6 +229,92 @@ function test_clustering(record::Record)
         dataset = get_dataset(set, GraphANN.stdallocator)
         for clustering in clusterings
             cluster(record, dataset, clustering; saveprefix = name(set))
+        end
+    end
+end
+
+#####
+##### Quantization Inference
+#####
+
+function __test_quantized_query(record)
+    set = Sift1M()
+    dataset = get_dataset(set)
+    graph = get_graph(set)
+    quantization = Quantization(;
+        path = joinpath(SCRATCH, "sift1m", "pq_4x256.jls"),
+        num_centroids = 256,
+        num_partitions = 32,
+
+        encoded_data_allocator = GraphANN.stdallocator,
+        pqgraph_allocator = GraphANN.stdallocator,
+    )
+
+    dtypes = [EagerDistance(), LazyDistance()]
+    dstrategies = [EncodedData(), EncodedGraph()]
+
+    iter = Iterators.product(dtypes, dstrategies)
+    for tup in iter
+        dtype = tup[1]
+        dstrategy = tup[2]
+
+        quantized_query(
+            record,
+            quantization,
+            dataset,
+            graph;
+            target_accuracies = [0.95],
+            distance_type = dtype,
+            distance_strategy = dstrategy,
+        )
+    end
+end
+
+function test_quantized_query(record)
+    #sets = [Sift1M(), Sift10M(), Sift100M()]
+    sets = [Sift100M()]
+
+    dtypes = [EagerDistance(), LazyDistance()]
+    dstrategies = [EncodedData(), EncodedGraph()]
+    iter = Iterators.product(dtypes, dstrategies)
+    clustering_sets = [
+        #(num_centroids = 256, num_partitions = 16),
+        #(num_centroids = 512, num_partitions = 16),
+        (num_centroids = 256, num_partitions = 32),
+        (num_centroids = 512, num_partitions = 32),
+    ]
+
+    for set in sets, clustering_set in clustering_sets
+        dataset = get_dataset(set)
+        graph = get_graph(set)
+        # TODO: Hack - fixed dataset element size ...
+        @unpack num_partitions, num_centroids = clustering_set
+        points_per_partition = div(128, num_partitions)
+        quantization = Quantization(;
+            path = joinpath(
+                SCRATCH,
+                name(set),
+                "pq_$(points_per_partition)x$(num_centroids).jls"
+            ),
+            num_centroids = num_centroids,
+            num_partitions = num_partitions,
+            encoded_data_allocator = GraphANN.stdallocator,
+            pqgraph_allocator = default_allocator(set),
+        )
+
+        for tup in iter
+            dtype = tup[1]
+            dstrategy = tup[2]
+
+            quantized_query(
+                record,
+                quantization,
+                dataset,
+                graph;
+                target_accuracies = [0.95, 0.98, 0.99],
+                distance_type = dtype,
+                distance_strategy = dstrategy,
+            )
         end
     end
 end
