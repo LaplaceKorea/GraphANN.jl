@@ -15,7 +15,7 @@ import UnPack: @unpack
 ##### Generic Distance
 #####
 
-export distance
+export distance, search, searchall
 
 """
     distance(x, y)
@@ -37,6 +37,13 @@ distribute_distance(x) = x
 Optional metric function. Perform necessary pre-distance computations on query `x`.
 """
 distance_prehook(metric, x) = nothing
+
+#####
+##### Search Hooks
+#####
+
+function search end
+function searchall end
 
 #####
 ##### Generic MetaGraph

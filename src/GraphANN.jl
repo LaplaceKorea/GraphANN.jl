@@ -1,15 +1,12 @@
 module GraphANN
 
-# Imports (avoid brining names into our namespace)
-import LightGraphs
-import ProgressMeter
-import Setfield
-
-# Explicit imports
-import UnPack: @unpack, @pack!
-
-# Constants
-const INDEX_BALANCE_FACTOR = 64
+# # Imports (avoid brining names into our namespace)
+# import LightGraphs
+# import ProgressMeter
+# import Setfield
+#
+# # Explicit imports
+# import UnPack: @unpack, @pack!
 
 # Bootstrap
 include("base/base.jl"); using ._Base
@@ -20,36 +17,34 @@ include("prefetch/prefetch.jl"); using ._Prefetcher
 include("quantization/quantization.jl"); using ._Quantization
 
 # Core implementation
-include("query/greedy.jl")
-include("index/index.jl")
-
-# Prefetcher to increase performance
+include("algorithms/algorithms.jl")
+using .DiskANN
 
 #####
 ##### Misc development functions
 #####
 
-siftsmall() = joinpath(dirname(@__DIR__), "data", "siftsmall_base.fvecs")
-function _prepare(path = siftsmall(); allocator = stdallocator, maxlines = nothing)
-    dataset = load_vecs(
-        Euclidean{128,UInt8},
-        path;
-        maxlines = maxlines,
-        allocator = allocator
-    )
-
-    parameters = GraphParameters(
-        alpha = 1.2,
-        window_size = 80,
-        target_degree = 10,
-        prune_threshold_degree = 15,
-        prune_to_degree = 10,
-    )
-
-    return (;
-        dataset,
-        parameters,
-    )
-end
+# siftsmall() = joinpath(dirname(@__DIR__), "data", "siftsmall_base.fvecs")
+# function _prepare(path = siftsmall(); allocator = stdallocator, maxlines = nothing)
+#     dataset = load_vecs(
+#         Euclidean{128,UInt8},
+#         path;
+#         maxlines = maxlines,
+#         allocator = allocator
+#     )
+#
+#     parameters = GraphParameters(
+#         alpha = 1.2,
+#         window_size = 80,
+#         target_degree = 10,
+#         prune_threshold_degree = 15,
+#         prune_to_degree = 10,
+#     )
+#
+#     return (;
+#         dataset,
+#         parameters,
+#     )
+# end
 
 end # module
