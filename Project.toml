@@ -5,10 +5,10 @@ version = "0.1.0"
 
 [deps]
 DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
-HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
 LightGraphs = "093fc24a-ae57-5d10-9952-331d41423f4d"
 Mmap = "a63ad114-7e13-5084-954f-fe012c677804"
 ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 SIMD = "fdea26ae-647d-5447-a871-4b548cad5224"
 Setfield = "efcf1570-3423-57d1-acb7-fd33fddbac46"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"

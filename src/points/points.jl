@@ -5,8 +5,10 @@ using .._Base
 using .._Graphs
 import .._IO
 
+# stdlib
+import Random
+
 # deps
-import HDF5
 import LightGraphs
 import LightGraphs.SimpleGraphs: fadj
 import ProgressMeter

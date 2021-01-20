@@ -2,8 +2,10 @@
 safe_maximum(f::F, itr, default = 0) where {F} = isempty(itr) ? default : maximum(f, itr)
 donothing(x...) = nothing
 printlnstyled(x...; kw...) = printstyled(x..., "\n"; kw...)
-zero!(x) = (x .= zero(eltype(x)))
-typemax!(x) = (x .= typemax(eltype(x)))
+
+# Convenience definitions
+zero!(x) = fill!(x, zero(eltype(x)))
+typemax!(x) = fill!(x, typemax(eltype(x)))
 
 # Ceiling division
 cdiv(a::Integer, b::Integer) = cdiv(promote(a, b)...)
@@ -18,9 +20,12 @@ cdiv(a::T, b::T) where {T <: Integer} = one(T) + div(a - one(T), b)
 
 Lightweight struct for containing an ID/distance pair with a total ordering.
 """
-struct Neighbor
+struct Neighbor{D}
     id::UInt32
-    distance::Float32
+    distance::D
+
+    # Inner conversion constructors
+    Neighbor(id::Integer, distance::D) where {D} = new{D}(unsafe_trunc(UInt32, id), distance)
 end
 
 getid(x::Integer) = x

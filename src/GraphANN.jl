@@ -18,7 +18,7 @@ include("quantization/quantization.jl"); using ._Quantization
 
 # Core implementation
 include("algorithms/algorithms.jl")
-using .DiskANN
+using .Algorithms
 
 #####
 ##### Misc development functions

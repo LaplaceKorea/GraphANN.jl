@@ -1,7 +1,6 @@
-
 @testset "Testing Pruner" begin
     # Make this definition for convenience
-    Pruner = GraphANN.DiskANN.Pruner
+    Pruner = GraphANN.Algorithms.Pruner
 
     x = [3,2,1]
     pruner = Pruner{eltype(x)}()
@@ -9,11 +8,11 @@
     @test length(pruner) == 0
 
     # Add all the items in `x` to the pruner.
-    GraphANN.DiskANN.initialize!(pruner, x)
+    GraphANN.Algorithms.initialize!(pruner, x)
     @test length(pruner) == 3
-    @test GraphANN.DiskANN.ispruned(pruner, 1) == false
-    @test GraphANN.DiskANN.ispruned(pruner, 2) == false
-    @test GraphANN.DiskANN.ispruned(pruner, 3) == false
+    @test GraphANN.Algorithms.ispruned(pruner, 1) == false
+    @test GraphANN.Algorithms.ispruned(pruner, 2) == false
+    @test GraphANN.Algorithms.ispruned(pruner, 3) == false
     @test collect(pruner) == x
 
     # Does sorting work?
@@ -21,33 +20,37 @@
     @test collect(pruner) == sort(x)
 
     # Prune out the middle element
-    GraphANN.DiskANN.prune!(pruner, 2)
-    @test GraphANN.DiskANN.ispruned(pruner, 1) == false
-    @test GraphANN.DiskANN.ispruned(pruner, 2) == true
-    @test GraphANN.DiskANN.ispruned(pruner, 3) == false
+    GraphANN.Algorithms.prune!(pruner, 2)
+    @test GraphANN.Algorithms.ispruned(pruner, 1) == false
+    @test GraphANN.Algorithms.ispruned(pruner, 2) == true
+    @test GraphANN.Algorithms.ispruned(pruner, 3) == false
     @test collect(pruner) == [1,3]
 
     # Prune out other items
-    GraphANN.DiskANN.prune!(pruner, 3)
-    @test GraphANN.DiskANN.ispruned(pruner, 1) == false
-    @test GraphANN.DiskANN.ispruned(pruner, 2) == true
-    @test GraphANN.DiskANN.ispruned(pruner, 3) == true
+    GraphANN.Algorithms.prune!(pruner, 3)
+    @test GraphANN.Algorithms.ispruned(pruner, 1) == false
+    @test GraphANN.Algorithms.ispruned(pruner, 2) == true
+    @test GraphANN.Algorithms.ispruned(pruner, 3) == true
     @test collect(pruner) == [1]
 
-    GraphANN.DiskANN.prune!(pruner, 1)
-    @test GraphANN.DiskANN.ispruned(pruner, 1) == true
-    @test GraphANN.DiskANN.ispruned(pruner, 2) == true
-    @test GraphANN.DiskANN.ispruned(pruner, 3) == true
+    GraphANN.Algorithms.prune!(pruner, 1)
+    @test GraphANN.Algorithms.ispruned(pruner, 1) == true
+    @test GraphANN.Algorithms.ispruned(pruner, 2) == true
+    @test GraphANN.Algorithms.ispruned(pruner, 3) == true
     @test collect(pruner) == []
 
     # Try again, but now use the filter function.
-    pruner = GraphANN.DiskANN.Pruner{Int}()
-    GraphANN.DiskANN.initialize!(pruner, 1:100)
-    GraphANN.DiskANN.prune!(isodd, pruner)
+    pruner = GraphANN.Algorithms.Pruner{Int}()
+    GraphANN.Algorithms.initialize!(pruner, 1:100)
+    GraphANN.Algorithms.prune!(isodd, pruner)
     @test collect(pruner) == 2:2:100
 end
 
-function test_index(dataset, graph_type = GraphANN.DefaultAdjacencyList{UInt32})
+function test_index(
+    dataset::Vector{GraphANN.Euclidean{N,T}},
+    graph_type = GraphANN.DefaultAdjacencyList{UInt32}
+) where {N,T}
+
     alpha = 1.2
     max_degree = 70
     window_size = 50
@@ -67,15 +70,16 @@ function test_index(dataset, graph_type = GraphANN.DefaultAdjacencyList{UInt32})
     @test is_connected(g)
 
     # Lets try a search
-    queries = GraphANN.load_vecs(GraphANN.Euclidean{128,Float32}, query_path)
+    queries = GraphANN.load_vecs(GraphANN.Euclidean{N,Float32}, query_path)
+    queries = convert.(GraphANN.Euclidean{N,T}, queries)
 
     # Need to adjust ground-truth from index-0 to index-1
     ground_truth = GraphANN.load_vecs(groundtruth_path) .+ UInt32(1)
 
     @test eltype(ground_truth) == UInt32
-    algo = GraphANN.GreedySearch(100)
-    start = GraphANN.medioid(dataset)
-    start = GraphANN.StartNode(start, dataset[start])
+    algo = GraphANN.GreedySearch(100; cost_type = GraphANN._Points.cost_type(dataset))
+    start_index = GraphANN.medioid(dataset)
+    start = GraphANN.StartNode(start_index, dataset[start])
 
     ids = GraphANN.searchall(algo, meta, start, queries; num_neighbors = 100)
     recalls = GraphANN.recall(ground_truth, ids)
