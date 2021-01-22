@@ -45,7 +45,8 @@ julia> GraphANN.distance(x, y)
 Distance computation travels through a promotion pipeline to dispatch to the most efficient distance computation for the Euclidean types.
 To motivate this design decision, recent AVX-512 extensions implement the VNNI class of instructions, which allows for very quick distance computation for `Int8/UInt8/Int16` types.
 Furthermore, we would like to allow distance computations to be performed efficiently between mixed types.
-As an example.
+As an example:
+
 ```julia
 julia> using Random; Random.seed!(123)
 julia> a = rand(GraphANN.Euclidean{32,Float32});
@@ -64,5 +65,10 @@ julia> GraphANN.distance(a, c)
 # UInt8 and UInt8
 julia> GraphANN.distance(c, d)
 284372
-
 ```
+
+The bulk of this behavior lives in the [`_Points.simd_type`](@ref) and [`_Points.EagerWrap`](@ref).
+The function `_Points.simd_type` selects the appropriate `SIMD.Vec` type to split the argument tupes into.
+This is then passed to the `_Points.EagerWrap` constructor which partitions and lazily converts `Euclidean` points into the promoted type.
+As an implementation detail, construction of a `_Points.EagerWrap` type should be a no-op.
+

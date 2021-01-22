@@ -1,5 +1,3 @@
-module _Spans
-
 # Spans are simply a pointer-length pair to serve as a light weight, bounds checked access
 # to memory.
 #
@@ -13,7 +11,6 @@ module _Spans
 # 2. Spans will only work for `isbits` types (types that are stored contiguously).
 # This is NOT yet inforced, but if it becomes a problem - this can be enforced by using
 # an inner constructor and checking for the `isbits` property.
-export Span
 
 # By default, Julia pessimizes direct pointer loads because it doesn't assume alignment.
 # VectorizationBase implements the `vload` function, which overrides this behavior and
@@ -82,5 +79,3 @@ Base.IndexStyle(::Type{<:Span}) = Base.IndexLinear()
 #
 # It should be noted that this test is currently broken :(
 broadcast_add(a, b) = a .+ b
-
-end

@@ -1,4 +1,3 @@
-
 # Constants
 const INDEX_BALANCE_FACTOR = 64
 
@@ -162,7 +161,6 @@ end
 
 Base.getindex(x::NextListBuffer, i) = x.nextlists[i]
 Base.setindex!(x::NextListBuffer{T}, v::Vector{T}, i) where {T} = x.nextlists[i] = v
-
 Base.pairs(x::NextListBuffer) = pairs(x.nextlists)
 
 # Remove previous mappings but save the allocated vectors for the next iteration.
@@ -443,8 +441,8 @@ end
             # Perform a greedy search from this node.
             # The visited list will live inside the `greedy` object and will be extracted
             # using the `getvisited` function.
-            datum = data[vertex]
-            search(storage.greedy, meta, StartNode(vertex, datum), datum)
+            point = data[vertex]
+            search(storage.greedy, meta, StartNode(vertex, point), point)
             candidates = getvisited(storage.greedy)
 
             # Run the `RobustPrune` algorithm on the graph starting at this point.

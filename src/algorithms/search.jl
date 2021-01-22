@@ -350,6 +350,7 @@ end
 ##### Callback Implementations
 #####
 
+# Single Threaded
 function latency_callbacks()
     times = UInt64[]
     prequery = () -> push!(times, time_ns())
@@ -357,6 +358,13 @@ function latency_callbacks()
     return (latencies = times, callbacks = GreedyCallbacks(; prequery, postquery))
 end
 
+function visited_callbacks()
+    visited = UInt32[]
+    postdistance = (_, neighbors) -> append!(visited, neighbors)
+    return (visited = visited, callbacks = GreedyCallbacks(; postdistance))
+end
+
+# Multi Threaded
 function latency_mt_callbacks()
     times = ThreadLocal(UInt64[])
     prequery = () -> push!(times[], time_ns())

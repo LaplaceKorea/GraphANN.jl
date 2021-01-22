@@ -76,7 +76,7 @@ include("pm.jl")
 export ThreadPool, ThreadLocal, TaskHandle
 export getall, getpool, allthreads, dynamic_thread, on_threads
 include("threading.jl")
-distribute_distance(x::ThreadLocal) = x[]
+# distribute_distance(x::ThreadLocal) = x[]
 
 #####
 ##### MinMaxHeap
@@ -90,7 +90,7 @@ include("minmax_heap.jl")
 #####
 
 export Span
-include("spans.jl"); import ._Spans: Span
+include("spans.jl")
 
 #####
 ##### Utilities

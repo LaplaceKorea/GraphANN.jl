@@ -1,5 +1,11 @@
 # Points using the euclidean distances metric
-struct Euclidean{N,T}
+"""
+    Euclidean{N,T}
+
+A point in `N` dimensional space using the Euclidean metric.
+Each component has type `T`.
+"""
+struct Euclidean{N,T <: Number}
     vals::SVector{N,T}
 end
 
@@ -8,10 +14,12 @@ unwrap(x::SIMD.Vec) = x
 Base.Tuple(x::Euclidean) = Tuple(unwrap(x))
 
 Euclidean{N,T}() where {N,T} = Euclidean(@SVector zeros(T, N))
-Euclidean{N,T}(vals::NTuple{N,T}) where {N,T} = Euclidean(SVector{N,T}(vals))
+Euclidean{N}(x::T) where {N,T <: Number} = Euclidean{N,T}(@SVector fill(x, N))
+Euclidean{N,T}(vals::NTuple{N,T}) where {N,T <: Number} = Euclidean(SVector{N,T}(vals))
 Euclidean(vals::NTuple{N,T}) where {N,T} = Euclidean{N,T}(vals)
 Euclidean(vec::SIMD.Vec) = Euclidean(Tuple(vec))
 
+Base.:(==)(a::Euclidean{N}, b::Euclidean{N}) where {N} = (a.vals == b.vals)
 function Base.rand(rng::Random.AbstractRNG, ::Random.SamplerType{Euclidean{N,T}}) where {N,T}
     return Euclidean{N,T}(rand(rng, SVector{N,T}))
 end
@@ -19,10 +27,10 @@ end
 Base.zero(::E) where {E <: Euclidean} = zero(E)
 Base.zero(::Type{Euclidean{N,T}}) where {N,T} = Euclidean{N,T}()
 Base.one(::E) where {E <: Euclidean} = one(E)
-Base.one(::Type{Euclidean{N,T}}) where {N,T} = Euclidean{N,T}(ntuple(_ -> one(T), Val(N)))
+Base.one(::Type{Euclidean{N,T}}) where {N,T} = Euclidean{N}(one(T))
 
 Base.sizeof(::Type{Euclidean{N,T}}) where {N,T} = N * sizeof(T)
-Base.sizeof(x::E) where {E <: Euclidean} = sizeof(E)
+Base.sizeof(::E) where {E <: Euclidean} = sizeof(E)
 
 Base.length(::Euclidean{N}) where {N} = N
 Base.length(::Type{<:Euclidean{N}}) where {N} = N
@@ -30,6 +38,7 @@ Base.lastindex(x::Euclidean) = length(x)
 
 Base.eltype(::Euclidean{N,T}) where {N,T} = T
 Base.eltype(::Type{Euclidean{N,T}}) where {N,T} = T
+
 # Need to define transpose for `Euclidean` to that transpose works on arrays of `Euclidean`.
 # This is because `transpose` is recursive.
 Base.transpose(x::Euclidean) = x
@@ -44,9 +53,9 @@ function Base.show(io::IO, x::Euclidean{N,T}) where {N,T}
     print(io, ">")
     return nothing
 end
+
 _Base.zeroas(::Type{T}, ::Type{Euclidean{N,U}}) where {T,N,U} = Euclidean{N,T}()
 _Base.zeroas(::Type{T}, x::E) where {T, E <: Euclidean} = zeroas(T, E)
-
 Base.@propagate_inbounds @inline Base.getindex(x::Euclidean, i) = getindex(x.vals, i)
 
 # Use scalar behavior for broadcasting
@@ -75,13 +84,57 @@ _merge(x) = Tuple(x)
 ##### Eager Conversion
 #####
 
-struct EagerWrap{V <: SIMDType,K,N,T}
-    vectors::NTuple{K,SIMD.Vec{N,T}}
-end
-EagerWrap{V}(x::NTuple{K,SIMD.Vec{N,T}}) where {V,K,N,T} = EagerWrap{V,K,N,T}(x)
+const SIMDType{N,T} = Union{Euclidean{N,T}, SIMD.Vec{N,T}}
 
+# Ideally, the generated code for this should be a no-op, it's just awkward because
+# Julia doesn't really have a "bitcast" function ...
+# This also has the benefit of allowing us to do lazy zero padding if necessary.
+function _cast_impl(f, N::Integer, S::Integer, ::Type{T}) where {T}
+    num_tuples = ceil(Int, N / S)
+    exprs = map(1:num_tuples) do i
+        inds = map(1:S) do j
+            index = (i - 1) * S + j
+            return index <= N ? :(x[$index]) : :(zero($T))
+        end
+        return :($f(($(inds...),)))
+    end
+    return :(($(exprs...),))
+end
+
+@generated function cast(::Type{E}, x::SIMDType{N,T}) where {N, T, S, E <: SIMDType{S,T}}
+    _cast_impl(E, N, S, T)
+end
+
+"""
+    EagerWrap{V <: SIMDType, K,N,T}
+
+Wrapper for tuple of `SIMD.Vec{N,T}` with length `K`.
+When indexing, converts elements to type `V`.
+
+# Examples
+```julia-repl
+julia> using SIMD
+julia> x = rand(GraphANN.Euclidean{12,UInt8})
+Euclidean{12,UInt8} <27, 171, 144, 15, 162, 14, 55, 5, 31, 143, 174, 211>
+
+julia> y = GraphANN._Points.EagerWrap{GraphANN.Euclidean{4,Float32}}(x);
+
+julia> y[1]
+<4 x Float32>[27.0, 171.0, 144.0, 15.0]
+
+julia> y[2]
+<4 x Float32>[162.0, 14.0, 55.0, 5.0]
+```
+"""
+struct EagerWrap{V <: SIMDType,K,N,T}
+    vectors::NTuple{K, SIMD.Vec{N,T}}
+end
+EagerWrap{V}(x::NTuple{K, SIMD.Vec{N,T}}) where {V,K,N,T} = EagerWrap{V,K,N,T}(x)
+
+# Implementation note - even though the `cast` function looks like is should spew out
+# a bunch of garbage, we're depending on LLVM to convert this into a series of bitcasts
+# and ultimately a no-op.
 function EagerWrap{SIMD.Vec{N1,T1}}(x::Euclidean{N2,T2}) where {N1,T1,N2,T2}
-    # Convert `x` into a collection of appropriately sized vectors
     vectors = cast(SIMD.Vec{N1,T2}, x)
     return EagerWrap{SIMD.Vec{N1,T1}}(vectors)
 end
@@ -102,7 +155,7 @@ Base.length(::EagerWrap{V,K}) where {V,K} = K
 ##### SIMD Promotion and Stuff
 #####
 
-# There are sevarl goals to be acomplished by the code below:
+# There are several goals to be acomplished by the code below:
 #
 # - Select the correct type to perform distance computations in.
 #   In other words, provide a promotion mechanism that also allows us to customize promotion
@@ -117,7 +170,6 @@ Base.length(::EagerWrap{V,K}) where {V,K} = K
 #   agressive constant propagation.
 #
 # - Actually perform the distance computation in a manner that allows customization.
-const SIMDType{N,T} = Union{Euclidean{N,T}, SIMD.Vec{N,T}}
 
 # Number of bytes in a 128, 256, and 512 bit vector respectively.
 const VECTOR_BYTES = (16, 32, 64)
@@ -139,6 +191,9 @@ end
 distance_select(::Nothing, ::Nothing, ::Type{A}, ::Type{B}) where {A,B} = promote_type(A, B)
 distance_select(::Type{T}, ::Any, ::Any, ::Any) where {T} = T
 distance_select(::Nothing, ::Type{T}, ::Any, ::Any) where {T} = T
+function find_distance_type(::Type{A}, ::Type{B}) where {A, B}
+    return distance_select(distance_type(A,B), distance_type(B,A), A, B)
+end
 
 # Generic fallback
 distance_type(::Type{A}, ::Type{B}) where {A,B} = nothing
@@ -147,23 +202,52 @@ distance_type(::Type{A}, ::Type{B}) where {A,B} = nothing
 distance_type(::Type{UInt8}, ::Type{UInt8}) = Int16
 distance_type(::Type{UInt8}, ::Type{Int16}) = Int16
 
+"""
+    accum_type(x)
+
+Return the appropriate `SIMD.Vec` type to hold partial results when computing distances.
+"""
 accum_type(::Type{T}) where {T <: SIMD.Vec} = T
 accum_type(::Type{SIMD.Vec{32, Int16}}) = SIMD.Vec{16,Int32}
 
-cost_type(::Type{T}) where {T <: SIMDType} = eltype(accum_type(distance_type(T)))
+"""
+    cost_type(x)
+
+Return the type yielded by distance computations involving `x`.
+"""
+cost_type(::Type{T}) where {T <: SIMDType} = eltype(accum_type(simd_type(T)))
+cost_type(::T) where {T <: SIMDType} = cost_type(T)
+
+function cost_type(::Type{A}, ::Type{B}) where {A <: SIMDType, B <: SIMDType}
+    return eltype(accum_type(simd_type(T)))
+end
+cost_type(::A, ::B) where {A <: SIMDType, B <: SIMDType} = cost_type(A, B)
 cost_type(::AbstractVector{T}) where {T <: SIMDType} = cost_type(T)
 
-simd_type(::A, ::B) where {A <: SIMDType, B <: SIMDType} = simd_type(A, B)
-simd_type(::Type{T}) where {T} = distance_select(T, T, T, T)
+"""
+    simd_type(vector_type1, vector_type2)
+
+Return the SIMD vector type (`SIMD.Vec`) to perform distance computations for the given types.
+The default behavior is to use Julia's normal promotion for the element type of the vector arguments.
+However, this may be customized by extending `distance_type`.
+"""
 function simd_type(::Type{<:SIMDType{N,T1}}, ::Type{<:SIMDType{N,T2}}) where {N,T1,T2}
-    T = distance_select(distance_type(T1, T2), distance_type(T2, T1), T1, T2)
+    T = find_distance_type(T1, T2)
     return SIMD.Vec{vector_width(T, Val(N)), T}
 end
+simd_type(::A, ::B) where {A <: SIMDType, B <: SIMDType} = simd_type(A, B)
+simd_type(::Type{T}) where {T} = simd_type(T, T)
 
 #####
 ##### Distance Computation
 #####
 
+"""
+    distance(a::Euclidean, b::Euclidean)
+
+Return the euclidean distance between `a` and `b`.
+Return type can be queried by `cost_type(a, b)`.
+"""
 function _Base.distance(a::A, b::B) where {A <: Euclidean, B <: Euclidean}
     T = simd_type(A, B)
     return distance(EagerWrap{T}(a), EagerWrap{T}(b))
@@ -276,183 +360,6 @@ else
 end
 
 #####
-##### Lazy Conversion
-#####
-
-struct LazyWrap{V <: SIMDType, E <: SIMDType}
-    val::E
-end
-
-LazyWrap{V}(val::E) where {V,E} = LazyWrap{V,E}(val)
-
-Base.length(x::LazyWrap{V,E}) where {V,E} = div(length(E), length(V))
-
-function Base.getindex(x::LazyWrap{V}, i) where {N,T,V <: SIMDType{N,T}}
-    return convert(V, _getindex(x, N * (i - 1)))
-end
-
-@generated function _getindex(x::LazyWrap{V}, i) where {N, T, V <: SIMDType{N,T}}
-    inds = [:(@inbounds(v[i + $j])) for j in 1:N]
-    return quote
-        v = _Points.unwrap(x.val)
-        V(($(inds...),))
-    end
-end
-
-#####
-##### Lazy Conversion for Arrays
-#####
-
-struct LazyArrayWrap{V <: SIMDType, N, T} <: AbstractMatrix{V}
-    parent::Vector{Euclidean{N,T}}
-end
-
-Base.size(x::LazyArrayWrap{V,N}) where {V,N} = (div(N, length(V)), length(x.parent))
-Base.parent(x::LazyArrayWrap) = x.parent
-
-function LazyArrayWrap{V}(x::Vector{Euclidean{N,T}}) where {V <: SIMDType, N, T}
-    return LazyArrayWrap{V,N,T}(x)
-end
-
-function Base.getindex(x::LazyArrayWrap{V,N,T}, I::Vararg{Int, 2}) where {NV, V <: SIMDType{NV}, N, T}
-    @boundscheck checkbounds(x, I...)
-    @unpack parent = x
-    ptr = Ptr{Euclidean{NV,T}}(pointer(parent, I[2])) + (I[1] - 1) * sizeof(SIMD.Vec{NV,T})
-    return convert(V, unsafe_load(ptr))
-end
-
-#####
-##### Fancy Bitcast
-#####
-
-# Ideally, the generated code for this should be a no-op, it's just awkward because
-# Julia doesn't really have a "bitcast" function ...
-# This also has the benefit of allowing us to do lazy zero padding if necessary.
-function _cast_impl(f, N::Integer, S::Integer, ::Type{T}) where {T}
-    num_tuples = ceil(Int, N / S)
-    exprs = map(1:num_tuples) do i
-        inds = map(1:S) do j
-            index = (i - 1) * S + j
-            return index <= N ? :(x[$index]) : :(zero($T))
-        end
-        return :($f(($(inds...),)))
-    end
-
-    return :(($(exprs...),))
-end
-
-@generated function cast(::Type{Euclidean{S,T}}, x::SIMDType{N,T}) where {S,T,N}
-    _cast_impl(Euclidean{S,T}, N, S, T)
-end
-
-@generated function cast(::Type{SIMD.Vec{S,T}}, x::SIMDType{N,T}) where {S,T,N}
-    _cast_impl(SIMD.Vec{S,T}, N, S, T)
-end
-
-
-
-# How do we pack these items.
-# Default definition.
-packed_type(::Type{<:Euclidean{<:Any,T}}) where {T} = SIMD.Vec{div(64,sizeof(T)),T}
-
-# specializations
-packed_type(::Type{<:Euclidean{<:Any,UInt8}}) = SIMD.Vec{32,UInt8}
-
-#####
-##### Packed SIMD
-#####
-
-# Pack `K` Euclideans into a single `Vec`
-struct Packed{K, E <: Euclidean, V <: SIMD.Vec}
-    repr::V
-
-    # Inner constructor that only accepts packing if `E` and `V` have the same eltype.
-    function Packed{K,E,V}(repr::V) where {K, T, E <: Euclidean{<:Any,T}, V <: SIMD.Vec{<:Any,T}}
-        return new{K,E,V}(repr)
-    end
-end
-Packed(e::Euclidean...) = Packed(e)
-function Packed(e::NTuple{K,Euclidean{N,T}}) where {K,N,T}
-    V = SIMD.Vec{K * N, T}
-    return Packed{K, Euclidean{N,T}, V}(V(_merge(e...)))
-end
-
-Base.length(::Type{<:Packed{K}}) where {K} = K
-Base.length(x::P) where {P <: Packed} = length(P)
-distance_type(::Type{<:Packed{<:Any,<:Any,V}}) where {V} = distance_type(V)
-Base.transpose(x::Packed) = x
-
-unwrap(x::Packed) = x.repr
-function _Base.distance(A::P, B::P) where {K, E, V, P <: Packed{K, E, V}}
-    Base.@_inline_meta
-    # Figure out the correct promotion type
-    promote_type = distance_type(P)
-    a = convert(promote_type, unwrap(A))
-    b = convert(promote_type, unwrap(B))
-    accumulator = square(a - b)
-    return squish(Val(K), accumulator)
-end
-
-# Convenience setter
-set!(A::AbstractArray{<:Packed}, v, I::CartesianIndex) = set!(A, v, Tuple(I))
-set!(A::AbstractArray{<:Packed}, v, I::Integer...) = set!(A, v, I)
-Base.@propagate_inbounds function set!(
-    A::AbstractArray{Packed{K,E,V},N1},
-    v::E,
-    I::NTuple{N2,Int}
-) where {K,E,V,N1,N2}
-    @assert N2 == N1 + 1
-    # Destructure tuple
-    offset = I[1]
-    i = LinearIndices(A)[CartesianIndex(Base.tail(I)...)]
-    ptr = pointer(A, i) + (offset-1) * sizeof(E)
-    unsafe_store!(Ptr{E}(ptr), v)
-end
-
-Base.get(A::AbstractArray{<:Packed}, I::CartesianIndex) = get(A, Tuple(I))
-Base.get(A::AbstractArray{<:Packed}, I::Integer...) = get(A, I)
-Base.@propagate_inbounds function Base.get(
-    A::AbstractArray{Packed{K,E,V},N1},
-    I::NTuple{N2,Int}
-) where {K,E,V,N1,N2}
-    @assert N2 == N1 + 1
-    # Destructure tuple
-    offset = I[1]
-    i = LinearIndices(A)[CartesianIndex(Base.tail(I)...)]
-    ptr = pointer(A, i) + (offset-1) * sizeof(E)
-    return unsafe_load(Ptr{E}(ptr))
-end
-
-#####
-##### Cache Line Reduction
-#####
-
-@generated function squish(::Val{N}, cacheline::SIMD.Vec{S,T}) where {N,S,T}
-    # Optimization - if we're just going to sum across the whole vector, then just do
-    # that to avoid any kind of expensive reduction.
-    # In practice, this is much faster.
-    if N == 1
-        return quote
-            Base.@_inline_meta
-            SIMD.Vec(_sum(cacheline))
-        end
-    end
-
-    # Otherwise, build up a reduction tree.
-    step = div(S,N)
-    exprs = map(1:step) do i
-        tup = valtuple(i, step, S)
-        :(SIMD.shufflevector(cacheline, Val($tup)))
-    end
-    return quote
-        Base.@_inline_meta
-        reduce(+, ($(exprs...),))
-    end
-end
-
-valtuple(start, step, stop) = tuple((start - 1):step:(stop - 1)...)
-
-#####
 ##### Vector Loading Functions
 #####
 
@@ -460,7 +367,8 @@ _IO.vecs_read_type(::Type{Euclidean{N,T}}) where {N,T} = T
 
 function _IO.addto!(v::Vector{Euclidean{N,T}}, index, buf::AbstractVector{T}) where {N,T}
     length(buf) == N || error("Lenght of buffer is incorrect!")
-    v[index] = Euclidean{N,T}(ntuple(i -> buf[i], Val(N)))
+    ptr = Ptr{T}(pointer(v, index))
+    unsafe_copyto!(ptr, pointer(buf), N)
     return 1
 end
 

@@ -15,6 +15,12 @@ cdiv(a::T, b::T) where {T <: Integer} = one(T) + div(a - one(T), b)
 ##### Neighbor
 #####
 
+# NOTE: Don't define conversion functions like:
+# `convert(Neighbor{Float32}, ::Neighbor{Int32})`.
+# If this function gets called, it means some data structure wasn't initialized right.
+# We don't want to find this because we don't want this kind of implicit conversion to
+# happen since it will usually result in less than optimal code.
+
 """
     Neighbor
 
