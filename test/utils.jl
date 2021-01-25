@@ -1,28 +1,42 @@
 @testset "Testing Neighbor" begin
     Neighbor = GraphANN.Neighbor
 
-    a = Neighbor(1, 1.0)
-    b = Neighbor(1, 2.0)
+    # Test constructor errors.
+    # If the type of the `id` field is not provided, we shouldn't be able to construct a
+    # `Neighbor` object.
+    # This keeps the id type explicit.
+    @test_throws MethodError Neighbor(1, 1.0)
+    @test GraphANN.idtype(10) == Int64
+    @test GraphANN.idtype(UInt32) == UInt32
+    @test GraphANN.idtype(UInt32(100)) == UInt32
+
+    @test GraphANN.costtype(Float32) == Float32
+    @test GraphANN.costtype(Float64(1.0)) == Float64
+    @test GraphANN.costtype(UInt8, Int16) == Int16
+    @test GraphANN.costtype(Int64(10), Float32(100)) == Float32
+
+    x = [1,2,3]
+    @test isa(x, Vector{Int64})
+    @test GraphANN.costtype(x) == Int64
+
+    a = Neighbor{Int64}(1, 1.0)
+    b = Neighbor{Int64}(1, 2.0)
     @test GraphANN.getid(a) == 1
     @test GraphANN.getid(b) == 1
     @test GraphANN.getdistance(a) == 1.0
     @test GraphANN.getdistance(b) == 2.0
 
     @test GraphANN.idequal(a, b)
-    c = Neighbor(2, 5.0)
+    c = Neighbor{Int64}(2, 5.0)
     @test GraphANN.idequal(a, c) == false
 
     # Ordering
-    @test Neighbor(1, 1.0) < Neighbor(2, 2.0)
-    @test Neighbor(10, 5.0) > Neighbor(40, 1.2)
+    @test Neighbor{Int64}(1, 1.0) < Neighbor{Int64}(2, 2.0)
+    @test Neighbor{Int64}(10, 5.0) > Neighbor{Int64}(40, 1.2)
 
     # Total Ordering
-    @test Neighbor(1, 1.0) < Neighbor(2, 1.0)
-    @test Neighbor(2, 1.0) > Neighbor(1, 1.0)
-
-    # Getting the right neighbor type
-    @test GraphANN._Base.neighbortype(Float32, Int8) == Float32
-    @test GraphANN._Base.neighbortype(Int16, Int64) == Int64
+    @test Neighbor{Int64}(1, 1.0) < Neighbor{Int64}(2, 1.0)
+    @test Neighbor{Int64}(2, 1.0) > Neighbor{Int64}(1, 1.0)
 end
 
 @testset "Testing RobinSet" begin

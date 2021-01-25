@@ -26,21 +26,28 @@ cdiv(a::T, b::T) where {T <: Integer} = one(T) + div(a - one(T), b)
 
 Lightweight struct for containing an ID/distance pair with a total ordering.
 """
-struct Neighbor{D}
-    id::UInt32
+struct Neighbor{T,D}
+    id::T
     distance::D
 
     # Inner conversion constructors
-    Neighbor(id::Integer, distance::D) where {D} = new{D}(unsafe_trunc(UInt32, id), distance)
+    # Require explicitly calling out integer type.
+    Neighbor{T}(id::Integer, distance::D) where {T,D} = new{T,D}(T(id), distance)
+    Neighbor{T,D}(id::Integer, distance::D) where {T,D} = new{T,D}(T(id), distance)
 end
 
-"""
-    cost_type(x)
+# Since `Neighbor` contains two generic fields (id and distance), we need to provide hooks
+# to allow users of `Neighbor` to preallocate types with the correct parameters.
+# These are `idtype` and `costtype` respectively.
+idtype(::Type{T}) where {T} = T
+idtype(::T) where {T} = idtype(T)
 
-Return the type yielded by distance computations involving `x`.
-"""
-cost_type(::Type{A}, ::Type{B}) where {A, B} = promote_type(A, B)
-neighbortype(::Type{A}, ::Type{B}) where {A, B} = Neighbor{cost_type(A, B)}
+# For convenience, define two-arg and one-arg versions to allow for promotion.
+costtype(::Type{A}) where {A} = A
+costtype(::Type{A}, ::Type{B}) where {A, B} = promote_type(A, B)
+costtype(::A) where {A} = costtype(A)
+costtype(::A, ::B) where {A, B} = costtype(A, B)
+costtype(::AbstractVector{T}) where {T} = costtype(T)
 
 # Define `getid` for integers as well so we can use `getid` in all places where we need
 # an id without fear.

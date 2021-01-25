@@ -39,7 +39,7 @@ struct NoPrefetching end
 
 # Use the `GreedySearch` type to hold parameters and intermediate datastructures
 # used to control the greedy search.
-mutable struct GreedySearch{T <: AbstractSet, P, D}
+mutable struct GreedySearch{T <: AbstractSet, P, I <: Integer, D}
     search_list_size::Int
 
     # Pre-allocated buffer for the search list
@@ -52,20 +52,31 @@ mutable struct GreedySearch{T <: AbstractSet, P, D}
     # When popping off neighbors to get the number of elements in `best` under
     # `search_list_size`, we will also need to pop items off `queue` IF there
     # is a match.
-    best::BinaryMinMaxHeap{Neighbor{D}}
-    best_unvisited::BinaryMinMaxHeap{Neighbor{D}}
+    best::BinaryMinMaxHeap{Neighbor{I,D}}
+    best_unvisited::BinaryMinMaxHeap{Neighbor{I,D}}
     visited::T
     prefetch_queue::P
+end
+
+_Base.idtype(::GreedySearch{<:Any,<:Any,I}) where {I} = I
+_Base.costtype(::GreedySearch{<:Any,<:Any,<:Any,D}) where {D} = D
+function _Base.Neighbor(x::GreedySearch, id::Integer, distance)
+    I, D = idtype(x), costtype(x)
+    # Use `unsafe_trunc` to be slightly faster.
+    # In the body of the search routine, we shouldn't see any actual values that will
+    # cause the undefined behavior of `unsafe_trunc`.
+    return Neighbor{I, D}(unsafe_trunc(I, id), distance)
 end
 
 function GreedySearch(
         search_list_size;
         prefetch_queue = nothing,
-        cost_type::Type{D} = Float32
-   ) where {D}
-    best = BinaryMinMaxHeap{Neighbor{D}}()
-    best_unvisited = BinaryMinMaxHeap{Neighbor{D}}()
-    visited = RobinSet{UInt32}()
+        idtype::Type{I} = UInt32,
+        costtype::Type{D} = Float32,
+   ) where {I,D}
+    best = BinaryMinMaxHeap{Neighbor{I,D}}()
+    best_unvisited = BinaryMinMaxHeap{Neighbor{I,D}}()
+    visited = RobinSet{I}()
     return GreedySearch(
         search_list_size,
         best,
@@ -189,7 +200,7 @@ function _Base.search(
 
     # Destructure argument
     @unpack graph, data = meta
-    pushcandidate!(algo, Neighbor(start.index, metric(query, start.value)))
+    pushcandidate!(algo, Neighbor(algo, start.index, metric(query, start.value)))
     while !done(algo)
         p = getid(unsafe_peek(algo))
         neighbors = LightGraphs.outneighbors(graph, p)
@@ -216,7 +227,7 @@ function _Base.search(
 
             ## only bother to add if it's better than the worst currently tracked.
             if d < algmax || !isfull(algo)
-                maybe_pushcandidate!(algo, Neighbor(v, d))
+                maybe_pushcandidate!(algo, Neighbor(algo, v, d))
             end
         end
 
@@ -239,7 +250,7 @@ function _Base.search(
 
     # Destructure argument
     @unpack graph, data = meta
-    pushcandidate!(algo, Neighbor(start.index, metric(query, start.value)))
+    pushcandidate!(algo, Neighbor(algo, start.index, metric(query, start.value)))
     while !done(algo)
         p = getid(unsafe_peek(algo))
         neighbors = LightGraphs.outneighbors(graph, p)
@@ -266,7 +277,7 @@ function _Base.search(
 
             ## only bother to add if it's better than the worst currently tracked.
             if d < getdistance(maximum(algo)) || !isfull(algo)
-                pushcandidate!(algo, Neighbor(v, d))
+                pushcandidate!(algo, Neighbor(algo, v, d))
             end
         end
 

@@ -121,7 +121,7 @@ end
         T = eltype(eltype(data))
         centroid_type = Euclidean{partition_size, T}
         packed_type = _packed_type(centroid_type)
-        cost_type = GraphANN._Points.cost_type(eltype(data))
+        costtype = GraphANN.costtype(eltype(data))
 
         # TODO: There has to be a better way of getting this type ...
 

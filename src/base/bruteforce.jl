@@ -31,11 +31,13 @@ function bruteforce_search(
     num_neighbors::Int = 100;
     groupsize = 32,
     savefile = nothing,
+    idtype::Type{T} = UInt32,
     metric::F = distance,
-) where {A,B,F}
+) where {A,B,T,F}
     # Allocate max heaps for each
     # One for each column in the queries matrix
-    _heaps = [BoundedMaxHeap{neighbortype(A, B)}(num_neighbors) for _ in 1:groupsize]
+    D = costtype(A, B)
+    _heaps = [BoundedMaxHeap{Neighbor{T,D}}(num_neighbors) for _ in 1:groupsize]
     tls = ThreadLocal(_heaps)
 
     num_queries = length(queries)
@@ -43,7 +45,7 @@ function bruteforce_search(
 
     # Pre-allocate ground-truth array
     # TODO: Parameterize integer type?
-    gt = Array{UInt32,2}(undef, num_neighbors, num_queries)
+    gt = Array{T,2}(undef, num_neighbors, num_queries)
 
     # Batch the query range so each thread works on a chunk of queries at a time.
     # The dynamic load balancer will give one batch at a time to each worker.
@@ -58,7 +60,7 @@ function bruteforce_search(
                 dist = metric(query, base)
 
                 # Need to convert from 1 based indexing to 0 based indexing...
-                push!(heaps[heap_num], Neighbor(base_id - 1, dist))
+                push!(heaps[heap_num], Neighbor{T}(base_id - 1, dist))
             end
         end
 

@@ -211,18 +211,14 @@ accum_type(::Type{T}) where {T <: SIMD.Vec} = T
 accum_type(::Type{SIMD.Vec{32, Int16}}) = SIMD.Vec{16,Int32}
 
 """
-    cost_type(x)
+    costtype(x)
 
 Return the type yielded by distance computations involving `x`.
 """
-_Base.cost_type(::Type{T}) where {T <: SIMDType} = eltype(accum_type(simd_type(T)))
-_Base.cost_type(::T) where {T <: SIMDType} = cost_type(T)
-
-function _Base.cost_type(::Type{A}, ::Type{B}) where {A <: SIMDType, B <: SIMDType}
+_Base.costtype(::Type{T}) where {T <: SIMDType} = eltype(accum_type(simd_type(T)))
+function _Base.costtype(::Type{A}, ::Type{B}) where {A <: SIMDType, B <: SIMDType}
     return eltype(accum_type(simd_type(A, B)))
 end
-_Base.cost_type(::A, ::B) where {A <: SIMDType, B <: SIMDType} = cost_type(A, B)
-_Base.cost_type(::AbstractVector{T}) where {T <: SIMDType} = cost_type(T)
 
 """
     simd_type(vector_type1, vector_type2)
@@ -246,7 +242,7 @@ simd_type(::Type{T}) where {T} = simd_type(T, T)
     distance(a::Euclidean, b::Euclidean)
 
 Return the euclidean distance between `a` and `b`.
-Return type can be queried by `cost_type(a, b)`.
+Return type can be queried by `costtype(a, b)`.
 """
 function _Base.distance(a::A, b::B) where {A <: Euclidean, B <: Euclidean}
     T = simd_type(A, B)

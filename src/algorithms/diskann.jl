@@ -224,7 +224,7 @@ function neighbor_updates!(
     # Use lazy functions to efficientaly initialize the Pruner object
     vertex_data = data[vertex]
     initialize!(
-        u -> Neighbor(u, distance(vertex_data, @inbounds data[u])),
+        u -> Neighbor(meta, u, distance(vertex_data, @inbounds data[u])),
         !isequal(vertex),
         pruner,
         candidates,
@@ -379,8 +379,8 @@ function generate_index(
 
     meta = MetaGraph(graph, data)
     tls = ThreadLocal(;
-        greedy = GreedySearch(window_size; cost_type = cost_type(data)),
-        pruner = Pruner{Neighbor{cost_type(data)}}(),
+        greedy = GreedySearch(window_size; idtype = eltype(graph), costtype = costtype(data)),
+        pruner = Pruner{Neighbor{eltype(graph),costtype(data)}}(),
         nextlists = NextListBuffer{eltype(graph)}(
             target_degree,
             2 * ceil(Int, batchsize / Threads.nthreads()),

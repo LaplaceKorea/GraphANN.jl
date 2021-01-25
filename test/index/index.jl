@@ -77,9 +77,9 @@ function test_index(
     ground_truth = GraphANN.load_vecs(groundtruth_path) .+ UInt32(1)
 
     @test eltype(ground_truth) == UInt32
-    algo = GraphANN.GreedySearch(100; cost_type = GraphANN._Points.cost_type(dataset))
+    algo = GraphANN.GreedySearch(100; costtype = GraphANN.costtype(dataset), idtype = UInt32)
     start_index = GraphANN.medioid(dataset)
-    start = GraphANN.StartNode(start_index, dataset[start])
+    start = GraphANN.StartNode(start_index, dataset[start_index])
 
     ids = GraphANN.searchall(algo, meta, start, queries; num_neighbors = 100)
     recalls = GraphANN.recall(ground_truth, ids)

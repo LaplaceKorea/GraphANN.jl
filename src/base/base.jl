@@ -46,22 +46,6 @@ function search end
 function searchall end
 
 #####
-##### Generic MetaGraph
-#####
-
-export MetaGraph
-
-"""
-    MetaGraph{G,D}
-
-Grouping of a graph of type `G` and corresponding vertex data points of type `D`.
-"""
-struct MetaGraph{G,D}
-    graph::G
-    data::D
-end
-
-#####
 ##### Allocators
 #####
 
@@ -76,7 +60,6 @@ include("pm.jl")
 export ThreadPool, ThreadLocal, TaskHandle
 export getall, getpool, allthreads, dynamic_thread, on_threads
 include("threading.jl")
-# distribute_distance(x::ThreadLocal) = x[]
 
 #####
 ##### MinMaxHeap
@@ -97,7 +80,7 @@ include("spans.jl")
 #####
 
 export safe_maximum, donothing, printlnstyled, zero!, typemax!, cdiv, Map
-export Neighbor, getid, getdistance, idequal, cost_type, neighbortype
+export Neighbor, getid, getdistance, idequal, idtype, costtype
 export RobinSet
 export zeroas, medioid, nearest_neighbor
 export recall
@@ -112,5 +95,23 @@ include("utils.jl")
 
 export bruteforce_search
 include("bruteforce.jl")
+
+#####
+##### Generic MetaGraph
+#####
+
+export MetaGraph
+
+"""
+    MetaGraph{G,D}
+
+Grouping of a graph of type `G` and corresponding vertex data points of type `D`.
+"""
+struct MetaGraph{G,D}
+    graph::G
+    data::D
+end
+
+Neighbor(meta::MetaGraph, id, distance) = Neighbor{eltype(meta.graph)}(id, distance)
 
 end
