@@ -1,43 +1,4 @@
 #####
-##### Bounded Max Heap
-#####
-
-# TODO: Saving is currently broken because the `save_vecs` function is stored in _IO instead
-# of _Base.
-
-struct BoundedMaxHeap{H}
-    heap::H
-    bound::Int
-end
-
-function BoundedMaxHeap{T}(bound::Int) where {T}
-    return BoundedMaxHeap(
-        DataStructures.BinaryMaxHeap{T}(),
-        bound,
-    )
-end
-
-"""
-    push!(H::BoundedMaxHeap, i)
-
-Add `i` to `H` if (1) `H` is not full or (2) `i` is less than maximal element in `H`.
-After calling `push!`, the length of `H` will be less than or equal to its established
-bound.
-"""
-function Base.push!(H::BoundedMaxHeap, i)
-    if (length(H.heap) < H.bound || i < first(H.heap))
-        push!(H.heap, i)
-
-        # Wrap in a "while" loop to handle the case where extra things got added somehow.
-        # (i.e., someone used this type incorrectly)
-        while length(H.heap) > H.bound
-            pop!(H.heap)
-        end
-    end
-    return nothing
-end
-
-#####
 ##### BruteForce
 #####
 
@@ -65,16 +26,16 @@ it too large will hurt performance in the cache.
 The default is `groupsize = 32`.
 """
 function bruteforce_search(
-    queries::AbstractVector,
-    dataset::AbstractVector,
+    queries::AbstractVector{A},
+    dataset::AbstractVector{B},
     num_neighbors::Int = 100;
     groupsize = 32,
     savefile = nothing,
     metric::F = distance,
-) where {F}
+) where {A,B,F}
     # Allocate max heaps for each
     # One for each column in the queries matrix
-    _heaps = [BoundedMaxHeap{Neighbor}(num_neighbors) for _ in 1:groupsize]
+    _heaps = [BoundedMaxHeap{neighbortype(A, B)}(num_neighbors) for _ in 1:groupsize]
     tls = ThreadLocal(_heaps)
 
     num_queries = length(queries)

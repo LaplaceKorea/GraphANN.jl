@@ -215,14 +215,14 @@ accum_type(::Type{SIMD.Vec{32, Int16}}) = SIMD.Vec{16,Int32}
 
 Return the type yielded by distance computations involving `x`.
 """
-cost_type(::Type{T}) where {T <: SIMDType} = eltype(accum_type(simd_type(T)))
-cost_type(::T) where {T <: SIMDType} = cost_type(T)
+_Base.cost_type(::Type{T}) where {T <: SIMDType} = eltype(accum_type(simd_type(T)))
+_Base.cost_type(::T) where {T <: SIMDType} = cost_type(T)
 
-function cost_type(::Type{A}, ::Type{B}) where {A <: SIMDType, B <: SIMDType}
-    return eltype(accum_type(simd_type(T)))
+function _Base.cost_type(::Type{A}, ::Type{B}) where {A <: SIMDType, B <: SIMDType}
+    return eltype(accum_type(simd_type(A, B)))
 end
-cost_type(::A, ::B) where {A <: SIMDType, B <: SIMDType} = cost_type(A, B)
-cost_type(::AbstractVector{T}) where {T <: SIMDType} = cost_type(T)
+_Base.cost_type(::A, ::B) where {A <: SIMDType, B <: SIMDType} = cost_type(A, B)
+_Base.cost_type(::AbstractVector{T}) where {T <: SIMDType} = cost_type(T)
 
 """
     simd_type(vector_type1, vector_type2)

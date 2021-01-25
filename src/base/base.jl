@@ -97,12 +97,13 @@ include("spans.jl")
 #####
 
 export safe_maximum, donothing, printlnstyled, zero!, typemax!, cdiv, Map
-export Neighbor, getid, getdistance, idequal
+export Neighbor, getid, getdistance, idequal, cost_type, neighbortype
 export RobinSet
 export zeroas, medioid, nearest_neighbor
 export recall
 export prefetch, prefetch_llc, unsafe_prefetch
 export BatchedRange, batched
+export BoundedMaxHeap
 include("utils.jl")
 
 #####

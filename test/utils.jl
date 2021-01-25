@@ -19,6 +19,10 @@
     # Total Ordering
     @test Neighbor(1, 1.0) < Neighbor(2, 1.0)
     @test Neighbor(2, 1.0) > Neighbor(1, 1.0)
+
+    # Getting the right neighbor type
+    @test GraphANN._Base.neighbortype(Float32, Int8) == Float32
+    @test GraphANN._Base.neighbortype(Int16, Int64) == Int64
 end
 
 @testset "Testing RobinSet" begin

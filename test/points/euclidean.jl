@@ -178,6 +178,10 @@ end
     @test simd_type(Euclidean{4, Float32}, Euclidean{4, Float32}) == SIMD.Vec{4, Float32}
     @inferred simd_type(Euclidean{4, Float32}, Euclidean{4, Float32})
 
+    # Neighbor Types
+    @test GraphANN._Base.neighbortype(F32, U8) = GraphANN.Neighbor{Float32}
+    @test GraphANN._Base.neighbortype(U8, U8) = GraphANN.Neighbor{Int32}
+
     # # Does LazyWrap also work?
     # a, b, c, d = ntuple(_ -> ntuple(_ -> rand(UInt8), 32), 4)
 

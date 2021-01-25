@@ -34,9 +34,18 @@ struct Neighbor{D}
     Neighbor(id::Integer, distance::D) where {D} = new{D}(unsafe_trunc(UInt32, id), distance)
 end
 
+"""
+    cost_type(x)
+
+Return the type yielded by distance computations involving `x`.
+"""
+cost_type(::Type{A}, ::Type{B}) where {A, B} = promote_type(A, B)
+neighbortype(::Type{A}, ::Type{B}) where {A, B} = Neighbor{cost_type(A, B)}
+
+# Define `getid` for integers as well so we can use `getid` in all places where we need
+# an id without fear.
 getid(x::Integer) = x
 getid(x::Neighbor) = x.id
-
 getdistance(x::Neighbor) = x.distance
 
 idequal(a::Neighbor, b::Neighbor) = (getid(a) == getid(b))
@@ -225,15 +234,6 @@ else
     end
 end
 
-function unsafe_prefetch(x::AbstractVector{T}, i, len) where {T}
-    # Compute the number of cache lines accessed.
-    num_cache_lines = ceil(Int, len * sizeof(T) / 64)
-    ptr = pointer(x, i)
-    for j in 0:(num_cache_lines - 1)
-        prefetch(ptr + 64 * j)
-    end
-end
-
 function prefetch(A::AbstractVector{T}, i, f::F = _Base.prefetch) where {T,F}
     # Need to prefetch the entire vector
     # Compute how many cache lines are needed.
@@ -290,4 +290,40 @@ macro ttime(expr)
             $expr
         end
     end
+end
+
+#####
+##### Bounded Max Heap
+#####
+
+struct BoundedMaxHeap{H}
+    heap::H
+    bound::Int
+end
+
+function BoundedMaxHeap{T}(bound::Int) where {T}
+    return BoundedMaxHeap(
+        DataStructures.BinaryMaxHeap{T}(),
+        bound,
+    )
+end
+
+"""
+    push!(H::BoundedMaxHeap, i)
+
+Add `i` to `H` if (1) `H` is not full or (2) `i` is less than maximal element in `H`.
+After calling `push!`, the length of `H` will be less than or equal to its established
+bound.
+"""
+function Base.push!(H::BoundedMaxHeap, i)
+    if (length(H.heap) < H.bound || i < first(H.heap))
+        push!(H.heap, i)
+
+        # Wrap in a "while" loop to handle the case where extra things got added somehow.
+        # (i.e., someone used this type incorrectly)
+        while length(H.heap) > H.bound
+            pop!(H.heap)
+        end
+    end
+    return nothing
 end

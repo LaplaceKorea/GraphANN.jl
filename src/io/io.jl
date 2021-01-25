@@ -6,6 +6,7 @@ export load_vecs, save_vecs
 # local deps
 import .._Base: MetaGraph, stdallocator
 import .._Graphs: UniDirectedGraph
+import .._Trees: BKTNode, BKTree
 
 # deps
 import LightGraphs

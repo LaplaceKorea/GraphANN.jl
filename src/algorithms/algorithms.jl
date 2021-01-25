@@ -9,8 +9,6 @@ using .._Graphs
 using .._Prefetcher
 using .._Quantization
 
-import .._Points: cost_type
-
 # deps
 import LightGraphs
 import ProgressMeter

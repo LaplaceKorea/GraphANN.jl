@@ -91,28 +91,25 @@ end
 ##### Tree Readers
 #####
 
-# Note - this should shadow the `BKTNode` type in the C++ code, which uses `Int32/UInt32`
-# for the internal fields.
-#
-# Apparently, leaf nodes use Int32(-1) / typemax(UInt32) to encode the child nodes.
-struct BKTNode{T <: Integer}
-    center::T
-    childstart::T
-    childend::T
-end
+sentinel_value(::Type{T}) where {T <: Unsigned} = typemax(T)
+sentinel_value(::Type{T}) where {T <: Signed} = -(one(T))
+sentinel_value(x::T) where {T <: Integer} = sentinel_value(T)
 
-maybeincrement(x::T) where {T <: Signed} = (x == -1) ? x : (x + one(T))
-maybeincrement(x::T) where {T <: Unsigned} = (x == typemax(T)) ? x : (x + one(T))
+maybeadjust(x::Signed) = (x == sentinel_value(x)) ? zero(x) : x
+maybeadjust(x::Unsigned) = (x == sentinel_value(x)) ? zero(x) : x
+maybeincrement(x::Signed) = (x == sentinel_value(x)) ? zero(x) : (x + one(x))
+maybeincrement(x::Unsigned) = (x == sentinel_value(x)) ? zero(x) : (x + one(x))
+issentinel(x::BKTNode) = iszero(x.id)
 
-# Nodes get loaded with index-0 indices.
+# Nodes get loaded with index-0 indices for the point ids.
 # This is a helper function to convert everything to index-1
-# Need to be careful and treat the all-ones pattern as a special sentinel - hence the
-# `maybeincrement` function defined aboce.
+# However, the index ranges for the child nodes work fine if we take the very first node
+# as the root.
 function increment(x::BKTNode{T}) where {T}
     return BKTNode(
-        maybeincrement(x.center),
-        maybeincrement(x.childstart),
-        maybeincrement(x.childend),
+        maybeincrement(x.id),
+        maybeadjust(x.childstart),
+        maybeadjust(x.childend),
     )
 end
 
@@ -138,14 +135,19 @@ function load_bktree(io::IO)
     tree_start_indices = Int.(tree_start_indices) .+ 1
 
     # Number of BKTNodes in the
+    # We first read the root node which seems to be special.
     number_of_nodes = read(io, UInt32)
-    roots = Vector{BKTNode{Int32}}(undef, number_of_nodes)
-    read!(io, roots)
-    roots .= increment.(roots)
+    root = read(io, BKTNode{Int32})
+    nodes = Vector{BKTNode{Int32}}(undef, number_of_nodes - 1)
+    read!(io, nodes)
+    nodes .= increment.(nodes)
 
     if !eof(io)
         error("Something went wrong when loading BKTree. End of file not reached!")
     end
-    return (; number_of_trees, tree_start_indices, roots)
+
+    # TODO: remove sentinel nodes that show up at the end of the file ...
+    tree = BKTree(root, nodes)
+    return (; number_of_trees, tree_start_indices, tree)
 end
 
