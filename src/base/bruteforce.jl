@@ -32,11 +32,11 @@ function bruteforce_search(
     groupsize = 32,
     savefile = nothing,
     idtype::Type{T} = UInt32,
+    costtype::Type{D} = costtype(A, B),
     metric::F = distance,
-) where {A,B,T,F}
+) where {A,B,T,D,F}
     # Allocate max heaps for each
     # One for each column in the queries matrix
-    D = costtype(A, B)
     _heaps = [BoundedMaxHeap{Neighbor{T,D}}(num_neighbors) for _ in 1:groupsize]
     tls = ThreadLocal(_heaps)
 

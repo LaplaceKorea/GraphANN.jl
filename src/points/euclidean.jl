@@ -24,6 +24,8 @@ function Base.rand(rng::Random.AbstractRNG, ::Random.SamplerType{Euclidean{N,T}}
     return Euclidean{N,T}(rand(rng, SVector{N,T}))
 end
 
+Base.write(io::IO, x::Euclidean) = write(io, unwrap(x))
+
 Base.zero(::E) where {E <: Euclidean} = zero(E)
 Base.zero(::Type{Euclidean{N,T}}) where {N,T} = Euclidean{N,T}()
 Base.one(::E) where {E <: Euclidean} = one(E)
@@ -227,9 +229,9 @@ Return the SIMD vector type (`SIMD.Vec`) to perform distance computations for th
 The default behavior is to use Julia's normal promotion for the element type of the vector arguments.
 However, this may be customized by extending `distance_type`.
 """
-function simd_type(::Type{<:SIMDType{N,T1}}, ::Type{<:SIMDType{N,T2}}) where {N,T1,T2}
+function simd_type(::Type{<:SIMDType{N1,T1}}, ::Type{<:SIMDType{N2,T2}}) where {N1,N2,T1,T2}
     T = find_distance_type(T1, T2)
-    return SIMD.Vec{vector_width(T, Val(N)), T}
+    return SIMD.Vec{vector_width(T, Val(min(N1,N2))), T}
 end
 simd_type(::A, ::B) where {A <: SIMDType, B <: SIMDType} = simd_type(A, B)
 simd_type(::Type{T}) where {T} = simd_type(T, T)

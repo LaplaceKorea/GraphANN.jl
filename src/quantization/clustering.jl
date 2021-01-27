@@ -186,9 +186,8 @@ function choose_centroids!(
     # Hoist up a bunch of useful constants
     # -- types
     P = Packed{K,E,V}
-    distance_type = _Points.distance_type(V)
-    accum_type = _Points.accum_type(distance_type)
-    cost_type = eltype(accum_type)
+    distance_type = _Points.simd_type(V)
+    cost_type = _Base.costtype(V)
 
     # -- values
     num_centroids = size(packed_centroids, 2)
@@ -442,10 +441,10 @@ function counts_per_centroid(
     data::LazyArrayWrap{V},
 ) where {K,E,V}
     num_groups = size(packed_centroids, 1)
-    distance_type = _Points.distance_type(V)
-    accum_type = _Points.accum_type(distance_type)
+    distance_type = _Points.simd_type(V)
+    cost_type = _Base.costtype(V)
     tls = ThreadLocal(;
-        minimums = [CurrentMinimum{K,eltype(accum_type)}() for _ in 1:num_groups],
+        minimums = [CurrentMinimum{K, cost_type}() for _ in 1:num_groups],
         counts = zeros(Int, fullsize(packed_centroids))
     )
 

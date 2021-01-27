@@ -31,14 +31,14 @@ end
 
 Base.show(io::IO, tree::BKTree) = print(io, "BKTree with $(length(tree.nodes)) nodes")
 
-struct BKTreeNeighbor{T,D}
-    node::BKTNode{T}
-    distance::D
-end
-
-getnode(x::BKTreeNeighbor) = x.node
-_Base.getdistance(x::BKTreeNeighbor) = x.distance
-Base.isless(x::T, y::T) where {T <: BKTreeNeighbor} = isless(x.distance, y.distance)
+# struct BKTreeNeighbor{T,D}
+#     node::BKTNode{T}
+#     distance::D
+# end
+#
+# getnode(x::BKTreeNeighbor) = x.node
+# _Base.getdistance(x::BKTreeNeighbor) = x.distance
+# Base.isless(x::T, y::T) where {T <: BKTreeNeighbor} = isless(x.distance, y.distance)
 
 function search(
     tree::BKTree,

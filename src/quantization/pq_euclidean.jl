@@ -71,8 +71,10 @@ function unsafe_encode!(
     ptr::Ptr,
     centroids::BinnedPQCentroids{<:Any,P},
     x::E
-) where {P,E <: Euclidean}
-    U = _Points.distance_type(E, _Points.distance_type(P))
+) where {P <: Packed, E <: Euclidean}
+    # TODO: Fix
+    U = _Points.simd_type(E, _Points.simd_type(P))
+    #U = _Points.distance_type(E, _Points.distance_type(P))
     return unsafe_encode!(
         ptr,
         centroids,
@@ -110,11 +112,12 @@ function partial_encode(
     num_centroids = length(centroids)
     num_centroids > typemax(index_type) && error("Vector is too long!")
 
-    promote_type = _Points.distance_type(V)
-    distance_type = eltype(_Points.accum_type(promote_type))
+    #promote_type = _Points.distance_type(V)
+    promote_type = _Points.simd_type(V)
+    cost_type = costtype(V)
 
     # Keep track of one per group
-    minimum = CurrentMinimum{K, distance_type}()
+    minimum = CurrentMinimum{K, cost_type}()
     for i in 1:num_centroids
         current_distances = distance(x, centroids[i])
         minimum = update(minimum, current_distances, i - 1)
@@ -126,12 +129,12 @@ end
 ##### Distance Computations
 #####
 
-function (table::PQTable{K,E})(
-    a::Euclidean{N,T},
-    b::NTuple{K, <:Integer}
-) where {K, E <: Euclidean, N, T}
-    return compute_distance(table, a, b)
-end
+# function (table::PQTable{K,E})(
+#     a::Euclidean{N,T},
+#     b::NTuple{K, <:Integer}
+# ) where {K, E <: Euclidean, N, T}
+#     return compute_distance(table, a, b)
+# end
 
 function pq_distance_type(::Type{Euclidean{N,Float32}}, ::Type{<:Euclidean}) where {N}
     SIMD.Vec{N,Float32}

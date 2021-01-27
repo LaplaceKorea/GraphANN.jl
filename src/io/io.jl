@@ -4,7 +4,7 @@ export DiskANNLoader, load_graph, save_graph
 export load_vecs, save_vecs
 
 # local deps
-import .._Base: MetaGraph, stdallocator
+import .._Base: MetaGraph, stdallocator, medioid
 import .._Graphs: UniDirectedGraph
 import .._Trees: BKTNode, BKTree
 

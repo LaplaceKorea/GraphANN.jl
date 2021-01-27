@@ -32,8 +32,15 @@ struct Neighbor{T,D}
 
     # Inner conversion constructors
     # Require explicitly calling out integer type.
-    Neighbor{T}(id::Integer, distance::D) where {T,D} = new{T,D}(T(id), distance)
+    Neighbor{T}(id::Integer, distance::D) where {T,D} = Neighbor{T,D}(id, distance)
     Neighbor{T,D}(id::Integer, distance::D) where {T,D} = new{T,D}(T(id), distance)
+    function Neighbor{T,Any}(id::Integer, distance) where {T}
+        err = ArgumentError("""
+        You're trying to construct a Neighbor object with `Any` as the distance parameter.
+        Doing so is a performance trap. Please fix this.
+        """)
+        throw(err)
+    end
 end
 
 # Since `Neighbor` contains two generic fields (id and distance), we need to provide hooks

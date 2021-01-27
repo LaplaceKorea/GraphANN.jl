@@ -15,16 +15,18 @@ function generate_data_file(
     delimiter = '|'
 )
     for (i, col) in enumerate(eachcol(data))
-        # Optionaly print metadata
+        # Optionaly print metadata.
+        # Always need to follow with a tab, even if there is no metadata.
         metadata === nothing || (print(io, metadata[i]))
         print(io, '\t')
+        # Dump delimiter-separated numbers.
         for j in eachindex(col)
             print(io, col[j])
             if j != lastindex(col)
                 print(io, delimiter)
             end
         end
-        # Add newline
+        # End of line.
         print(io, '\n')
     end
     return nothing
@@ -40,7 +42,7 @@ function generate_groundtruth_file(::SPTAG, io::IO, data::AbstractMatrix, delimi
     for col in eachcol(data)
         for i in eachindex(col)
             print(io, col[i])
-            i != lastindex(col) && print(io, ' ')
+            i != lastindex(col) && print(io, delimiter)
         end
         print(io, '\n')
     end
@@ -95,11 +97,13 @@ sentinel_value(::Type{T}) where {T <: Unsigned} = typemax(T)
 sentinel_value(::Type{T}) where {T <: Signed} = -(one(T))
 sentinel_value(x::T) where {T <: Integer} = sentinel_value(T)
 
-maybeadjust(x::Signed) = (x == sentinel_value(x)) ? zero(x) : x
-maybeadjust(x::Unsigned) = (x == sentinel_value(x)) ? zero(x) : x
-maybeincrement(x::Signed) = (x == sentinel_value(x)) ? zero(x) : (x + one(x))
-maybeincrement(x::Unsigned) = (x == sentinel_value(x)) ? zero(x) : (x + one(x))
+issentinel(x) = (x == sentinel_value(x))
 issentinel(x::BKTNode) = iszero(x.id)
+
+maybeadjust(x::Signed) = issentinel(x) ? zero(x) : x
+maybeadjust(x::Unsigned) = issentinel(x) ? zero(x) : x
+maybeincrement(x::Signed) = issentinel(x) ? zero(x) : (x + one(x))
+maybeincrement(x::Unsigned) = issentinel(x) ? zero(x) : (x + one(x))
 
 # Nodes get loaded with index-0 indices for the point ids.
 # This is a helper function to convert everything to index-1

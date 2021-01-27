@@ -72,14 +72,14 @@ end
 
 Base.length(::Type{<:Packed{K}}) where {K} = K
 Base.length(x::P) where {P <: Packed} = length(P)
-distance_type(::Type{<:Packed{<:Any,<:Any,V}}) where {V} = distance_type(V)
+simd_type(::Type{<:Packed{<:Any,<:Any,V}}) where {V} = simd_type(V)
 Base.transpose(x::Packed) = x
 
 unwrap(x::Packed) = x.repr
 function _Base.distance(A::P, B::P) where {K, E, V, P <: Packed{K, E, V}}
     Base.@_inline_meta
     # Figure out the correct promotion type
-    promote_type = distance_type(P)
+    promote_type = simd_type(P)
     a = convert(promote_type, unwrap(A))
     b = convert(promote_type, unwrap(B))
     accumulator = square(a - b)
