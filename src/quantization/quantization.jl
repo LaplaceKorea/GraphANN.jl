@@ -18,7 +18,7 @@ import UnPack: @unpack
 # Widen data types, but no bigger than 64-bits.
 const NoWidenTypes = Union{Float64,Int64,UInt64}
 maybe_widen(x) = widen(x)
-maybe_widtn(x::T) where {T <: NoWidenTypes} = x
+maybe_widen(x::T) where {T <: NoWidenTypes} = x
 maybe_widen(::Type{T}) where {T} = widen(T)
 maybe_widen(::Type{T}) where {T <: NoWidenTypes} = T
 

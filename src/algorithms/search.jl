@@ -55,6 +55,12 @@ mutable struct GreedySearch{T <: AbstractSet, P, I <: Integer, D}
     best::BinaryMinMaxHeap{Neighbor{I,D}}
     best_unvisited::BinaryMinMaxHeap{Neighbor{I,D}}
     visited::T
+
+    # Optional `prefetch_queue`.
+    # If `prefetch_queue === nothing` then no prefetching outside of the normal x86 prefetch
+    # instructions will be performed.
+    #
+    # Otherwise, queue must accept vertex IDs.
     prefetch_queue::P
 end
 
@@ -65,7 +71,7 @@ function _Base.Neighbor(x::GreedySearch, id::Integer, distance)
     # Use `unsafe_trunc` to be slightly faster.
     # In the body of the search routine, we shouldn't see any actual values that will
     # cause the undefined behavior of `unsafe_trunc`.
-    return Neighbor{I, D}(unsafe_trunc(I, id), distance)
+    return Neighbor{I,D}(unsafe_trunc(I, id), distance)
 end
 
 function GreedySearch(
@@ -104,12 +110,13 @@ isvisited(greedy::GreedySearch, vertex) = in(getid(vertex), greedy.visited)
 getvisited(greedy::GreedySearch) = greedy.visited
 
 # Get the closest non-visited vertex
+# `unsafe_peek` will not remove top element. Unsafe because it assumes queue is nonempty.
 unsafe_peek(greedy::GreedySearch) = @inbounds greedy.best_unvisited.valtree[1]
-#getcandidate!(greedy::GreedySearch) = popmin!(greedy.best_unvisited)
-
 getcandidate!(greedy::GreedySearch) = getcandidate!(greedy, hasprefetching(greedy))
-getcandidate!(greedy::GreedySearch, ::NoPrefetching) = popmin!(greedy.best_unvisited)
 
+# no prefetching case
+getcandidate!(greedy::GreedySearch, ::NoPrefetching) = popmin!(greedy.best_unvisited)
+# prefetching case
 function getcandidate!(greedy::GreedySearch, ::HasPrefetching)
     @unpack best_unvisited, prefetch_queue = greedy
     candidate = popmin!(best_unvisited)
@@ -127,7 +134,7 @@ isfull(greedy::GreedySearch) = length(greedy) >= greedy.search_list_size
 
 function maybe_pushcandidate!(greedy::GreedySearch, vertex)
     # If this has already been seen, don't do anything.
-    in(getid(vertex), greedy.visited) && return nothing
+    isvisited(greedy, vertex) && return nothing
     pushcandidate!(greedy, vertex)
 end
 
@@ -150,7 +157,9 @@ function pushcandidate!(greedy::GreedySearch, vertex)
 end
 
 maybe_prefetch(greedy::GreedySearch, vertex) = maybe_prefetch(greedy, hasprefetching(greedy), vertex)
+# non-prefetching case
 maybe_prefetch(greedy::GreedySearch, ::NoPrefetching, vertex) = nothing
+# prefetching case
 function maybe_prefetch(greedy::GreedySearch, ::HasPrefetching, vertex)
     @unpack prefetch_queue = greedy
     push!(prefetch_queue, getid(vertex))
@@ -158,7 +167,6 @@ function maybe_prefetch(greedy::GreedySearch, ::HasPrefetching, vertex)
 end
 
 done(greedy::GreedySearch) = isempty(greedy.best_unvisited)
-
 Base.maximum(greedy::GreedySearch) = _unsafe_maximum(greedy.best)
 
 # Bring the size of the best list down to `search_list_size`

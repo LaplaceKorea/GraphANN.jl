@@ -120,10 +120,7 @@ ThreadLocal(pool::ThreadPool; kw...) = ThreadLocal(pool, (;kw...,))
 ThreadLocal(values) = ThreadLocal(allthreads(), values)
 
 function ThreadLocal(pool::ThreadPool, values::T) where {T}
-    return ThreadLocal{T}(
-        Dict(tid => deepcopy(values) for tid in pool),
-        pool,
-    )
+    return ThreadLocal{T}(Dict(tid => deepcopy(values) for tid in pool), pool)
 end
 
 Base.getindex(t::ThreadLocal, i::Integer = Threads.threadid()) = t.values[i]

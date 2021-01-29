@@ -168,5 +168,4 @@ Base.length(x::DenseAdjacencyList, i) = length(x.fadj[i])
 Base.empty!(x::DenseAdjacencyList) = _cannot_mutate()
 
 Base.iterate(x::DenseAdjacencyList, s...) = iterate(x.fadj, s...)
-
 Base.copyto!(x::DenseAdjacencyList, args...) = _cannot_mutate()

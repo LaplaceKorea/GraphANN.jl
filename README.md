@@ -130,3 +130,8 @@ GraphANN.save_vecs("another_groundtruth.ivecs", gt)
 
 5. Measure exploration vs direct path when navigating to nearest neighbor (vague, but have general idea).
 
+
+# TODO:
+
+Picture of graphs and adjacency lists
+Picture of dense adjacency list - How is it saving space.

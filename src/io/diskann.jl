@@ -57,8 +57,9 @@ function save_graph(loader::DiskANN, path::AbstractString, meta::MetaGraph)
     end
 end
 
-function save_graph(::DiskANN, io::IO, meta::MetaGraph)
+function save_graph(::DiskANN, io::IO, meta::MetaGraph; medioid = medoid(data))
     @unpack graph, data = meta
+    @show medioid
 
     # Compute how large the file will be when it's created.
     filesize = sizeof(UInt64) +
@@ -70,13 +71,11 @@ function save_graph(::DiskANN, io::IO, meta::MetaGraph)
     bytes = 0
     bytes += write(io, UInt64(filesize))
     bytes += write(io, Cuint(maximum(LightGraphs.outdegree(graph))))
-    bytes += write(io, Cuint(medioid(data) - 1))
+    bytes += write(io, Cuint(medioid - 1))
     ProgressMeter.@showprogress 1 for v in LightGraphs.vertices(graph)
         neighbors = LightGraphs.outneighbors(graph, v)
         bytes += write(io, Cuint(length(neighbors)))
-        for u in neighbors
-            bytes += write(io, Cuint(u-1))
-        end
+        bytes += write(io, Cuint.(neighbors .- 1))
     end
 
     if bytes != filesize
