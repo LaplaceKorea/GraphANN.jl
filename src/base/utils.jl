@@ -32,9 +32,10 @@ struct Neighbor{T,D}
 
     # Inner conversion constructors
     # Require explicitly calling out integer type.
-    Neighbor{T}(id::Integer, distance::D) where {T,D} = Neighbor{T,D}(id, distance)
-    Neighbor{T,D}(id::Integer, distance::D) where {T,D} = new{T,D}(T(id), distance)
-    function Neighbor{T,Any}(id::Integer, distance) where {T}
+    Neighbor{T}(id, distance::D) where {T,D} = Neighbor{T,D}(id, distance)
+    Neighbor{T,D}(id::T, distance::D) where {T,D} = new{T,D}(id, distance)
+    Neighbor{T,D}(id, distance::D) where {T,D} = new{T,D}(convert(T, id), distance)
+    function Neighbor{T,Any}(id, distance) where {T}
         err = ArgumentError("""
         You're trying to construct a Neighbor object with `Any` as the distance parameter.
         Doing so is a performance trap. Please fix this.
@@ -310,17 +311,17 @@ end
 ##### Bounded Max Heap
 #####
 
-struct BoundedMaxHeap{H}
-    heap::H
+struct BoundedMaxHeap{T}
+    heap::DataStructures.BinaryMaxHeap{T}
     bound::Int
 end
 
 function BoundedMaxHeap{T}(bound::Int) where {T}
-    return BoundedMaxHeap(
-        DataStructures.BinaryMaxHeap{T}(),
-        bound,
-    )
+    return BoundedMaxHeap(DataStructures.BinaryMaxHeap{T}(), bound)
 end
+# slight type hijacking ...
+# we don't technically "own" valtree.
+Base.empty!(H::BoundedMaxHeap) = empty!(H.heap.valtree)
 
 """
     push!(H::BoundedMaxHeap, i)
@@ -341,3 +342,5 @@ function Base.push!(H::BoundedMaxHeap, i)
     end
     return nothing
 end
+
+DataStructures.extract_all_rev!(H::BoundedMaxHeap) = DataStructures.extract_all_rev!(H.heap)

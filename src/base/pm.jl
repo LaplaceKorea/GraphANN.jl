@@ -5,7 +5,7 @@ struct PMAllocator
     path::String
 end
 
-(f::PMAllocator)(type, dims...) = pmmap(type, f.path, dims...)
+(f::PMAllocator)(type, dims...) = pmmap(type, f.path, dims...; rmfile = true)
 pmallocator(path::AbstractString) = PMAllocator(path)
 
 const COUNT = Threads.Atomic{Int}(0)

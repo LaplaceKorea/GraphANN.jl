@@ -1,12 +1,13 @@
 module _IO
 
-export DiskANNLoader, load_graph, save_graph
+export load_graph, save_graph
 export load_vecs, save_vecs
 
 # local deps
 import .._Base: MetaGraph, stdallocator, medioid
 import .._Graphs: UniDirectedGraph
-import .._Trees: BKTNode, BKTree
+import .._Points: Euclidean
+import .._Trees: TreeNode, Tree
 
 # deps
 import LightGraphs

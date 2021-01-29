@@ -102,4 +102,26 @@ end
         @test length(handle) == 1
         @test id[] == 2
     end
+
+    @testset "Thread Pool" begin
+        pool = GraphANN.ThreadPool(1:2)
+        # Keyword Only Constructor
+        tls = GraphANN.ThreadLocal(pool; a = 10, b = "hello world")
+        @test isa(GraphANN._Base.getall(tls), Vector{<:NamedTuple})
+        @test length(tls.values) == length(pool)
+        @test tls[].a == 10
+        @test tls[].b == "hello world"
+        @test tls[1].a == 10
+        @test tls[1].b == "hello world"
+        @test tls[2].a == 10
+        @test tls[2].b == "hello world"
+
+        # Also just try the normal copying constructor
+        tls = GraphANN.ThreadLocal(pool, Int[1,2,3])
+        values = GraphANN.getall(tls)
+        @test length(values) == 2
+        # test for deep copy
+        @test values[1] == values[2]
+        @test values[1] !== values[2]
+    end
 end

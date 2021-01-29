@@ -1,6 +1,16 @@
-function map_then_return(dir, expected_path)
+function map_then_return(dir::AbstractString, expected_path)
     @test !ispath(expected_path)
     A = GraphANN._Base.pmmap(Float32, dir, 100)
+    @test isa(A, Vector{Float32})
+    @test length(A) == 100
+    @test ispath(expected_path)
+
+    return nothing
+end
+
+function map_then_return(allocator::GraphANN._Base.PMAllocator, expected_path)
+    @test !ispath(expected_path)
+    A = allocator(Float32, 100)
     @test isa(A, Vector{Float32})
     @test length(A) == 100
     @test ispath(expected_path)
@@ -28,4 +38,18 @@ end
         yield()
     end
     @test !ispath(expected_path)
+
+    # Now test if we increment the atomic count and use the partially applied version
+    # that everything still works.
+    expected_path = joinpath(dir, join((GraphANN._Base.mmap_prefix(), 1)))
+    ispath(expected_path) && rm(expected_path)
+    allocator = GraphANN.pmallocator(dir)
+    @test isa(allocator, GraphANN._Base.PMAllocator)
+
+    map_then_return(allocator, expected_path)
+    GC.gc()
+    for i in 1:1000
+        yield()
+    end
+    @test ispath(expected_path) == false
 end

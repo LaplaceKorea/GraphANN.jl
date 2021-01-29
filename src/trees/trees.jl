@@ -7,6 +7,8 @@ using .._Base
 import DataStructures
 import UnPack: @unpack
 
-include("balanced_kmeans.jl")
+export TreeNode, isleaf, childindices
+export Tree
+include("tree.jl")
 
 end

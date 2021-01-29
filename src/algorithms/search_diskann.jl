@@ -79,7 +79,7 @@ function GreedySearch(
         prefetch_queue = nothing,
         idtype::Type{I} = UInt32,
         costtype::Type{D} = Float32,
-   ) where {I,D}
+) where {I,D}
     best = BinaryMinMaxHeap{Neighbor{I,D}}()
     best_unvisited = BinaryMinMaxHeap{Neighbor{I,D}}()
     visited = RobinSet{I}()

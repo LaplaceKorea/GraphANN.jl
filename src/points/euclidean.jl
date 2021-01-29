@@ -357,18 +357,3 @@ else
     end
 end
 
-#####
-##### Vector Loading Functions
-#####
-
-_IO.vecs_read_type(::Type{Euclidean{N,T}}) where {N,T} = T
-
-function _IO.addto!(v::Vector{Euclidean{N,T}}, index, buf::AbstractVector{T}) where {N,T}
-    length(buf) == N || error("Lenght of buffer is incorrect!")
-    ptr = Ptr{T}(pointer(v, index))
-    unsafe_copyto!(ptr, pointer(buf), N)
-    return 1
-end
-
-_IO.vecs_reshape(::Type{<:Euclidean}, v, dim) = v
-

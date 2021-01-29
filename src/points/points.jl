@@ -2,7 +2,6 @@ module _Points
 
 # local deps
 using .._Base
-import .._IO
 
 # stdlib
 import Random

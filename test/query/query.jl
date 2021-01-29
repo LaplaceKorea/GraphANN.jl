@@ -62,7 +62,7 @@ approx_or_greater(a, b) = (a ≈ b) || (a > b)
     # Load in siftsmall dataset, queries, and ground truth.
     data = GraphANN.load_vecs(GraphANN.Euclidean{128,Float32}, dataset_path)
     graph = GraphANN.load_graph(
-        GraphANN.DiskANNLoader(),
+        GraphANN._IO.DiskANN(),
         diskann_index,
         # Sift Small has 10000 base elements.
         length(data),

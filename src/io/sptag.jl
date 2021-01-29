@@ -98,10 +98,10 @@ sentinel_value(::Type{T}) where {T <: Signed} = -(one(T))
 sentinel_value(x::T) where {T <: Integer} = sentinel_value(T)
 
 issentinel(x) = (x == sentinel_value(x))
-issentinel(x::BKTNode) = iszero(x.id)
+issentinel(x::TreeNode) = iszero(x.id)
 
-maybeadjust(x::Signed) = issentinel(x) ? zero(x) : x
-maybeadjust(x::Unsigned) = issentinel(x) ? zero(x) : x
+maybeadjust(x::Signed, sub = zero(x)) = issentinel(x) ? zero(x) : (x - sub)
+maybeadjust(x::Unsigned, sub = zero(x)) = issentinel(x) ? zero(x) : (x - sub)
 maybeincrement(x::Signed) = issentinel(x) ? zero(x) : (x + one(x))
 maybeincrement(x::Unsigned) = issentinel(x) ? zero(x) : (x + one(x))
 
@@ -109,11 +109,14 @@ maybeincrement(x::Unsigned) = issentinel(x) ? zero(x) : (x + one(x))
 # This is a helper function to convert everything to index-1
 # However, the index ranges for the child nodes work fine if we take the very first node
 # as the root.
-function increment(x::BKTNode{T}) where {T}
-    return BKTNode(
+#
+# BUT, it's never that easy. We need to subtract 1 from the child-end size of things
+# because C is crazy and doesn't include the last element of its ranges.
+function increment(x::TreeNode{T}) where {T}
+    return TreeNode(
         maybeincrement(x.id),
         maybeadjust(x.childstart),
-        maybeadjust(x.childend),
+        maybeadjust(x.childend, one(T)),
     )
 end
 
@@ -138,11 +141,11 @@ function load_bktree(io::IO)
     read!(io, tree_start_indices)
     tree_start_indices = Int.(tree_start_indices) .+ 1
 
-    # Number of BKTNodes in the
+    # Number of TreeNode in the
     # We first read the root node which seems to be special.
     number_of_nodes = read(io, UInt32)
-    root = read(io, BKTNode{Int32})
-    nodes = Vector{BKTNode{Int32}}(undef, number_of_nodes - 1)
+    root = increment(read(io, TreeNode{UInt32}))
+    nodes = Vector{TreeNode{UInt32}}(undef, number_of_nodes - 1)
     read!(io, nodes)
     nodes .= increment.(nodes)
 
@@ -151,7 +154,7 @@ function load_bktree(io::IO)
     end
 
     # TODO: remove sentinel nodes that show up at the end of the file ...
-    tree = BKTree(root, nodes)
+    tree = Tree(root, nodes)
     return (; number_of_trees, tree_start_indices, tree)
 end
 

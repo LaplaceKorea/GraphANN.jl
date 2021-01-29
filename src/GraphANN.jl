@@ -6,10 +6,10 @@ using Statistics
 include("base/base.jl"); using ._Base
 include("graphs/graphs.jl"); using ._Graphs
 include("trees/trees.jl"); using ._Trees
-include("io/io.jl"); using ._IO
 include("points/points.jl"); using ._Points
 include("prefetch/prefetch.jl"); using ._Prefetcher
 include("quantization/quantization.jl"); using ._Quantization
+include("io/io.jl"); using ._IO
 
 # Core implementation
 include("algorithms/algorithms.jl")
