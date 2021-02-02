@@ -23,9 +23,10 @@ end
 #####
 ##### Tree
 #####
+
 # The layout of this data structure is pretty similar to to the layout of the SPTAG C++ code.
 # I'm not sure yet if that is the best layout, but we have to start somewhere.
-struct Tree{T <: TreeNode}
+struct Tree{T <: TreeNode} <: AbstractTree
     root::T
     nodes::Vector{T}
 end

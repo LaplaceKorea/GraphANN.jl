@@ -5,7 +5,7 @@ export load_vecs, save_vecs
 
 # local deps
 import .._Base: MetaGraph, stdallocator, medioid
-import .._Graphs: UniDirectedGraph
+import .._Graphs: UniDirectedGraph, FlatAdjacencyList
 import .._Points: Euclidean
 import .._Trees: TreeNode, Tree
 

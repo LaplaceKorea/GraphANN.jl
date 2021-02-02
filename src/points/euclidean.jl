@@ -247,9 +247,17 @@ Return the euclidean distance between `a` and `b`.
 Return type can be queried by `costtype(a, b)`.
 """
 function _Base.distance(a::A, b::B) where {A <: Euclidean, B <: Euclidean}
+    Base.@_inline_meta
     T = simd_type(A, B)
     return distance(EagerWrap{T}(a), EagerWrap{T}(b))
 end
+
+# TODO: Think through if this API makes sense
+# # Allow elements to be passed by pointer.
+# # Can save a little bit of time in places due to calling conventions.
+# function _Base.distance(a::Ptr{<:Euclidean}, b::Euclidean)
+#     return distance(unsafe_load(a), b)
+# end
 
 function _Base.distance(a::EagerWrap{V,K}, b::EagerWrap{V,K}) where {V, K}
     Base.@_inline_meta

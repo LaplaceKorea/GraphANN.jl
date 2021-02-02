@@ -94,16 +94,14 @@ end
 #####
 
 sentinel_value(::Type{T}) where {T <: Unsigned} = typemax(T)
-sentinel_value(::Type{T}) where {T <: Signed} = -(one(T))
+sentinel_value(::Type{T}) where {T <: Signed} = -one(T)
 sentinel_value(x::T) where {T <: Integer} = sentinel_value(T)
 
 issentinel(x) = (x == sentinel_value(x))
 issentinel(x::TreeNode) = iszero(x.id)
 
-maybeadjust(x::Signed, sub = zero(x)) = issentinel(x) ? zero(x) : (x - sub)
-maybeadjust(x::Unsigned, sub = zero(x)) = issentinel(x) ? zero(x) : (x - sub)
-maybeincrement(x::Signed) = issentinel(x) ? zero(x) : (x + one(x))
-maybeincrement(x::Unsigned) = issentinel(x) ? zero(x) : (x + one(x))
+maybeadjust(x::Signed, add = zero(x)) = issentinel(x) ? zero(x) : (x + add)
+maybeadjust(x::Unsigned, add = zero(x)) = issentinel(x) ? zero(x) : (x + add)
 
 # Nodes get loaded with index-0 indices for the point ids.
 # This is a helper function to convert everything to index-1
@@ -112,11 +110,15 @@ maybeincrement(x::Unsigned) = issentinel(x) ? zero(x) : (x + one(x))
 #
 # BUT, it's never that easy. We need to subtract 1 from the child-end size of things
 # because C is crazy and doesn't include the last element of its ranges.
-function increment(x::TreeNode{T}) where {T}
+function adjust(x::TreeNode{T}) where {T}
     return TreeNode(
-        maybeincrement(x.id),
+        # Bump the ID up from index-0 to index-1
+        maybeadjust(x.id, one(T)),
+        # C++ start indices are already valid for index-1.
+        # Just turn "-1" bit patterns into "0".
         maybeadjust(x.childstart),
-        maybeadjust(x.childend, one(T)),
+        # If this is a valid node, decrement the upper bound so the range is inclusive.
+        maybeadjust(x.childend, -one(T)),
     )
 end
 
@@ -144,10 +146,10 @@ function load_bktree(io::IO)
     # Number of TreeNode in the
     # We first read the root node which seems to be special.
     number_of_nodes = read(io, UInt32)
-    root = increment(read(io, TreeNode{UInt32}))
+    root = adjust(read(io, TreeNode{UInt32}))
     nodes = Vector{TreeNode{UInt32}}(undef, number_of_nodes - 1)
     read!(io, nodes)
-    nodes .= increment.(nodes)
+    nodes .= adjust.(nodes)
 
     if !eof(io)
         error("Something went wrong when loading BKTree. End of file not reached!")
@@ -156,5 +158,41 @@ function load_bktree(io::IO)
     # TODO: remove sentinel nodes that show up at the end of the file ...
     tree = Tree(root, nodes)
     return (; number_of_trees, tree_start_indices, tree)
+end
+
+#####
+##### Graph Loading
+#####
+
+function load_graph(sptag::SPTAG, path::AbstractString)
+    return open(path; read = true) do io
+        load_graph(sptag, io)
+    end
+end
+
+# Graphs in SPTAG land are stored as a dense 2D matrix where the adjacency lists are stored
+# along the primary memory axis.
+#
+# The last portion of each adjacency list is padded by "-1".
+# This function both determines how many entries are valid and sorts the valid entries
+# in each adjacency list.
+function getlength!(v::AbstractVector{T}, max_degree) where {T <: Unsigned}
+    i = findfirst(issentinel, v)
+    num_neighbors = (i === nothing) ? T(max_degree) : T(i - 1)
+    vw = view(v, 1:num_neighbors)
+    # Sort and convert to index-1
+    sort!(view(v, 1:num_neighbors); alg = QuickSort)
+    vw .+= one(T)
+
+    return num_neighbors
+end
+
+function load_graph(::SPTAG, io::IO)
+    num_vertices = read(io, UInt32)
+    max_degree = read(io, UInt32)
+    adj = Matrix{UInt32}(undef, max_degree, num_vertices)
+    read!(io, vec(adj))
+    lengths = map(x -> getlength!(x, max_degree), eachcol(adj))
+    return UniDirectedGraph{UInt32}(FlatAdjacencyList{UInt32}(adj, lengths))
 end
 

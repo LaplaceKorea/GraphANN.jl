@@ -319,9 +319,15 @@ end
 function BoundedMaxHeap{T}(bound::Int) where {T}
     return BoundedMaxHeap(DataStructures.BinaryMaxHeap{T}(), bound)
 end
+
+isfull(H::BoundedMaxHeap) = length(H.heap) >= H.bound
+
 # slight type hijacking ...
 # we don't technically "own" valtree.
 Base.empty!(H::BoundedMaxHeap) = empty!(H.heap.valtree)
+Base.isempty(H::BoundedMaxHeap) = isempty(H.heap)
+Base.first(H::BoundedMaxHeap) = first(H.heap)
+getbound(H::BoundedMaxHeap) = H.bound
 
 """
     push!(H::BoundedMaxHeap, i)
@@ -344,3 +350,8 @@ function Base.push!(H::BoundedMaxHeap, i)
 end
 
 DataStructures.extract_all_rev!(H::BoundedMaxHeap) = DataStructures.extract_all_rev!(H.heap)
+
+function destructive_extract!(H::BoundedMaxHeap)
+    sort!(H.heap.valtree; alg = Base.QuickSort)
+    return H.heap.valtree
+end

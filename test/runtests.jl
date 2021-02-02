@@ -52,4 +52,6 @@ include("index/index.jl")
 
 # Loads
 include("io/vecs.jl")
+include("io/sptag.jl")
+
 

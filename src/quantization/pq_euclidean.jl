@@ -173,7 +173,7 @@ end
 function PQTransposed(pqtable::PQTable{N,E}) where {N,E <: Euclidean}
     packed_type = _Points.packed_type(E)
     K = exact_div(length(packed_type), length(E))
-    cost_type = _Points.cost_type(E)
+    cost_type = _Points.costtype(E)
 
     @unpack centroids = pqtable
     centroids_transposed = centroids |>

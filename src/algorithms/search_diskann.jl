@@ -226,11 +226,10 @@ function _Base.search(
         algmax = getdistance(maximum(algo))
 
         # Distance computations
-        for i in eachindex(neighbors)
+        for v in neighbors
             # Perform distance query, and try to prefetch the next datapoint.
             # NOTE: Checking if a vertex has been visited here is actually SLOWER than
             # deferring until after the distance comparison.
-            @inbounds v = neighbors[i]
             @inbounds d = metric(query, data[v])
 
             ## only bother to add if it's better than the worst currently tracked.
@@ -339,27 +338,25 @@ function _Base.searchall(
     num_queries = length(queries)
     dest = Array{eltype(meta.graph),2}(undef, num_neighbors, num_queries)
 
-    dynamic_thread(getpool(tls), eachindex(queries), 64) do r
+    dynamic_thread(getpool(tls), eachindex(queries), 64) do col
         _metric = _Base.distribute_distance(metric)
-        for col in r
-            query = queries[col]
-            algo = tls[]
+        query = queries[col]
+        algo = tls[]
 
-            # -- optional telemetry
-            callbacks.prequery()
+        # -- optional telemetry
+        callbacks.prequery()
 
-            _Base.distance_prehook(_metric, query)
-            search(algo, meta, start, query; callbacks = callbacks, metric = _metric)
+        _Base.distance_prehook(_metric, query)
+        search(algo, meta, start, query; callbacks = callbacks, metric = _metric)
 
-            # Copy over the results to the destination
-            results = destructive_extract!(algo.best, num_neighbors)
-            for i in 1:num_neighbors
-                @inbounds dest[i,col] = getid(results[i])
-            end
-
-            # -- optional telemetry
-            callbacks.postquery()
+        # Copy over the results to the destination
+        results = destructive_extract!(algo.best, num_neighbors)
+        for i in 1:num_neighbors
+            @inbounds dest[i,col] = getid(results[i])
         end
+
+        # -- optional telemetry
+        callbacks.postquery()
     end
 
     return dest

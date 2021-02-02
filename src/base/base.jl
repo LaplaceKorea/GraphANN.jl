@@ -60,6 +60,7 @@ include("pm.jl")
 export ThreadPool, ThreadLocal, TaskHandle
 export getall, getpool, allthreads, dynamic_thread, on_threads
 include("threading.jl")
+#distribute_distance(x::ThreadLocal) = x[]
 
 #####
 ##### MinMaxHeap

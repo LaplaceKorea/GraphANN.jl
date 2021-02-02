@@ -37,6 +37,18 @@ end
 
 Pruner{T}() where {T} = Pruner(T[], Bool[])
 
+# Fancy Printing
+function Base.show(io::IO, x::Pruner{T}) where {T}
+    print(io, typeof(x), "([")
+    items = x.items
+    for i in eachindex(items)
+        color = ispruned(x, i) ? (:red) : (:green)
+        printstyled(items[i]; color = color)
+        i == lastindex(items) || print(io, ", ")
+    end
+    print(io, "])")
+end
+
 function Base.empty!(x::Pruner)
     empty!(x.items)
     empty!(x.pruned)
