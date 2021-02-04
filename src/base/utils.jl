@@ -35,6 +35,8 @@ struct Neighbor{T,D}
     Neighbor{T}(id, distance::D) where {T,D} = Neighbor{T,D}(id, distance)
     Neighbor{T,D}(id::T, distance::D) where {T,D} = new{T,D}(id, distance)
     Neighbor{T,D}(id, distance::D) where {T,D} = new{T,D}(convert(T, id), distance)
+    Neighbor{T,D}(id, distance) where {T,D} = new{T,D}(convert(T, id), convert(D, distance))
+    Neighbor{T,D}() where {T,D} = new{T,D}(zero(T), typemax(D))
     function Neighbor{T,Any}(id, distance) where {T}
         err = ArgumentError("""
         You're trying to construct a Neighbor object with `Any` as the distance parameter.

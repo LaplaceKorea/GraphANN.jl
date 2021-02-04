@@ -1,6 +1,15 @@
 module GraphANN
 
-using Statistics
+const DEBUG = true
+@static if DEBUG
+    macro debug_assert(expr)
+        return :(@assert $expr)
+    end
+else
+    macro debug_assert(expr)
+        return :()
+    end
+end
 
 # Bootstrap
 include("base/base.jl"); using ._Base

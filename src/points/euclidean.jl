@@ -5,7 +5,7 @@
 A point in `N` dimensional space using the Euclidean metric.
 Each component has type `T`.
 """
-struct Euclidean{N,T <: Number}
+struct Euclidean{N, T <: Number}
     vals::SVector{N,T}
 end
 
@@ -19,7 +19,9 @@ Euclidean{N,T}(vals::NTuple{N,T}) where {N,T <: Number} = Euclidean(SVector{N,T}
 Euclidean(vals::NTuple{N,T}) where {N,T} = Euclidean{N,T}(vals)
 Euclidean(vec::SIMD.Vec) = Euclidean(Tuple(vec))
 
+Base.:(==)(::Euclidean, ::Euclidean) = false
 Base.:(==)(a::Euclidean{N}, b::Euclidean{N}) where {N} = (a.vals == b.vals)
+
 function Base.rand(rng::Random.AbstractRNG, ::Random.SamplerType{Euclidean{N,T}}) where {N,T}
     return Euclidean{N,T}(rand(rng, SVector{N,T}))
 end

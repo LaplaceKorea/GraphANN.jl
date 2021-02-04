@@ -4,7 +4,6 @@ module _Base
 
 # stdlib
 import Mmap
-import Statistics
 
 # deps
 import DataStructures
@@ -68,13 +67,6 @@ include("threading.jl")
 
 export BinaryMinMaxHeap, destructive_extract!, popmax!, popmin!, _unsafe_maximum, _unsafe_minimum
 include("minmax_heap.jl")
-
-#####
-##### Spans
-#####
-
-export Span
-include("spans.jl")
 
 #####
 ##### Utilities

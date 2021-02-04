@@ -151,21 +151,32 @@ end
 
 # This is for inference only - perform a single allocation for the whole adjacency list,
 # with elements packed as closely together as possible.
+#
+# This is basically a CSR style format where the adacency list for vertex `i` is stored
+# in the range `offsets[i]:(offsets[i+1] - 1)`.
+# Adjacency lists are materialized lazily as views.
 struct DenseAdjacencyList{T} <: AbstractAdjacencyList{T}
     storage::Vector{T}
-    fadj::Vector{Span{T}}
+    offsets::Vector{Int64}
 end
 
 # Implement the (read only) AdjacencyList API
 _cannot_mutate() = error("Cannot modify a DenseAdjacencyList")
 
 Base.push!(x::DenseAdjacencyList, v) = _cannot_mutate()
-Base.getindex(x::DenseAdjacencyList, i) = x.fadj[i]
+# The adjacency list must be constructed correctly so that the below rang is always inbounds.
+function Base.getindex(x::DenseAdjacencyList, i)
+    return Base.unsafe_view(x.storage, x.offsets[i]:(x.offsets[i+1]-1))
+end
+
 caninsert(x::DenseAdjacencyList, i) = false
 
-Base.length(x::DenseAdjacencyList) = length(x.fadj)
-Base.length(x::DenseAdjacencyList, i) = length(x.fadj[i])
+Base.length(x::DenseAdjacencyList) = length(x.offsets) - 1
+Base.length(x::DenseAdjacencyList, i) = x.offsets[i+1] - x.offsets[i]
 Base.empty!(x::DenseAdjacencyList) = _cannot_mutate()
 
-Base.iterate(x::DenseAdjacencyList, s...) = iterate(x.fadj, s...)
+function Base.iterate(x::DenseAdjacencyList, s = 1)
+    return s > length(x) ? nothing : (@inbounds(x[s]), s + 1)
+end
+
 Base.copyto!(x::DenseAdjacencyList, args...) = _cannot_mutate()

@@ -136,14 +136,15 @@ end
 # that point to centroids
 struct PQGraph{T <: Unsigned, N}
     raw::Vector{NTuple{N,T}}
-    spans::Vector{Span{NTuple{N,T}}}
+    # TODO: Broken at the moment.
+    #spans::Vector{Span{NTuple{N,T}}}
 
     # -- very specific inner constructor
     function PQGraph{T, N}(
         raw::Vector{NTuple{N,T}},
-        spans::Vector{Span{NTuple{N,T}}},
+        #spans::Vector{Span{NTuple{N,T}}},
     ) where {T <: Unsigned, N}
-        return new{T,N}(raw, spans)
+        return new{T,N}(raw)#, spans)
     end
 end
 

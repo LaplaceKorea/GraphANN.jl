@@ -37,6 +37,10 @@
     # Total Ordering
     @test Neighbor{Int64}(1, 1.0) < Neighbor{Int64}(2, 1.0)
     @test Neighbor{Int64}(2, 1.0) > Neighbor{Int64}(1, 1.0)
+
+    n = Neighbor{Int64,Float32}()
+    @test iszero(GraphANN.getid(n))
+    @test GraphANN.getdistance(n) == typemax(Float32)
 end
 
 @testset "Testing RobinSet" begin

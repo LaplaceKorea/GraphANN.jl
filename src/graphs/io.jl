@@ -112,8 +112,11 @@ function load(
     @assert elsize == sizeof(T)
 
     # Load how long each adjacency list is.
-    degrees = Vector{T}(undef, nv)
-    read!(io, degrees)
+    offsets = Vector{Int}(undef, nv + 1)
+    offsets[1] = 1
+    ProgressMeter.@showprogress 1 for i in 1:nv
+        @inbounds offsets[i+1] = offsets[i] + read(io, T)
+    end
 
     # Preallocate the storage and load everything into memory.
     A = allocator(T, ne)
@@ -121,24 +124,24 @@ function load(
     eof(io) || error("There seems to be more room in the file!")
 
     # Reconstruct the graph from the degree information.
-    spans = Vector{Span{T}}()
-    sizehint!(spans, nv)
+    #spans = Vector{Span{T}}()
+    #sizehint!(spans, nv)
 
-    progress_meter = ProgressMeter.Progress(nv, 1)
-    index = 1
-    ProgressMeter.@showprogress 1 for v in 1:nv
-        degree = degrees[v]
-        push!(spans, Span(pointer(A, index), degree))
-        index += degree
-    end
+    # progress_meter = ProgressMeter.Progress(nv, 1)
+    # index = 1
+    # ProgressMeter.@showprogress 1 for v in 1:nv
+    #     degree = degrees[v]
+    #     push!(spans, Span(pointer(A, index), degree))
+    #     index += degree
+    # end
 
-    # Post processing sanity check
-    index != (ne + 1) && error("""
-        Incorrect final index.
-        Should be: $(ne + 1). Is: ($index).
-        """
-    )
+    # # Post processing sanity check
+    # index != (ne + 1) && error("""
+    #     Incorrect final index.
+    #     Should be: $(ne + 1). Is: ($index).
+    #     """
+    # )
 
-    adj = DenseAdjacencyList{T}(A, spans)
+    adj = DenseAdjacencyList{T}(A, offsets)
     return UniDirectedGraph{T}(adj)
 end

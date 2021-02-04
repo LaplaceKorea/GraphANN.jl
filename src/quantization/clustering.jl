@@ -11,6 +11,7 @@ end
 function CurrentMinimum{N,T}() where {N,T}
     return CurrentMinimum{N,T}(SIMD.Vec{N,T}(typemax(T)), zero(SIMD.Vec{N,Int32}))
 end
+
 # Scalar broadcasting
 Base.broadcastable(x::CurrentMinimum) = (x,)
 Base.isless(a::CurrentMinimum, b::CurrentMinimum) = (a.distance < b.distance)

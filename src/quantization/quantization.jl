@@ -25,7 +25,8 @@ maybe_widen(::Type{T}) where {T <: NoWidenTypes} = T
 # Product Quantization
 export PQTable, PQGraph
 export encode
-include("clustering.jl")
+#include("clustering.jl")
+include("clustering2.jl")
 include("pq.jl")
 include("pq_euclidean.jl")
 
