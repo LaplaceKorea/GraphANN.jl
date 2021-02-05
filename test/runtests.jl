@@ -9,6 +9,7 @@ using Statistics
 # Extra helpful imports
 using LightGraphs
 import SIMD
+import StaticArrays: SVector, @SVector
 
 import GraphANN: Neighbor
 

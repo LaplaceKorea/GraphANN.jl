@@ -584,7 +584,7 @@ function lloyds!(
     )
 
     for iter in 1:num_iterations
-        dynamic_thread(1:size(data, 2), 1024) do i
+        dynamic_thread(2:size(data, 2), 1024) do i
             threadlocal = tls[]
             @unpack current_minimums = threadlocal
 

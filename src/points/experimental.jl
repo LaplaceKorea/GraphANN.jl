@@ -27,47 +27,47 @@ end
 #####
 
 struct LazyArrayWrap{V <: SIMDType, N, T} <: AbstractMatrix{V}
-    parent::Vector{Euclidean{N,T}}
+    parent::Vector{SVector{N,T}}
 end
 
 Base.size(x::LazyArrayWrap{V,N}) where {V,N} = (div(N, length(V)), length(x.parent))
 Base.parent(x::LazyArrayWrap) = x.parent
 
-function LazyArrayWrap{V}(x::Vector{Euclidean{N,T}}) where {V <: SIMDType, N, T}
+function LazyArrayWrap{V}(x::Vector{SVector{N,T}}) where {V <: SIMDType, N, T}
     return LazyArrayWrap{V,N,T}(x)
 end
 
 function Base.getindex(x::LazyArrayWrap{V,N,T}, I::Vararg{Int, 2}) where {NV, V <: SIMDType{NV}, N, T}
     @boundscheck checkbounds(x, I...)
     @unpack parent = x
-    ptr = Ptr{Euclidean{NV,T}}(pointer(parent, I[2])) + (I[1] - 1) * sizeof(SIMD.Vec{NV,T})
+    ptr = Ptr{SVector{NV,T}}(pointer(parent, I[2])) + (I[1] - 1) * sizeof(SIMD.Vec{NV,T})
     return convert(V, unsafe_load(ptr))
 end
 
 # How do we pack these items.
 # Default definition.
-packed_type(::Type{<:Euclidean{<:Any,T}}) where {T} = SIMD.Vec{div(64,sizeof(T)),T}
+packed_type(::Type{<:SVector{<:Any,T}}) where {T} = SIMD.Vec{div(64,sizeof(T)),T}
 
 # specializations
-packed_type(::Type{<:Euclidean{<:Any,UInt8}}) = SIMD.Vec{32,UInt8}
+packed_type(::Type{<:SVector{<:Any,UInt8}}) = SIMD.Vec{32,UInt8}
 
 #####
 ##### Packed SIMD
 #####
 
-# Pack `K` Euclideans into a single `Vec`
-struct Packed{K, E <: Euclidean, V <: SIMD.Vec}
+# Pack `K` SVectors into a single `Vec`
+struct Packed{K, E <: SVector, V <: SIMD.Vec}
     repr::V
 
     # Inner constructor that only accepts packing if `E` and `V` have the same eltype.
-    function Packed{K,E,V}(repr::V) where {K, T, E <: Euclidean{<:Any,T}, V <: SIMD.Vec{<:Any,T}}
+    function Packed{K,E,V}(repr::V) where {K, T, E <: SVector{<:Any,T}, V <: SIMD.Vec{<:Any,T}}
         return new{K,E,V}(repr)
     end
 end
-Packed(e::Euclidean...) = Packed(e)
-function Packed(e::NTuple{K,Euclidean{N,T}}) where {K,N,T}
+Packed(e::SVector...) = Packed(e)
+function Packed(e::NTuple{K,SVector{N,T}}) where {K,N,T}
     V = SIMD.Vec{K * N, T}
-    return Packed{K, Euclidean{N,T}, V}(V(_merge(e...)))
+    return Packed{K, SVector{N,T}, V}(V(_merge(e...)))
 end
 
 Base.length(::Type{<:Packed{K}}) where {K} = K
@@ -76,7 +76,7 @@ simd_type(::Type{<:Packed{<:Any,<:Any,V}}) where {V} = simd_type(V)
 Base.transpose(x::Packed) = x
 
 unwrap(x::Packed) = x.repr
-function _Base.distance(A::P, B::P) where {K, E, V, P <: Packed{K, E, V}}
+function _Base.evaluate(::Euclidean, A::P, B::P) where {K, E, V, P <: Packed{K, E, V}}
     Base.@_inline_meta
     # Figure out the correct promotion type
     promote_type = simd_type(P)

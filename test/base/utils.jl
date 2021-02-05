@@ -1,3 +1,9 @@
+@testset "Testing Utils" begin
+    @test GraphANN.astype(Float32, 10) === Float32(10)
+    @test GraphANN.astype(Float32, 10) !== 10
+    @test GraphANN.astype(Float32, Float32(10)) === Float32(10)
+end
+
 @testset "Testing Neighbor" begin
     Neighbor = GraphANN.Neighbor
 

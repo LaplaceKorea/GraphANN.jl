@@ -15,6 +15,7 @@
         # in the column dimension (first dimension)
         mismatches = findall(ids .!= gt)
         rank_swap = CartesianIndex(1,0)
+        metric = GraphANN.Euclidean()
         for (a, b) in Iterators.partition(mismatches, 2)
             @test b - a == rank_swap
 
@@ -24,8 +25,8 @@
 
             # Need to add 1 to convert from the 0-based indexing to Julia's 1-based indexing.
             @test ==(
-                GraphANN.distance(query, dataset[ids[a] + 1]),
-                GraphANN.distance(query, dataset[ids[b] + 1]),
+                GraphANN.evaluate(metric, query, dataset[ids[a] + 1]),
+                GraphANN.evaluate(metric, query, dataset[ids[b] + 1]),
             )
 
             @test ids[a] == gt[b]
@@ -33,11 +34,11 @@
         end
     end
 
-    dataset = GraphANN.load_vecs(GraphANN.Euclidean{128,Float32}, dataset_path)
-    queries = GraphANN.load_vecs(GraphANN.Euclidean{128,Float32}, query_path)
+    dataset = GraphANN.load_vecs(SVector{128,Float32}, dataset_path)
+    queries = GraphANN.load_vecs(SVector{128,Float32}, query_path)
 
     # Using Float32
-    ids = GraphANN.bruteforce_search(queries, dataset)
+    ids = GraphANN.bruteforce_search(queries, dataset; metric = GraphANN.Euclidean())
     compare_ids(ids)
 
     # Using UInt8
@@ -45,8 +46,8 @@
     dataset_u8 = [map(UInt8, i) for i in dataset]
     ids = GraphANN.bruteforce_search(
         queries_u8,
-        dataset_u8,
+        dataset_u8;
+        metric = GraphANN.Euclidean(),
     )
     compare_ids(ids)
-
 end

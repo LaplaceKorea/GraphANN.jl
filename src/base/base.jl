@@ -8,20 +8,22 @@ import Mmap
 # deps
 import DataStructures
 import ProgressMeter
+import SIMD
+import StaticArrays: SVector
 import UnPack: @unpack
 
 #####
 ##### Generic Distance
 #####
 
-export distance, search, searchall
+export evaluate, search, searchall
 
 """
     distance(x, y)
 
 Return the distance between points `x` and `y`.
 """
-function distance end
+function evaluate end
 
 """
     distribute_distance(x)
@@ -36,6 +38,9 @@ distribute_distance(x) = x
 Optional metric function. Perform necessary pre-distance computations on query `x`.
 """
 distance_prehook(metric, x) = nothing
+
+export Euclidean
+include("euclidean.jl")
 
 #####
 ##### Search Hooks
@@ -72,7 +77,7 @@ include("minmax_heap.jl")
 ##### Utilities
 #####
 
-export safe_maximum, donothing, printlnstyled, zero!, typemax!, cdiv, Map
+export safe_maximum, donothing, printlnstyled, zero!, typemax!, cdiv, astype
 export Neighbor, getid, getdistance, idequal, idtype, costtype
 export RobinSet
 export zeroas, medioid, nearest_neighbor

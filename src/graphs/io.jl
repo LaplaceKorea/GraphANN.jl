@@ -2,13 +2,14 @@
 ##### Serialization
 #####
 
-function save(file::AbstractString, g::UniDirectedGraph; kw...)
+function save(file::AbstractString, x; kw...)
     open(file; write = true) do io
-        save(io, g; kw...)
+        save(io, x; kw...)
     end
     return nothing
 end
 
+save(io::IO, meta::MetaGraph{<:UniDirectedGraph}; kw...) = save(io, meta.graph; kw...)
 function save(
     io::IO,
     g::UniDirectedGraph{T};

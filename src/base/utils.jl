@@ -11,6 +11,10 @@ typemax!(x) = fill!(x, typemax(eltype(x)))
 cdiv(a::Integer, b::Integer) = cdiv(promote(a, b)...)
 cdiv(a::T, b::T) where {T <: Integer} = one(T) + div(a - one(T), b)
 
+astype(::Type{T}, x::T) where {T} = x
+astype(::Type{T}, x) where {T} = convert(T, x)
+astype(::Type{T}) where {T} = x -> astype(T, x)
+
 #####
 ##### Neighbor
 #####
@@ -33,9 +37,7 @@ struct Neighbor{T,D}
     # Inner conversion constructors
     # Require explicitly calling out integer type.
     Neighbor{T}(id, distance::D) where {T,D} = Neighbor{T,D}(id, distance)
-    Neighbor{T,D}(id::T, distance::D) where {T,D} = new{T,D}(id, distance)
     Neighbor{T,D}(id, distance::D) where {T,D} = new{T,D}(convert(T, id), distance)
-    Neighbor{T,D}(id, distance) where {T,D} = new{T,D}(convert(T, id), convert(D, distance))
     Neighbor{T,D}() where {T,D} = new{T,D}(zero(T), typemax(D))
     function Neighbor{T,Any}(id, distance) where {T}
         err = ArgumentError("""
@@ -109,12 +111,9 @@ Base.iterate(set::RobinSet, s) = iterate(keys(set.dict), s)
 ##### Medoid
 #####
 
-# Find the medioid of a dataset
-zeroas(::Type{T}, x::Number) where {T} = zero(T)
-
-function medioid(data::Vector{T}) where {T}
+function medioid(data::Vector{SVector{N,T}}) where {N,T}
     # Thread to make fast for larger datasets.
-    tls = ThreadLocal(zeroas(Float32, T))
+    tls = ThreadLocal(zero(SVector{N,Float32}))
     dynamic_thread(data, 1024) do i
         tls[] += i
     end
@@ -126,7 +125,7 @@ end
 ##### nearest_neighbor
 #####
 
-function nearest_neighbor(query::T, data::AbstractVector) where {T}
+function nearest_neighbor(query::T, data::AbstractVector; metric = Euclidean()) where {T}
     # Thread local storage is a NamedTuple with the following fields:
     # `min_ind` - The index of the nearest neighbor seen by this thread so far.
     # `min_dist` - The distance corresponding to the current nearest neighbor.
@@ -135,7 +134,7 @@ function nearest_neighbor(query::T, data::AbstractVector) where {T}
     dynamic_thread(1:length(data), 128) do i
         @inbounds x = data[i]
         @unpack min_ind, min_dist = tls[]
-        dist = distance(query, x)
+        dist = evaluate(metric, query, x)
 
         # Update Thread Local Storage is closer
         if dist < min_dist

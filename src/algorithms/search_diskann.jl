@@ -202,13 +202,13 @@ function _Base.search(
     start::StartNode,
     query;
     callbacks = GreedyCallbacks(),
-    metric = distance,
+    metric = Euclidean(),
 )
     empty!(algo)
 
     # Destructure argument
     @unpack graph, data = meta
-    pushcandidate!(algo, Neighbor(algo, start.index, metric(query, start.value)))
+    pushcandidate!(algo, Neighbor(algo, start.index, evaluate(metric, query, start.value)))
     while !done(algo)
         p = getid(unsafe_peek(algo))
         neighbors = LightGraphs.outneighbors(graph, p)
@@ -230,7 +230,7 @@ function _Base.search(
             # Perform distance query, and try to prefetch the next datapoint.
             # NOTE: Checking if a vertex has been visited here is actually SLOWER than
             # deferring until after the distance comparison.
-            @inbounds d = metric(query, data[v])
+            @inbounds d = evaluate(metric, query, data[v])
 
             ## only bother to add if it's better than the worst currently tracked.
             if d < algmax || !isfull(algo)
@@ -245,54 +245,54 @@ function _Base.search(
 end
 
 # Specialize for using PQ based distance computations.
-function _Base.search(
-    algo::GreedySearch,
-    meta::MetaGraph{<:Any, <:PQGraph},
-    start::StartNode,
-    query;
-    callbacks = GreedyCallbacks(),
-    metric = distance,
-)
-    empty!(algo)
-
-    # Destructure argument
-    @unpack graph, data = meta
-    pushcandidate!(algo, Neighbor(algo, start.index, metric(query, start.value)))
-    while !done(algo)
-        p = getid(unsafe_peek(algo))
-        neighbors = LightGraphs.outneighbors(graph, p)
-
-        # TODO: Implement prefetching for PQGraphs
-        # Prefetch all new datapoints.
-        # IMPORTANT: This is critical for performance!
-        neighbor_points = data[p]
-        unsafe_prefetch(neighbor_points, 1, length(neighbor_points))
-
-        # Prune
-        # Do this here to allow the prefetched vectors time to arrive in the cache.
-        getcandidate!(algo)
-        reduce!(algo)
-
-        # Distance computations
-        for i in eachindex(neighbors)
-            # Since PQ based distance computations take longer, check if we even need
-            # to perform the distance computation first.
-            @inbounds v = neighbors[i]
-            isvisited(algo, v) && continue
-
-            @inbounds d = metric(query, neighbor_points[i])
-
-            ## only bother to add if it's better than the worst currently tracked.
-            if d < getdistance(maximum(algo)) || !isfull(algo)
-                pushcandidate!(algo, Neighbor(algo, v, d))
-            end
-        end
-
-        callbacks.postdistance(algo, neighbors)
-    end
-
-    return nothing
-end
+# function _Base.search(
+#     algo::GreedySearch,
+#     meta::MetaGraph{<:Any, <:PQGraph},
+#     start::StartNode,
+#     query;
+#     callbacks = GreedyCallbacks(),
+#     metric = distance,
+# )
+#     empty!(algo)
+#
+#     # Destructure argument
+#     @unpack graph, data = meta
+#     pushcandidate!(algo, Neighbor(algo, start.index, metric(query, start.value)))
+#     while !done(algo)
+#         p = getid(unsafe_peek(algo))
+#         neighbors = LightGraphs.outneighbors(graph, p)
+#
+#         # TODO: Implement prefetching for PQGraphs
+#         # Prefetch all new datapoints.
+#         # IMPORTANT: This is critical for performance!
+#         neighbor_points = data[p]
+#         unsafe_prefetch(neighbor_points, 1, length(neighbor_points))
+#
+#         # Prune
+#         # Do this here to allow the prefetched vectors time to arrive in the cache.
+#         getcandidate!(algo)
+#         reduce!(algo)
+#
+#         # Distance computations
+#         for i in eachindex(neighbors)
+#             # Since PQ based distance computations take longer, check if we even need
+#             # to perform the distance computation first.
+#             @inbounds v = neighbors[i]
+#             isvisited(algo, v) && continue
+#
+#             @inbounds d = metric(query, neighbor_points[i])
+#
+#             ## only bother to add if it's better than the worst currently tracked.
+#             if d < getdistance(maximum(algo)) || !isfull(algo)
+#                 pushcandidate!(algo, Neighbor(algo, v, d))
+#             end
+#         end
+#
+#         callbacks.postdistance(algo, neighbors)
+#     end
+#
+#     return nothing
+# end
 
 # Single Threaded Query
 function _Base.searchall(
@@ -302,7 +302,7 @@ function _Base.searchall(
     queries::AbstractVector;
     num_neighbors = 10,
     callbacks = GreedyCallbacks(),
-    metric::F = distance,
+    metric::F = Euclidean(),
 ) where {F}
     num_queries = length(queries)
     dest = Array{eltype(meta.graph),2}(undef, num_neighbors, num_queries)
@@ -310,7 +310,7 @@ function _Base.searchall(
         # -- optional telemetry
         callbacks.prequery()
 
-        _Base.distance_prehook(metric, query)
+        #_Base.distance_prehook(metric, query)
         search(algo, meta, start, query; callbacks, metric)
 
         # Copy over the results to the destination
@@ -333,7 +333,7 @@ function _Base.searchall(
     queries::AbstractVector;
     num_neighbors = 10,
     callbacks = GreedyCallbacks(),
-    metric::F = distance,
+    metric::F = Euclidean(),
 ) where {F}
     num_queries = length(queries)
     dest = Array{eltype(meta.graph),2}(undef, num_neighbors, num_queries)

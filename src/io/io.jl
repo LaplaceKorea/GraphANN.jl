@@ -12,6 +12,7 @@ import .._Trees: TreeNode, Tree
 # deps
 import LightGraphs
 import ProgressMeter
+import StaticArrays: SVector
 import UnPack: @unpack
 
 # Support for DiskANN generated binary files.

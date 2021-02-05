@@ -61,12 +61,7 @@ end
 # still allocate.
 #
 # This MAY get fixed in Julia 1.6, which will const-propagate keyword arguments.
-@inline function initialize!(
-    by::B,
-    filter::F,
-    x::Pruner,
-    itr;
-) where {B, F}
+@inline function initialize!(by::B, filter::F, x::Pruner, itr) where {B, F}
     empty!(x)
 
     # Add all items from the input iterator to the local item list.
@@ -236,7 +231,7 @@ function neighbor_updates!(
     # Use lazy functions to efficientaly initialize the Pruner object
     vertex_data = data[vertex]
     initialize!(
-        u -> Neighbor(meta, u, distance(vertex_data, @inbounds data[u])),
+        u -> Neighbor(meta, u, evaluate(Euclidean(), vertex_data, @inbounds data[u])),
         !isequal(vertex),
         pruner,
         candidates,
@@ -258,7 +253,7 @@ function neighbor_updates!(
 
         # Note: We're indexing `data` with `Neighbor` objects, but that's fine because
         # we've defined that behavior in `utils.jl`.
-        f = x -> (alpha * distance(data[i], data[x]) <= getdistance(x))
+        f = x -> (alpha * evaluate(Euclidean(), data[i], data[x]) <= getdistance(x))
         prune!(f, pruner; start = state)
         length(nextlist) >= target_degree && break
 

@@ -47,7 +47,7 @@
 end
 
 function test_index(
-    dataset::Vector{GraphANN.Euclidean{N,T}},
+    dataset::Vector{SVector{N,T}},
     graph_type = GraphANN.DefaultAdjacencyList{UInt32}
 ) where {N,T}
 
@@ -70,8 +70,8 @@ function test_index(
     @test is_connected(g)
 
     # Lets try a search
-    queries = GraphANN.load_vecs(GraphANN.Euclidean{N,Float32}, query_path)
-    queries = convert.(GraphANN.Euclidean{N,T}, queries)
+    queries = GraphANN.load_vecs(SVector{N,Float32}, query_path)
+    queries = map(x -> map(T, x), queries)
 
     # Need to adjust ground-truth from index-0 to index-1
     ground_truth = GraphANN.load_vecs(groundtruth_path) .+ UInt32(1)
@@ -89,8 +89,8 @@ end
 
 @testset "Testing Index" begin
     # Load the dataset into memory
-    dataset = GraphANN.load_vecs(GraphANN.Euclidean{128,Float32}, dataset_path)::Vector{GraphANN.Euclidean{128,Float32}}
-    dataset_u8 = map(x -> convert(GraphANN.Euclidean{128,UInt8}, x), dataset)
+    dataset = GraphANN.load_vecs(SVector{128,Float32}, dataset_path)::Vector{SVector{128,Float32}}
+    dataset_u8 = map(x -> convert(SVector{128,UInt8}, x), dataset)
 
     # Index generation using both Float32 and UInt8
     meta = test_index(dataset)

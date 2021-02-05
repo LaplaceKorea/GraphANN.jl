@@ -14,8 +14,6 @@ DiskANNComparison(x::Tuple) = DiskANNComparison(x...)
 approx_or_greater(a, b) = (a ≈ b) || (a > b)
 
 @testset "Testing Query with DiskANN" begin
-    distance = GraphANN.distance
-
     # Parameters taken from running the DiskANN code on the index included in the
     # "data" directory.
     #
@@ -60,7 +58,7 @@ approx_or_greater(a, b) = (a ≈ b) || (a > b)
     end
 
     # Load in siftsmall dataset, queries, and ground truth.
-    data = GraphANN.load_vecs(GraphANN.Euclidean{128,Float32}, dataset_path)
+    data = GraphANN.load_vecs(SVector{128,Float32}, dataset_path)
     graph = GraphANN.load_graph(
         GraphANN._IO.DiskANN(),
         diskann_index,
@@ -70,7 +68,7 @@ approx_or_greater(a, b) = (a ≈ b) || (a > b)
 
     meta = GraphANN.MetaGraph(graph, data)
 
-    queries = GraphANN.load_vecs(GraphANN.Euclidean{128,Float32}, query_path)
+    queries = GraphANN.load_vecs(SVector{128,Float32}, query_path)
 
     # Add "1" to ground truth to convert from index-0 to Julia's index-1
     ground_truth = GraphANN.load_vecs(groundtruth_path) .+ 1

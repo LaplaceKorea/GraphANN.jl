@@ -127,3 +127,14 @@ Base.getindex(t::ThreadLocal, i::Integer = Threads.threadid()) = t.values[i]
 Base.setindex!(t::ThreadLocal, v) = (t.values[Threads.threadid()] = v)
 getall(t::ThreadLocal) = collect(values(t.values))
 getpool(t::ThreadLocal) = t.pool
+
+# In the special case of NamedTuples, allow construction of a sub thread-local
+# by property name.
+function Base.getproperty(tls::ThreadLocal{T}, sym::Symbol) where {T <: NamedTuple}
+    if sym == :values || sym == :pool
+        return getfield(tls, sym)
+    else
+        values = Dict(k => getproperty(v, sym) for (k, v) in getfield(tls, :values))
+        return ThreadLocal{fieldtype(T, sym)}(values, getfield(tls, :pool))
+    end
+end

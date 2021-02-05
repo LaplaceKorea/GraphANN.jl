@@ -33,7 +33,7 @@ function bruteforce_search(
     savefile = nothing,
     idtype::Type{T} = UInt32,
     costtype::Type{D} = costtype(A, B),
-    metric::F = distance,
+    metric::F = Euclidean(),
 ) where {A,B,T,D,F}
     # Allocate max heaps for each
     # One for each column in the queries matrix
@@ -57,7 +57,7 @@ function bruteforce_search(
         for (base_id, base) in enumerate(dataset)
             for (heap_num, query_id) in enumerate(range)
                 query = queries[query_id]
-                dist = metric(query, base)
+                dist = evaluate(metric, query, base)
 
                 # Need to convert from 1 based indexing to 0 based indexing...
                 push!(heaps[heap_num], Neighbor{T}(base_id - 1, dist))

@@ -6,13 +6,15 @@ using .._Graphs
 using .._Points
 
 # Special imports
-import .._Points: cast, squish, LazyWrap, LazyArrayWrap, Packed, set!
+import .._Base: cast
+import .._Points: squish, LazyWrap, LazyArrayWrap, Packed, set!
 
 # deps
 import LightGraphs
 import LightGraphs.SimpleGraphs.fadj
 import ProgressMeter
 import SIMD
+import StaticArrays: SVector
 import UnPack: @unpack
 
 # Widen data types, but no bigger than 64-bits.
@@ -25,9 +27,9 @@ maybe_widen(::Type{T}) where {T <: NoWidenTypes} = T
 # Product Quantization
 export PQTable, PQGraph
 export encode
-#include("clustering.jl")
-include("clustering2.jl")
-include("pq.jl")
-include("pq_euclidean.jl")
+# #include("clustering.jl")
+# include("clustering2.jl")
+# include("pq.jl")
+# include("pq_euclidean.jl")
 
 end

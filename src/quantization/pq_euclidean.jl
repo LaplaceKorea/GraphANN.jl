@@ -119,7 +119,7 @@ function partial_encode(
     # Keep track of one per group
     minimum = CurrentMinimum{K, cost_type}()
     for i in 1:num_centroids
-        current_distances = distance(x, centroids[i])
+        current_distances = evaluate(Euclidean(), x, centroids[i])
         minimum = update(minimum, current_distances, i - 1)
     end
     return Tuple(minimum.index)

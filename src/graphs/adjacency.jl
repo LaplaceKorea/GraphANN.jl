@@ -155,6 +155,7 @@ end
 # This is basically a CSR style format where the adacency list for vertex `i` is stored
 # in the range `offsets[i]:(offsets[i+1] - 1)`.
 # Adjacency lists are materialized lazily as views.
+# NOTE: Offsets must be 1 longer than storage with `offsets[end] == length(storage) + 1`
 struct DenseAdjacencyList{T} <: AbstractAdjacencyList{T}
     storage::Vector{T}
     offsets::Vector{Int64}
@@ -166,7 +167,7 @@ _cannot_mutate() = error("Cannot modify a DenseAdjacencyList")
 Base.push!(x::DenseAdjacencyList, v) = _cannot_mutate()
 # The adjacency list must be constructed correctly so that the below rang is always inbounds.
 function Base.getindex(x::DenseAdjacencyList, i)
-    return Base.unsafe_view(x.storage, x.offsets[i]:(x.offsets[i+1]-1))
+    return Base.unsafe_view(x.storage, x.offsets[i]:(x.offsets[i+1] - 1))
 end
 
 caninsert(x::DenseAdjacencyList, i) = false

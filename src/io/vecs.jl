@@ -33,17 +33,17 @@ end
 
 # Overload points for customizing loading.
 vecs_read_type(::Type{T}) where {T} = T
-vecs_read_type(::Type{Euclidean{N,T}}) where {N,T} = T
+vecs_read_type(::Type{SVector{N,T}}) where {N,T} = T
 
 vecs_reshape(::Type, v, dim) = reshape(v, convert(Int, dim), :)
-vecs_reshape(::Type{<:Euclidean}, v, dim) = v
+vecs_reshape(::Type{<:SVector}, v, dim) = v
 
 function addto!(x::AbstractVector{T}, i, v::AbstractVector{T}) where {T}
     copyto!(x, i, v, 1, length(v))
     return length(v)
 end
 
-function addto!(v::Vector{Euclidean{N,T}}, index, buf::AbstractVector{T}) where {N,T}
+function addto!(v::Vector{SVector{N,T}}, index, buf::AbstractVector{T}) where {N,T}
     length(buf) == N || error("Lenght of buffer is incorrect!")
     ptr = Ptr{T}(pointer(v, index))
     unsafe_copyto!(ptr, pointer(buf), N)
