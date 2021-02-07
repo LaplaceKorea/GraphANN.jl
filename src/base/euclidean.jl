@@ -34,10 +34,10 @@ When indexing, converts elements to type `V`.
 # Examples
 ```julia-repl
 julia> using SIMD
-julia> x = rand(GraphANN.Euclidean{12,UInt8})
+julia> x = rand(GraphANN.SVector{12,UInt8})
 Euclidean{12,UInt8} <27, 171, 144, 15, 162, 14, 55, 5, 31, 143, 174, 211>
 
-julia> y = GraphANN._Points.EagerWrap{GraphANN.Euclidean{4,Float32}}(x);
+julia> y = GraphANN._Points.EagerWrap{GraphANN.SVector{4,Float32}}(x);
 
 julia> y[1]
 <4 x Float32>[27.0, 171.0, 144.0, 15.0]
@@ -159,7 +159,7 @@ simd_type(::Type{T}) where {T} = simd_type(T, T)
 #####
 
 """
-    distance(a::Euclidean, b::Euclidean)
+    evaluate(::Euclidean, a::SVector, b::SVector)
 
 Return the euclidean distance between `a` and `b`.
 Return type can be queried by `costtype(a, b)`.
@@ -170,24 +170,15 @@ function evaluate(metric::Euclidean, a::A, b::B) where {A <: SVector, B <: SVect
     return evaluate(metric, EagerWrap{T}(a), EagerWrap{T}(b))
 end
 
-# TODO: Think through if this API makes sense
-# # Allow elements to be passed by pointer.
-# # Can save a little bit of time in places due to calling conventions.
-# function _Base.distance(a::Ptr{<:Euclidean}, b::Euclidean)
-#     return distance(unsafe_load(a), b)
-# end
-
 function evaluate(::Euclidean, a::EagerWrap{V,K}, b::EagerWrap{V,K}) where {V, K}
     Base.@_inline_meta
     s = zero(accum_type(V))
-
     for i in 1:K
         z = @inbounds(a[i] - b[i])
         s = square_accum(z, s)
     end
     return _sum(s)
 end
-
 
 # The generic "sum" function in SIMD.jl is actually really slow.
 # Here, we define our own generic reducing sum function which actually ends up being much

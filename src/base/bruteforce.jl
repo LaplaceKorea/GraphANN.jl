@@ -29,12 +29,13 @@ function bruteforce_search(
     queries::AbstractVector{A},
     dataset::AbstractVector{B},
     num_neighbors::Int = 100;
+    executor::G = dynamic_thread,
     groupsize = 32,
     savefile = nothing,
     idtype::Type{T} = UInt32,
     costtype::Type{D} = costtype(A, B),
     metric::F = Euclidean(),
-) where {A,B,T,D,F}
+) where {A,B,G,T,D,F}
     # Allocate max heaps for each
     # One for each column in the queries matrix
     _heaps = [BoundedMaxHeap{Neighbor{T,D}}(num_neighbors) for _ in 1:groupsize]
@@ -50,7 +51,7 @@ function bruteforce_search(
     # Batch the query range so each thread works on a chunk of queries at a time.
     # The dynamic load balancer will give one batch at a time to each worker.
     batched_iter = BatchedRange(1:num_queries, groupsize)
-    dynamic_thread(batched_iter) do range
+    executor(batched_iter) do range
         heaps = tls[]
 
         # Compute nearest neighbors for this batch across the whole dataset.

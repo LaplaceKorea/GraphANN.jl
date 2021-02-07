@@ -1,15 +1,8 @@
 module GraphANN
 
-const DEBUG = true
-@static if DEBUG
-    macro debug_assert(expr)
-        return :(@assert $expr)
-    end
-else
-    macro debug_assert(expr)
-        return :()
-    end
-end
+# We use StaticArrays pretty heavily in the code, so import the `SVector` symbol
+# so users can access this type via `GraphANN.SVector`.
+import StaticArrays: SVector
 
 # Bootstrap
 include("base/base.jl"); using ._Base
@@ -21,69 +14,41 @@ include("quantization/quantization.jl"); using ._Quantization
 include("io/io.jl"); using ._IO
 
 # Core implementation
-include("algorithms/algorithms.jl")
-using .Algorithms
+include("algorithms/algorithms.jl"); using .Algorithms
 
-function sweep(meta, start, queries, gt; num_neighbors = 5)
-    times, callbacks = Algorithms.latency_mt_callbacks()
-    for i in 10:10:200
-        algo = ThreadLocal(GreedySearch(i; costtype = costtype(meta.data)))
-        # warmup run.
-        GraphANN.searchall(algo, meta, start, queries; num_neighbors = num_neighbors, callbacks = callbacks)
-        # Actual run
-        rt = @elapsed ids = GraphANN.searchall(
-            algo,
-            meta,
-            start,
-            queries;
-            num_neighbors = num_neighbors,
-            callbacks = callbacks
-        )
-
-        _recall = mean(recall(gt, ids))
-        alltimes = reduce(vcat, getall(times))
-        empty!.(getall(times))
-
-        sorted_times = sort(alltimes)
-        latency_mean = mean(alltimes) / 1000
-        latency_999 = sorted_times[ceil(Int, 0.999 * length(sorted_times))] / 1000
-        latency_001 = sorted_times[floor(Int, 0.001 * length(sorted_times))] / 1000
-        qps = length(queries) / rt
-
-        print("$i\t\t")
-        print("$(round(qps; digits = 2))\t\t")
-        print("$(round(latency_mean; digits = 2))\t\t")
-        print("$(round(latency_999; digits = 2))\t\t")
-        print("$(round(latency_001; digits = 2))\t\t")
-        println(_recall)
-    end
-end
-
-#####
-##### Misc development functions
-#####
-
-# siftsmall() = joinpath(dirname(@__DIR__), "data", "siftsmall_base.fvecs")
-# function _prepare(path = siftsmall(); allocator = stdallocator, maxlines = nothing)
-#     dataset = load_vecs(
-#         Euclidean{128,UInt8},
-#         path;
-#         maxlines = maxlines,
-#         allocator = allocator
-#     )
+# function sweep(meta, start, queries, gt; num_neighbors = 5)
+#     times, callbacks = Algorithms.latency_mt_callbacks()
+#     for i in 10:10:200
+#         algo = ThreadLocal(GreedySearch(i; costtype = costtype(meta.data)))
+#         # warmup run.
+#         GraphANN.searchall(algo, meta, start, queries; num_neighbors = num_neighbors, callbacks = callbacks)
+#         # Actual run
+#         rt = @elapsed ids = GraphANN.searchall(
+#             algo,
+#             meta,
+#             start,
+#             queries;
+#             num_neighbors = num_neighbors,
+#             callbacks = callbacks
+#         )
 #
-#     parameters = GraphParameters(
-#         alpha = 1.2,
-#         window_size = 80,
-#         target_degree = 10,
-#         prune_threshold_degree = 15,
-#         prune_to_degree = 10,
-#     )
+#         _recall = mean(recall(gt, ids))
+#         alltimes = reduce(vcat, getall(times))
+#         empty!.(getall(times))
 #
-#     return (;
-#         dataset,
-#         parameters,
-#     )
+#         sorted_times = sort(alltimes)
+#         latency_mean = mean(alltimes) / 1000
+#         latency_999 = sorted_times[ceil(Int, 0.999 * length(sorted_times))] / 1000
+#         latency_001 = sorted_times[floor(Int, 0.001 * length(sorted_times))] / 1000
+#         qps = length(queries) / rt
+#
+#         print("$i\t\t")
+#         print("$(round(qps; digits = 2))\t\t")
+#         print("$(round(latency_mean; digits = 2))\t\t")
+#         print("$(round(latency_999; digits = 2))\t\t")
+#         print("$(round(latency_001; digits = 2))\t\t")
+#         println(_recall)
+#     end
 # end
 
 end # module

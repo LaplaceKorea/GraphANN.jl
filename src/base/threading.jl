@@ -64,6 +64,9 @@ end
 ##### Dynamic
 #####
 
+single_thread(f::F, domain, args...) where {F} = foreach(f, domain)
+single_thread(f::F, ::ThreadPool, domain, args...) where {F} = single_thread(f, domain)
+
 # Default to using all threads
 dynamic_thread(f::F, args...) where {F} = dynamic_thread(f, allthreads(), args...)
 
@@ -112,6 +115,7 @@ struct ThreadLocal{T,U}
         return new{T, U}(values, pool)
     end
 end
+param(::ThreadLocal{T}) where {T} = T
 
 # Convenience, wrap around a NamedTuple
 # Need to define a few methods to get around ambiguities.

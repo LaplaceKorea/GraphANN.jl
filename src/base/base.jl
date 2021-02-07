@@ -95,6 +95,13 @@ export bruteforce_search
 include("bruteforce.jl")
 
 #####
+##### Partition utilities
+#####
+
+export PartitionUtil, partition!
+include("partition.jl")
+
+#####
 ##### Generic MetaGraph
 #####
 
