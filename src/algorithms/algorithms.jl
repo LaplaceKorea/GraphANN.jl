@@ -5,6 +5,7 @@ export GreedySearch, StartNode
 export TreeSearcher
 
 # stdlib
+import LinearAlgebra
 import Statistics
 import Random
 
@@ -21,12 +22,13 @@ import DataStructures
 import LightGraphs
 import ProgressMeter
 import Setfield
-import StaticArrays: SVector
+import StaticArrays: SVector, @SVector
 import UnPack: @unpack, @pack!
 
-include("search_diskann.jl")
-include("build_diskann.jl")
+include("diskann/search.jl")
+include("diskann/build.jl")
+include("sptag/search.jl")
 include("sptag/tptree.jl")
-include("search_sptag.jl")
+include("sptag/build.jl")
 
 end # module

@@ -102,13 +102,7 @@ function save_bin(diskann::DiskANN, path::AbstractString, args...)
     end
 end
 
-function save_bin(
-    ::DiskANN,
-    io::IO,
-    data::AbstractMatrix,
-    num_points = size(data, 2),
-    point_dim = size(data, 1)
-)
+function save_bin(::DiskANN, io::IO, data::AbstractMatrix, num_points = size(data, 2), point_dim = size(data, 1))
     write(io, Cuint(num_points))
     write(io, Cuint(point_dim))
     write(io, data)

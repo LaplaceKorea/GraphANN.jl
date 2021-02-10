@@ -12,14 +12,14 @@ function exact_div(A, B)
 end
 
 # Type Parameters
-# N - size(self.centroids, 2) - The number of centroids in this clustering.
+# N - size(self.centroids, 2) - The number of partitions in this clustering.
 # T - The element type of the centroid types.
 struct PQTable{N,T}
     # Centroids - one for each partition of the data space
     centroids::Matrix{T}
 end
 
-function PQTable{N}(centroids::Matrix{T}) where {N,V,T}
+function PQTable{N}(centroids::Matrix{T}) where {N,T}
     if size(centroids, 2) != N
         err = ArgumentError("""
         Centroid matrix for PQTable with $N partitions must have $N columns.
@@ -32,24 +32,25 @@ end
 
 # TODO: Work on making inference work better here.
 # Currently, not everything is statically typed.
-function PQTable{N}(data::Vector{Euclidean{M,T}}, num_centroids::Integer) where {N, M, T}
-    # How many element are in each partition?
-    # `_valdiv` will error if `N` does not divide the data size.
-    partition_size = exact_div(M, N)
-    centroids = ntuple(Val(N)) do i
-        _data = getindex.(cast.(Euclidean{partition_size,T}, data), i)
-        centroids = choose_centroids(
-            _data,
-            num_centroids;
-            num_iterations = 10,
-            oversample = 10
-        )
-        return lloyds(centroids, _data; max_iterations = 100, tol = 1E-5)
-    end
+# function PQTable{N}(data::Vector{Euclidean{M,T}}, num_centroids::Integer) where {N, M, T}
+#     # How many element are in each partition?
+#     # `_valdiv` will error if `N` does not divide the data size.
+#     partition_size = exact_div(M, N)
+#     centroids = ntuple(Val(N)) do i
+#         _data = getindex.(cast.(Euclidean{partition_size,T}, data), i)
+#         centroids = choose_centroids(
+#             _data,
+#             num_centroids;
+#             num_iterations = 10,
+#             oversample = 10
+#         )
+#         return lloyds(centroids, _data; max_iterations = 100, tol = 1E-5)
+#     end
+#
+#     centroids = reduce(hcat, centroids)
+#     return PQTable{N}(centroids)
+# end
 
-    centroids = reduce(hcat, centroids)
-    return PQTable{N}(centroids)
-end
 encoded_length(::PQTable{N}) where {N} = N
 
 refpointer(::Type{T}, x::Ref{U}) where {T,U} = Ptr{T}(Base.unsafe_convert(Ptr{U}, x))
@@ -105,7 +106,7 @@ function _unsafe_encode_fallback!(
 end
 
 # Compute distance for a vector of data points.
-function encode(::Type{U}, encoder, x::AbstractVector; allocator = stdallocator) where {U}
+function encode(::Type{U}, encoder, x::AbstractVector; allocator = stdallocator) where {U <: Unsigned}
     N = encoded_length(encoder)
     data = allocator(NTuple{N,U}, length(x))
     dynamic_thread(eachindex(data)) do i

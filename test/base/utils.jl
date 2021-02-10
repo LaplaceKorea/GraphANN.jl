@@ -114,3 +114,33 @@ end
     # Test iteration
     @test collect(x) == [10:2:16, 18:2:24, 26:2:30]
 end
+
+@testset "Testing meanvar" begin
+    for T in (Float32, UInt8), i in 1:100, corrected in (true, false)
+        x = rand(T, 100)
+        m, v = GraphANN._Base.meanvar(x, corrected)
+        @test isapprox(m, Statistics.mean(x))
+        @test isapprox(v, Statistics.var(x; corrected = corrected))
+    end
+
+    # Test inference works for things like generators.
+    # Pass a somewhat complicated generator but provide a type-stable default.
+    y = rand(1:100, 10)
+    @inferred GraphANN._Base.meanvar(sin(Float32(i) ^ 2) for i in y; default = zero(Float32))
+
+    # This should also work for vectors of StaticVectors
+    samples = [@SVector rand(Float32, 16) for _ in 1:100]
+    means, variances = GraphANN._Base.meanvar(samples)
+
+    @test isa(means, SVector{16, Float32})
+    @test isa(variances, SVector{16, Float32})
+
+    # Compute mean and variances another way to check equality.
+    samples_2d = reinterpret(reshape, Float32, samples)
+    @test isapprox(means, Statistics.mean.(eachrow(samples_2d)))
+    @test isapprox(variances, Statistics.var.(eachrow(samples_2d)))
+
+    @inferred GraphANN._Base.meanvar(samples)
+    y = rand(1:length(samples), 10)
+    @inferred GraphANN._Base.meanvar(samples[i] for i in y; default = zero(eltype(samples)))
+end

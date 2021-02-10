@@ -62,7 +62,7 @@ Now that Julia is up and running, we need to get some data into the program.
 At the moment, the code only knows how to load and save data in the `.[i|b|f]vecs` form, but more can be added if desired.
 To load the dataset, run
 ```julia
-dataset = GraphANN.load_vecs(GraphANN.Euclidean{128,UInt8}, "/path/to/dataset"; [maxlines = 1_000_000])
+dataset = GraphANN.load_vecs(GraphANN.SVector{128,UInt8}, "/path/to/dataset"; [maxlines = 1_000_000])
 ```
 This will, as the name implies, load data from the `vecs` file format.
 The optional keyword `maxlines` allows you to limit the number of points retrieved.
@@ -70,7 +70,7 @@ If it is not set, then `load_vecs` will load the entire dataset.
 
 Loading the query set is similar.
 ```julia
-queries = GraphANN.load_vecs(GraphANN.Euclidean{128,UInt8}, "/path/to/queries")
+queries = GraphANN.load_vecs(GraphANN.SVector{128,UInt8}, "/path/to/queries")
 ```
 
 ### Generating the Ground Truth
@@ -109,29 +109,13 @@ using GraphANN
 
 # Get the first 10 million entries in the Sift 1B dataset.
 # Note: trailing semi-colons are optional and just surpress the printing of the results to the REPL.
-dataset = GraphANN.load_vecs(GraphANN.Euclidean{128,UInt8}, "/data/bigann.bvecs"; maxlines = 10_000_000);
-queries = GraphANN.load_vecs(GraphANN.Euclidean{128,UInt8}, "/data/query.bvecs");
+dataset = GraphANN.load_vecs(GraphANN.SVector{128,UInt8}, "/data/bigann.bvecs"; maxlines = 10_000_000);
+queries = GraphANN.load_vecs(GraphANN.SVector{128,UInt8}, "/data/query.bvecs");
 
 gt = GraphANN.bruteforce_search(queries, dataset, 100; groupsize = 64, savefile = "groundtruth.ivecs")
 GraphANN.save_vecs("another_groundtruth.ivecs", gt)
 ```
 
-## Next Steps
-
-1. Measure Bandwidth - are we bandwidth limited?
-2. Ways of improving accuracy or performance.
-    - Do something else while waiting for data?
-    - Gather data more quickly.
-
-3. Measure accuracy after only a single round of pruning.
-
-4. Put documentation on graph serialization format ... actually with the serialized graphs.
-(and probably in the git repo as well)
-
-5. Measure exploration vs direct path when navigating to nearest neighbor (vague, but have general idea).
-
-
-# TODO:
-
-Picture of graphs and adjacency lists
-Picture of dense adjacency list - How is it saving space.
+- pointer to person who has asure PM systems.
+- have code if they want (Julia/C++ discussion).
+- SPTAG and the parameters for construction.

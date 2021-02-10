@@ -17,12 +17,11 @@ import SIMD
 import StaticArrays: SVector
 import UnPack: @unpack
 
-# Widen data types, but no bigger than 64-bits.
-const NoWidenTypes = Union{Float64,Int64,UInt64}
-maybe_widen(x) = widen(x)
-maybe_widen(x::T) where {T <: NoWidenTypes} = x
-maybe_widen(::Type{T}) where {T} = widen(T)
-maybe_widen(::Type{T}) where {T <: NoWidenTypes} = T
+# Widen data types to 64 bits
+widen64(::Type{<:Unsigned}) = UInt64
+widen64(::Type{<:Signed}) = Int64
+widen64(::Type{<:AbstractFloat}) = Float64
+widen64(x::T) where {T} = convert(widen64(T), x)
 
 # Product Quantization
 export PQTable, PQGraph

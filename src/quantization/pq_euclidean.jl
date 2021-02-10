@@ -72,9 +72,7 @@ function unsafe_encode!(
     centroids::BinnedPQCentroids{<:Any,P},
     x::E
 ) where {P <: Packed, E <: Euclidean}
-    # TODO: Fix
     U = _Points.simd_type(E, _Points.simd_type(P))
-    #U = _Points.distance_type(E, _Points.distance_type(P))
     return unsafe_encode!(
         ptr,
         centroids,
@@ -142,7 +140,7 @@ end
 
 function (table::PQTable{K, Euclidean{N1,T1}})(
     a::Euclidean{N2,T2},
-    b::NTuple{K, I},
+    b::NTuple{K,I},
 ) where {K, N1, N2, T1, T2, I <: Integer}
     Base.@_inline_meta
 

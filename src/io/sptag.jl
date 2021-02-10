@@ -164,9 +164,9 @@ end
 ##### Graph Loading
 #####
 
-function load_graph(sptag::SPTAG, path::AbstractString)
+function load_graph(sptag::SPTAG, path::AbstractString; kw...)
     return open(path; read = true) do io
-        load_graph(sptag, io)
+        load_graph(sptag, io; kw...)
     end
 end
 
@@ -187,10 +187,10 @@ function getlength!(v::AbstractVector{T}, max_degree) where {T <: Unsigned}
     return num_neighbors
 end
 
-function load_graph(::SPTAG, io::IO)
+function load_graph(::SPTAG, io::IO; allocator = stdallocator)
     num_vertices = read(io, UInt32)
     max_degree = read(io, UInt32)
-    adj = Matrix{UInt32}(undef, max_degree, num_vertices)
+    adj = allocator(UInt32, max_degree, num_vertices)
     read!(io, vec(adj))
     lengths = map(x -> getlength!(x, max_degree), eachcol(adj))
     return UniDirectedGraph{UInt32}(FlatAdjacencyList{UInt32}(adj, lengths))

@@ -350,9 +350,39 @@ function Base.push!(H::BoundedMaxHeap, i)
     return nothing
 end
 
-DataStructures.extract_all_rev!(H::BoundedMaxHeap) = DataStructures.extract_all_rev!(H.heap)
-
 function destructive_extract!(H::BoundedMaxHeap)
     sort!(H.heap.valtree; alg = Base.QuickSort)
     return H.heap.valtree
 end
+
+#####
+##### Compute mean and variance online
+#####
+
+# This is closely modeled on `_var(iterable, corrected::Bool, mean)` in the Statistics
+# `stdlib`, but slightly modified to take a default return value in the case of an empty
+# iterable rather than relying on the iterable implementing `eltype`.
+# N.B. Inference can be finicky with this function. Use with care.
+function meanvar(iterable, corrected::Bool = true; default = zero(eltype(iterable)))
+    y = iterate(iterable)
+    if y === nothing
+        return (mean = default, variance = default)
+    end
+    count = 1
+    value, state = y
+    y = iterate(iterable, state)
+    M = value / 1
+    S = real(zero(M))
+    while y !== nothing
+        value, state = y
+        y = iterate(iterable, state)
+        count += 1
+        new_M = M + (value - M) / count
+        S = S + ziptimes(value - M, value - new_M)
+        M = new_M
+    end
+    return (mean = M, variance = S / (count - Int(corrected)))
+end
+
+ziptimes(a::Number, b::Number) = a * b
+ziptimes(a::AbstractVector, b::AbstractVector) = a .* b

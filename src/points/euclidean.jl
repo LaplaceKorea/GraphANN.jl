@@ -1,93 +1,5 @@
-# # Points using the euclidean distances metric
+# Points using the euclidean distances metric
 struct Euclidean end
-
-# """
-#     Euclidean{N,T}
-#
-# A point in `N` dimensional space using the Euclidean metric.
-# Each component has type `T`.
-# """
-# struct Euclidean{N, T <: Number}
-#     vals::SVector{N,T}
-# end
-#
-# unwrap(x::Euclidean) = x.vals
-# unwrap(x::SIMD.Vec) = x
-# Base.Tuple(x::Euclidean) = Tuple(unwrap(x))
-#
-# Euclidean{N,T}() where {N,T} = Euclidean(@SVector zeros(T, N))
-# Euclidean{N}(x::T) where {N,T <: Number} = Euclidean{N,T}(@SVector fill(x, N))
-# Euclidean{N,T}(vals::NTuple{N,T}) where {N,T <: Number} = Euclidean(SVector{N,T}(vals))
-# Euclidean(vals::NTuple{N,T}) where {N,T} = Euclidean{N,T}(vals)
-# Euclidean(vec::SIMD.Vec) = Euclidean(Tuple(vec))
-#
-# Base.:(==)(::Euclidean, ::Euclidean) = false
-# Base.:(==)(a::Euclidean{N}, b::Euclidean{N}) where {N} = (a.vals == b.vals)
-#
-# function Base.rand(rng::Random.AbstractRNG, ::Random.SamplerType{Euclidean{N,T}}) where {N,T}
-#     return Euclidean{N,T}(rand(rng, SVector{N,T}))
-# end
-#
-# Base.write(io::IO, x::Euclidean) = write(io, unwrap(x))
-#
-# Base.zero(::E) where {E <: Euclidean} = zero(E)
-# Base.zero(::Type{Euclidean{N,T}}) where {N,T} = Euclidean{N,T}()
-# Base.one(::E) where {E <: Euclidean} = one(E)
-# Base.one(::Type{Euclidean{N,T}}) where {N,T} = Euclidean{N}(one(T))
-#
-# Base.sizeof(::Type{Euclidean{N,T}}) where {N,T} = N * sizeof(T)
-# Base.sizeof(::E) where {E <: Euclidean} = sizeof(E)
-#
-# Base.length(::Euclidean{N}) where {N} = N
-# Base.length(::Type{<:Euclidean{N}}) where {N} = N
-# Base.lastindex(x::Euclidean) = length(x)
-#
-# Base.eltype(::Euclidean{N,T}) where {N,T} = T
-# Base.eltype(::Type{Euclidean{N,T}}) where {N,T} = T
-#
-# # Need to define transpose for `Euclidean` to that transpose works on arrays of `Euclidean`.
-# # This is because `transpose` is recursive.
-# Base.transpose(x::Euclidean) = x
-#
-# ### Pretty Printing
-# function Base.show(io::IO, x::Euclidean{N,T}) where {N,T}
-#     print(io, "Euclidean{$N,$T} <")
-#     for (i, v) in enumerate(x)
-#         print(io, v)
-#         i == length(x) || print(io, ", ")
-#     end
-#     print(io, ">")
-#     return nothing
-# end
-#
-# _Base.zeroas(::Type{T}, ::Type{Euclidean{N,U}}) where {T,N,U} = Euclidean{N,T}()
-# _Base.zeroas(::Type{T}, x::E) where {T, E <: Euclidean} = zeroas(T, E)
-# Base.@propagate_inbounds @inline Base.getindex(x::Euclidean, i) = getindex(x.vals, i)
-#
-# # Use scalar behavior for broadcasting
-# Base.broadcastable(x::Euclidean) = (x,)
-# Base.map(f::F, x::Euclidean...) where {F} = Euclidean(map(f, unwrap.(x)...))
-# Base.:/(x::Euclidean, y::Number) = Euclidean(unwrap(x) ./ y)
-#
-# Base.:+(x::Euclidean...) = map(+, x...)
-# Base.:-(x::Euclidean...) = map(-, x...)
-# Base.:*(x::Euclidean...) = map(*, x...)
-#
-# Base.iterate(x::Euclidean, s...) = iterate(unwrap(x), s...)
-#
-# Base.convert(::Type{SIMD.Vec{N,T}}, x::Euclidean{N,T}) where {N,T} = SIMD.Vec{N,T}(Tuple(x))
-# function Base.convert(::Type{SIMD.Vec{N,T1}}, x::Euclidean{N,T2}) where {N, T1, T2}
-#     return convert(SIMD.Vec{N,T1}, convert(SIMD.Vec{N,T2}, x))
-# end
-# Base.convert(::Type{Euclidean{N,T}}, x::Euclidean{N,T}) where {N,T} = x
-# function Base.convert(::Type{Euclidean{N,T}}, x::Euclidean{N,U}) where {N,T,U}
-#     return map(i -> convert(T, i), x)
-# end
-#
-# _Base.astype(::Type{T}, x::Euclidean{N}) where {T,N} = convert(Euclidean{N,T}, x)
-#
-# _merge(x, y...) = (Tuple(x)..., _merge(y...)...)
-# _merge(x) = Tuple(x)
 
 #####
 ##### Eager Conversion
@@ -258,13 +170,6 @@ function _Base.evaluate(metric::Euclidean, a::A, b::B) where {A <: SVector, B <:
     T = simd_type(A, B)
     return evaluate(metric, EagerWrap{T}(a), EagerWrap{T}(b))
 end
-
-# TODO: Think through if this API makes sense
-# # Allow elements to be passed by pointer.
-# # Can save a little bit of time in places due to calling conventions.
-# function _Base.distance(a::Ptr{<:Euclidean}, b::Euclidean)
-#     return distance(unsafe_load(a), b)
-# end
 
 function _Base.evaluate(::Euclidean, a::EagerWrap{V,K}, b::EagerWrap{V,K}) where {V, K}
     Base.@_inline_meta

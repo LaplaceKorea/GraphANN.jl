@@ -1,13 +1,8 @@
-struct TPTSplit{K,T}
-    dims::NTuple{K,Int}
-    vals::SVector{K,T}
-end
-
-Base.@propagate_inbounds function eval(
-    x::TPTSplit{K,T1},
-    y::AbstractVector{T2}
+Base.@propagate_inbounds function evalsplit(
+    y::AbstractVector{T1},
+    dims::NTuple{K,<:Integer},
+    vals::SVector{K,T2},
 ) where {K,T1,T2}
-    @unpack dims, vals = x
     s = zero(promote_type(T1, T2))
     for i in 1:K
         s += vals[i] * y[dims[i]]
@@ -19,129 +14,116 @@ end
 ##### Entry Point
 #####
 
-struct TPTree{K,I,N,T}
-    indices::Vector{I}
-    # leaves::ThreadLocal{Vector{UnitRange{I}}}
-    data::Vector{SVector{N,T}}
+"""
+    TPTree{K,I}
+
+Preallocation utility for partitioning a dataset using approximate Trinary-projection trees.
+
+## Type Parameters
+* `K` - Number of dimensouns to consider for TPT splits.
+* `I` - Integer type for index permutations.
+
+## Fields
+* `permutation` - Permutation of the indices of a dataset.
+* `leafsize` - Maximum size of the leaf groupings of the dataset.
+* `numtrials` - Number of random vectors tried to find the weights that yield maximum
+    variance across a partition.
+* `numsamples` - Maximum number of points sampled per partition.
+* `partitioner` - Pre-allocated utility to help split a partition.
+* `samples` - Pre-allocated buffer holding the indices of items samples.
+* `scratch` - Misc. pre-allocated buffer.
+"""
+struct TPTree{K,I <: Unsigned}
+    permutation::Vector{I}
     # Partition Parameters
     leafsize::Int64
-    numattempts::Int64
+    numtrials::Int64
     numsamples::Int64
     # Scratch Space
     partitioner::PartitionUtil{I}
     samples::Vector{Int}
     scratch::Vector{Int}
-    bestweights::Vector{Float32}
-    projections::Vector{Float32}
 end
 
-function TPTree{K}(
-    data::Vector{SVector{N,T}};
-    idtype::Type{I} = UInt32,
-) where {K, N, T, I}
-    indices = collect(I(1):I(length(data)))
+function TPTree{K,I}(
+    length::Integer;
+    leafsize = 500,
+    numtrials = 100,
+    numsamples = 1000,
+) where {K, I <: Unsigned}
+    permutation = collect(I(1):I(length))
     partitioner = PartitionUtil{I}()
     samples = Int[]
     scratch = Int[]
-    bestweights = Vector{Float32}(undef, K)
-    projections = Float32[]
 
-    return TPTree{K,I,N,T}(
-        indices,
-        data,
-        10000,
-        100,
-        5000,
+    return TPTree{K,I}(
+        permutation,
+        leafsize,
+        numtrials,
+        numsamples,
         partitioner,
         samples,
         scratch,
-        bestweights,
-        projections,
     )
 end
 
-num_split_dimensions(::TPTree{K}) where {K} = K
-Base.ndims(tree::TPTree{<:Any, <:Any, N}) where {N} = N
+viewdata(data, tree) = view(data, tree.permutation)
+viewdata(data, tree, range::AbstractUnitRange) = view(data, view(tree.permutation, range))
 
-partition!(tree::TPTree, x...; kw...) = partition!((tree, x) -> println(x), tree, x...; kw...)
-function partition!(
+viewperm(tree) = tree.permutation
+viewperm(tree, range::AbstractUnitRange) = view(tree.permutation, range)
+num_split_dimensions(::TPTree{K}) where {K} = K
+
+_Base.partition!(data, tree::TPTree, x...; kw...) = partition!(println, data, tree, x...; kw...)
+function _Base.partition!(
     f::F,
-    tree::TPTree{K},
-    lo::Integer,
-    hi::Integer;
+    data::AbstractVector,
+    tree::TPTree{K};
     executor = dynamic_thread,
+    init = true
 ) where {F, K}
     # Unload data structures, parameters, and scratch space
-    @unpack data, indices = tree
-    @unpack leafsize, numattempts, numsamples = tree
-    @unpack samples, bestweights, projections, partitioner = tree
+    @unpack permutation = tree
+    @unpack leafsize, numtrials, numsamples = tree
+    @unpack samples, partitioner = tree
+
+    # Resize the permutation vector if requested.
+    if init
+        resize!(permutation, length(data))
+        permutation .= 1:length(data)
+    end
 
     # Do the processing in an explicit stack to avoid ANY potential issues with our
     # stack space blowing up.
-    stack = [(lo, hi)]
+    #
+    # Bootstrap by queuing the whole dataset.
+    stack = [(1, length(data))]
     while !isempty(stack)
         lo, hi = pop!(stack)
 
         # If we've reached the leaf size, then simply store this pair as a leaf and return.
-        if hi - lo <= tree.leafsize
-            f(tree, lo:hi)
+        if (hi - lo + 1) <= tree.leafsize
+            f(lo:hi)
             continue
         end
 
-        # Compute the variance in each dimension of the data in this range.
-        # Need to first compute the range.
+        # Sample data points in this range and get the dimension indices that have the
+        # highest variance
         range = lo:hi
-        dataview = view(data, view(indices, range))
+        dims = getdims!(data, tree, range)
 
-        # Get an initial sample for the dimensional mean and variance for the range.
-        resize!(samples, numsamples)
-        Random.rand!(samples, eachindex(dataview))
-        means = Statistics.mean(x -> map(Float32, dataview[x]), samples)
-        variances = sum(x -> (dataview[x] .- means) .^ 2, samples)
+        # Among the largest variance dims, generate a partition that maximizes separation.
+        weights, mean = getweights!(data, tree, dims, range)
 
-        # Get the top `K` variances.
-        dims = max_variance_dims(tree, variances)
-
-        # Prepare some of the local scratch spaces.
-        resize!(bestweights, K)
-        zero!(bestweights)
-        resize!(projections, numsamples)
-        bestmean = zero(Float32)
-        bestvariance = zero(Float32)
-
-        # Generate a number of random weights vectors along the axes with the largest
-        # variance.
-        # Track which weight generates the largest across our sample space.
-        for _ in 1:numattempts
-            weights = 2 .* rand(SVector{K, Float32}) .- 1
-            weights = weights ./ sum(abs, weights)
-
-            splitter = TPTSplit(dims, weights)
-            for (index, sample) in pairs(samples)
-                @inbounds projections[index] = eval(splitter, dataview[sample])
-            end
-
-            meanval = Statistics.mean(projections)
-            variance = sum(x -> (x - meanval) ^ 2, projections)
-
-            # Update to track maximum
-            if variance > bestvariance
-                bestvariance = variance
-                bestmean = meanval
-                bestweights .= weights
-            end
-        end
-
-        # Sort `indices` into two chunks, those whose projection is less than the best mean,
+        # Sort `permutation` into two chunks, those whose projection is less than the best mean,
         # and those whose projection is greater than the best mean.
-        # Also, we're getting closure inference bugs on `bestmean` for the anonymous
+        # Also, we're getting closure inference bugs on `mean` for the anonymous
         # function we're passing to `_Base.partition!`, so wrap this particular calculation
         # in a `let` block to avoid that.
-        g = TPTSplit(dims, SVector{K}(bestweights))
-        mid = let bestmean = bestmean
+        mid = let mean = mean
             _Base.partition!(
-                x -> (eval(g, data[x]) < bestmean),
-                view(indices, range),
+                x -> (evalsplit(data[x], dims, weights) < mean),
+                view(permutation, range),
                 partitioner;
                 executor,
             )
@@ -152,11 +134,14 @@ function partition!(
         # are working on.
         mid = mid + lo
 
-        # Recurse on the smaller branch first.
+        # If for some reason the split is super bad and all the data points end up on
+        # one side, then split the region down the middle.
         if mid <= lo || mid >= hi
             mid = div(lo + hi + 1, 2)
+            println("Performing partition fallback!")
         end
 
+        # Recurse on the smaller branch first.
         if mid - lo < hi - mid
             push!(stack, (lo, mid - 1))
             push!(stack, (mid, hi))
@@ -172,14 +157,64 @@ end
 ##### Helper Functions
 #####
 
+function getdims!(data::AbstractVector, tree::TPTree, range::AbstractUnitRange)
+    @unpack samples, numsamples = tree
+    dataview = viewdata(data, tree, range)
+    resize!(samples, numsamples)
+    Random.rand!(samples, eachindex(dataview))
+    # Statistics.var will use an efficient online algorithm that will in fact comput
+    # the element wise variance.
+    #variances = Statistics.var(view(dataview, samples))
+    _, variances = _Base.meanvar(dataview[i] for i in samples; default = zeros(eltype(data)))
+    dims = max_variance_dims(tree, variances)
+    return dims
+end
+
 function max_variance_dims(tree::TPTree{K}, variances) where {K}
     @unpack scratch = tree
-    resize!(scratch, ndims(tree))
-    scratch .= 1:ndims(tree)
-    partialsortperm!(scratch, variances, K; rev = true)
-    resize!(scratch, K)
-    sort!(scratch)
+    resize!(scratch, length(variances))
+    scratch .= 1:length(variances)
 
+    # Manually invoke `sort!` instead of using `partialsortperm!`.
+    # This is because `partialsortperm!` returns a view, which we don't use and doesn't
+    # reliably get removed by the compiler.
+    sort!(
+        scratch,
+        Base.Sort.PartialQuickSort(1:K),
+        Base.Sort.Perm(Base.Sort.ord(isless, identity, true, Base.Forward), variances)
+    )
+    resize!(scratch, K)
     return ntuple(i -> scratch[i], Val(K))
+end
+
+function getweights!(data::AbstractVector, tree::TPTree{K}, dims, range) where {K}
+    @unpack numtrials, samples = tree
+    dataview = viewdata(data, tree, range)
+
+    # Prepare some of the local scratch spaces.
+    bestweights = @SVector zeros(Float32, K)
+    bestvariance = zero(Float32)
+    bestmean = zero(Float32)
+
+    # Generate a number of random weights vectors along the axes with the largest
+    # variance.
+    # Track which weight generates the largest across our sample space.
+    for _ in 1:numtrials
+        weights = LinearAlgebra.normalize(2 .* rand(SVector{K, Float32}) .- 1)
+        mean, variance = _Base.meanvar(
+            evalsplit(dataview[i], dims, weights) for i in samples;
+            default = zero(Float32)
+        )
+
+        # Update to track maximum
+        if variance > bestvariance
+            bestvariance = variance
+            bestweights = weights
+            bestmean = mean
+        end
+    end
+
+    # Now that we have the best weights, compute the mean.
+    return bestweights, bestmean
 end
 

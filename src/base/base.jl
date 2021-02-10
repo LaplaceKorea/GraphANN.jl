@@ -62,7 +62,7 @@ include("pm.jl")
 #####
 
 export ThreadPool, ThreadLocal, TaskHandle
-export getall, getpool, allthreads, dynamic_thread, on_threads
+export getall, getpool, allthreads, single_thread, dynamic_thread, on_threads
 include("threading.jl")
 #distribute_distance(x::ThreadLocal) = x[]
 
@@ -91,7 +91,7 @@ include("utils.jl")
 ##### Bruteforce Search
 #####
 
-export bruteforce_search
+export bruteforce_search, bruteforce_search!
 include("bruteforce.jl")
 
 #####

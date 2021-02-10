@@ -82,12 +82,12 @@ isfull(x::TagSearch) = _Base.isfull(x.results)
 isvisited(x::TagSearch, node) = in(getid(node), x.visited)
 visited!(x::TagSearch, node) = push!(x.visited, getid(node))
 
-function init!(algo::TagSearch, tree::Tree, data, query; metric = distance)
+function init!(algo::TagSearch, tree::Tree, data, query; metric = Euclidean())
     empty!(algo)
     @unpack root, nodes = tree
     for i in childindices(root)
         child = nodes[i]
-        candidate = Neighbor(algo, child, metric(data[getid(child)], query))
+        candidate = Neighbor(algo, child, evaluate(metric, data[getid(child)], query))
         pushcandidate!(treectx, algo, candidate)
     end
 end
@@ -99,7 +99,7 @@ function _Base.search(
     query::U,
     numleaves::Integer
 ) where {T,U}
-    metric = distance
+    metric = Euclidean()
     @unpack root, nodes = tree
 
     # Start processing!
@@ -123,7 +123,7 @@ function _Base.search(
                 child = nodes[i]
                 @unpack id = child
                 iszero(id) && continue
-                candidate = Neighbor(algo, child, metric(data[id], query))
+                candidate = Neighbor(algo, child, evaluate(metric, data[id], query))
                 maybe_pushcandidate!(treectx, algo, candidate)
             end
         end
@@ -139,7 +139,7 @@ function _Base.search(
     maxcheck = 2000,
     propagation_limit = 128
 )
-    metric = distance
+    metric = Euclidean()
     @unpack graph, data = meta
     init!(algo, tree, data, query; metric = metric)
     search(algo, tree, data, query, 50)
@@ -167,7 +167,7 @@ function _Base.search(
 
         # Check progress
         for v in LightGraphs.outneighbors(graph, getid(u))
-            d = metric(data[v], query)
+            d = evaluate(metric, data[v], query)
             maybe_pushcandidate!(graphctx, algo, Neighbor(algo, v, d))
             leaves_seen += 1
         end
@@ -192,7 +192,7 @@ function _Base.searchall(
     queries::AbstractVector;
     kw...
 )
-    metric = distance
+    metric = Euclidean()
     num_queries = length(queries)
     # TODO: This is so gross ...
     num_neighbors = _Base.getbound(algo.results)
@@ -217,7 +217,7 @@ function _Base.searchall(
     queries;
     kw...
 )
-    metric = distance
+    metric = Euclidean()
     num_queries = length(queries)
     # TODO: This is so gross ...
     num_neighbors = _Base.getbound(tls[1].results)
