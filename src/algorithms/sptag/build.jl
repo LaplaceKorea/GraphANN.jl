@@ -1,14 +1,14 @@
 # First phase - build the initial KNN graph by partitioning.
 function build_by_trees!(
-    graph::UniDirectedGraph,
+    graph::UniDirectedGraph{I},
     data::AbstractVector{T};
     num_iterations = 1,
     num_neighbors = 32,
     leafsize = 500,
-    idtype::Type{I} = UInt32,
-    costtype::Type{D} = costtype(T, T),
     executor = dynamic_thread
-) where {T, I, D}
+) where {I, T}
+    D = costtype(T, T)
+
     # Preallocate utility for accelerating the partitioning phase
     tree = TPTree{5,I}(length(data))
 
@@ -23,31 +23,45 @@ function build_by_trees!(
     #
     # Also, keep the element type of the ground-truth buffers as `Neighbors` to more
     # efficiently compare with existing neighbors in the graph.
+    #
+    # Add 1 to the `num_neighbors` when constructing the thread local groundtruth buffer
+    # since eacy vertex will appear as its own nearest neighbor, effectively removing
+    # it from consideration.
+    compensated_neighbors = num_neighbors + 1
     tls = ThreadLocal(;
-        groundtruth = Array{Neighbor{I,D}, 2}(undef, num_neighbors, leafsize),
-        bruteforce_tls = _Base.bruteforce_threadlocal(single_thread, I, D, num_neighbors, groupsize)
+        groundtruth = Array{Neighbor{I,D}, 2}(undef, compensated_neighbors, leafsize),
+        bruteforce_tls = _Base.bruteforce_threadlocal(
+            single_thread,
+            I,
+            D,
+            compensated_neighbors,
+            groupsize
+        ),
     )
 
     for i in 1:num_iterations
         empty!(ranges)
-        progress_meter = ProgressMeter.Progress(length(data), 1, "Building Tree ... ")
+        partition_meter = ProgressMeter.Progress(length(data), 1, "Building Tree ... ")
         @time partition!(data, tree; init = false) do leaf
-            ProgressMeter.next!(progress_meter; step = length(leaf))
+            ProgressMeter.next!(partition_meter; step = length(leaf))
             push!(ranges, leaf)
         end
 
-        ProgressMeter.finish!(progress_meter)
-        progress_meter = ProgressMeter.Progress(length(data), 1, "Processing Tree ... ")
+        ProgressMeter.finish!(partition_meter)
+        neighbor_meter = ProgressMeter.Progress(length(data), 1, "Processing Tree ... ")
+
         executor(eachindex(ranges), 16) do i
             @inbounds range = ranges[i]
             threadlocal = tls[]
 
-            gt = view(threadlocal.groundtruth, :, 1:length(range))
+            ub = min(compensated_neighbors, length(range))
+            gt = view(threadlocal.groundtruth, 1:ub, 1:length(range))
             dataview = viewdata(data, tree, range)
+
             bruteforce_search!(gt, dataview, dataview;
                 executor = single_thread,
                 idtype = I,
-                costtype = costtype,
+                costtype = D,
                 meter = nothing,
                 tls = threadlocal.bruteforce_tls,
                 groupsize = groupsize,
@@ -55,8 +69,7 @@ function build_by_trees!(
 
             # Update graph to maintain nearest neighbors.
             update!(data, graph, gt, viewperm(tree, range))
-
-            ProgressMeter.next!(progress_meter; step = length(range))
+            ProgressMeter.next!(neighbor_meter; step = length(range))
         end
     end
 end

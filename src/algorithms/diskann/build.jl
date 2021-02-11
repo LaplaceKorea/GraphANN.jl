@@ -364,20 +364,23 @@ function generate_index(
     batchsize = 1000,
     allocator = stdallocator,
     graph_type = DefaultAdjacencyList{UInt32},
-    no_progress = false
+    no_progress = false,
+    graph::Union{Nothing, LightGraphs.AbstractGraph} = nothing,
 )
     @unpack window_size, target_degree, prune_threshold_degree = parameters
 
     # Generate a random `max_degree` regular graph.
     # TODO: Also, default the graph to UInt32's to save on space.
     # Keep this as a parameter so we can promote to Int64's if needed.
-    graph = random_regular(
-        graph_type,
-        length(data),
-        target_degree;
-        max_edges = prune_threshold_degree,
-        allocator = allocator,
-    )
+    if graph === nothing
+        graph = random_regular(
+            graph_type,
+            length(data),
+            target_degree;
+            max_edges = prune_threshold_degree,
+            allocator = allocator,
+        )
+    end
 
     # Create a spin-lock for each vertex in the graph.
     # This will be used during the `commit!` function to synchronize access to the graph.

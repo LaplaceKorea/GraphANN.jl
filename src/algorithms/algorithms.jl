@@ -13,7 +13,6 @@ import Random
 using .._Base
 using .._Graphs
 using .._Trees
-using .._Points
 using .._Prefetcher
 using .._Quantization
 

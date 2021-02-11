@@ -62,7 +62,6 @@ function kmeans(
     return centroids
 end
 
-
 #####
 ##### Broadcasting things ...
 #####

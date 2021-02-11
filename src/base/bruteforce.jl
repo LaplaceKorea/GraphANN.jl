@@ -47,7 +47,7 @@ function bruteforce_search!(
     idtype::Type{I} = UInt32,
     costtype::Type{D} = costtype(A, B),
     metric = Euclidean(),
-    tls::Union{Nothing, <:ThreadLocal} = nothing,
+    tls::Union{Nothing, <:ThreadLocal, <:AbstractVector} = nothing,
 ) where {A, B, I, D, ID <: Union{I, Neighbor{I, D}}, F}
     num_neighbors = size(gt, 1)
     num_queries = length(queries)

@@ -30,6 +30,11 @@ function UniDirectedGraph{T}(n::Integer = 0) where {T}
 end
 UniDirectedGraph(n::Integer = 0) = UniDirectedGraph{Int}(n)
 
+function UniDirectedGraph{T, FlatAdjacencyList{T}}(nv::Integer, ne::Integer; kw...) where {T}
+    adj = FlatAdjacencyList{T}(nv, ne; kw...)
+    return UniDirectedGraph{T}(adj)
+end
+
 LightGraphs.SimpleGraphs.fadj(x::UniDirectedGraph) = x.fadj
 LightGraphs.SimpleGraphs.fadj(x::UniDirectedGraph, i::Integer) = x.fadj[i]
 

@@ -1,12 +1,4 @@
-@testset "Testing TPTree" begin
-    dims = (1, 4, 5)
-    vals = SVector(0.5, 0.2, 0.4)
-    x = [1,2,3,4,5]
-    y = GraphANN.Algorithms.evalsplit(x, dims, vals)
-    @test y == x[1] * vals[1] + x[4] * vals[2] + x[5] * vals[3]
-
-    # Now - perform some tests on some real data.
-    data = GraphANN.load_vecs(GraphANN.SVector{128,Float32}, dataset_path)
+function _run_tpt_tests(data::AbstractVector{SVector{N,T}}) where {N,T}
     numsamples = 1000
     leafsize = 500
     tree = GraphANN.Algorithms.TPTree{4, UInt32}(
@@ -15,16 +7,16 @@
         numtrials = 100,
         numsamples = numsamples,
     )
+
     @test GraphANN.Algorithms.num_split_dimensions(tree) == 4
     @inferred GraphANN.Algorithms.getdims!(data, tree, 1:length(data))
     dims = GraphANN.Algorithms.getdims!(data, tree, 1:length(data))
     @test isa(dims, NTuple{4,Int})
 
     # Make sure that the maximum variances are being computed correctly.
-    #dataview = GraphANN.Algorithms.viewdata(data, tree, 1:length(data))
     dataview = view(data, tree.samples)
     @test length(dataview) == numsamples
-    variances = Statistics.var.(eachrow(reinterpret(reshape, Float32, dataview)))
+    variances = Statistics.var.(eachrow(reinterpret(reshape, T, dataview)))
 
     # Get the indices of the ranked variances from highest to lowest
     perm = partialsortperm(variances, 1:4; rev = true)
@@ -77,11 +69,27 @@
     checkranges(ranges, data, tree)
 end
 
+@testset "Testing TPTree" begin
+    dims = (1, 4, 5)
+    vals = SVector(0.5, 0.2, 0.4)
+    x = [1,2,3,4,5]
+    y = GraphANN.Algorithms.evalsplit(x, dims, vals)
+    @test y == x[1] * vals[1] + x[4] * vals[2] + x[5] * vals[3]
+
+    # Now - perform some tests on some real data.
+    data = GraphANN.load_vecs(GraphANN.SVector{128,Float32}, dataset_path)
+    _run_tpt_tests(data)
+
+    # Convert element types to UInt8 and try again.
+    data = map(x -> map(UInt8, x), data)
+    _run_tpt_tests(data)
+end
+
 # In this test suite, we see if building trees to group together data points is actuall
 # better than just randomly grouping together data points.
 #
 # The basic idea here is to cluster using the TPTrees, then compute the distances to the
-# nearest 50-odd neighbors within each leaf.
+# nearest ~100ish neighbors within each leaf.
 #
 # Then, we repeat by grouping together consecutive regions of the original data.
 # HOPEFULLY, the tree-based clustering does a better job.

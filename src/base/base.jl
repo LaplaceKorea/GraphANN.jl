@@ -19,7 +19,7 @@ import UnPack: @unpack
 export evaluate, search, searchall
 
 """
-    distance(x, y)
+    evaluate(metric, x, y)
 
 Return the distance between points `x` and `y`.
 """

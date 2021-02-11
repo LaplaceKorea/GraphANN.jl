@@ -1,15 +1,3 @@
-Base.@propagate_inbounds function evalsplit(
-    y::AbstractVector{T1},
-    dims::NTuple{K,<:Integer},
-    vals::SVector{K,T2},
-) where {K,T1,T2}
-    s = zero(promote_type(T1, T2))
-    for i in 1:K
-        s += vals[i] * y[dims[i]]
-    end
-    return s
-end
-
 #####
 ##### Entry Point
 #####
@@ -65,6 +53,18 @@ function TPTree{K,I}(
         samples,
         scratch,
     )
+end
+
+Base.@propagate_inbounds function evalsplit(
+    y::AbstractVector{T1},
+    dims::NTuple{K,<:Integer},
+    vals::SVector{K,T2},
+) where {K,T1,T2}
+    s = zero(promote_type(T1, T2))
+    for i in 1:K
+        s += vals[i] * y[dims[i]]
+    end
+    return s
 end
 
 viewdata(data, tree) = view(data, tree.permutation)

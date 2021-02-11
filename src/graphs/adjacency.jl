@@ -88,8 +88,13 @@ struct FlatAdjacencyList{T} <: AbstractAdjacencyList{T}
     end
 end
 
-function FlatAdjacencyList{T}(nv::Integer, max_degree::Integer) where {T}
-    adj = zeros(T, max_degree, nv)
+function FlatAdjacencyList{T}(
+    nv::Integer,
+    max_degree::Integer;
+    allocator = stdallocator
+) where {T}
+    adj = allocator(T, max_degree, nv)
+    zero!(adj)
     lengths = zeros(T, nv)
     return FlatAdjacencyList{T}(adj, lengths)
 end

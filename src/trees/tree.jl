@@ -48,9 +48,8 @@ function validate(tree::Tree{T}) where {T}
         node = pop!(dfs_stack)
         isleaf(node) && continue
         for i in childindices(node)
-            if indices_seen[i]
-                error("Already seen node at index $(i)!")
-            end
+            # Quick sanity check to make sure indices are unique.
+            indices_seen[i] && error("Already seen node at index $(i)!")
             indices_seen[i] = true
             push!(dfs_stack, nodes[i])
         end

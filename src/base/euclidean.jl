@@ -1,3 +1,4 @@
+# Singleton to dispatch to optimized square euclidean distance computations.
 struct Euclidean end
 
 #####
@@ -8,7 +9,14 @@ const SIMDType{N,T} = Union{SVector{N,T}, SIMD.Vec{N,T}}
 
 # Ideally, the generated code for this should be a no-op, it's just awkward because
 # Julia doesn't really have a "bitcast" function ...
-# This also has the benefit of allowing us to do lazy zero padding if necessary.
+# This also has the benefit of allowing us to do lazy zero padding if necessary,
+# so that's cool.
+#
+# Parameters:
+# `f`: Conversion function to run on slices of the original SVector.
+# `N`: Dimensionality of the original SVector.
+# `S`: Dimensionality of the smaller SVectors that we are creating a tuple of.
+# `T`: The element types of the SVectors.
 function _cast_impl(f, N::Integer, S::Integer, ::Type{T}) where {T}
     num_tuples = ceil(Int, N / S)
     exprs = map(1:num_tuples) do i
@@ -34,16 +42,28 @@ When indexing, converts elements to type `V`.
 # Examples
 ```julia-repl
 julia> using SIMD
-julia> x = rand(GraphANN.SVector{12,UInt8})
-Euclidean{12,UInt8} <27, 171, 144, 15, 162, 14, 55, 5, 31, 143, 174, 211>
+julia> x = rand(GraphANN.SVector{12,Int8})
+12-element StaticArrays.SVector{12, Int8} with indices SOneTo(12):
+  -15
+   37
+  -25
+  -77
+    8
+ -121
+   19
+  103
+  113
+   71
+  -70
+   57
 
-julia> y = GraphANN._Points.EagerWrap{GraphANN.SVector{4,Float32}}(x);
+julia> y = GraphANN._Base.EagerWrap{SIMD.Vec{4,Float32}}(x);
 
 julia> y[1]
-<4 x Float32>[27.0, 171.0, 144.0, 15.0]
+<4 x Float32>[-15.0, 37.0, -25.0, -77.0]
 
 julia> y[2]
-<4 x Float32>[162.0, 14.0, 55.0, 5.0]
+<4 x Float32>[8.0, -121.0, 19.0, 103.0]
 ```
 """
 struct EagerWrap{V <: SIMDType,K,N,T}
