@@ -8,10 +8,19 @@ struct TreeNode{T <: Integer}
     childend::T
 end
 
+TreeNode{T}() where {T <: Integer} = TreeNode{T}(zero(T), zero(T), zero(T))
+function TreeNode{T}(id::Integer) where {T <: Integer}
+    return TreeNode{T}(id, zero(T), zero(T))
+end
+TreeNode{T}(x::TreeNode{T}) where {T} = x
+
 _Base.getid(x::TreeNode) = x.id
 isleaf(x::TreeNode) = iszero(x.childstart)
+isnull(x::TreeNode) = iszero(x.id)
+
 childindices(x::TreeNode) = (x.childstart:x.childend)
 Base.isless(a::T, b::T) where {T <: TreeNode} = isless(getid(a), getid(b))
+Base.broadcastable(x::TreeNode) = (x,)
 
 function Base.read(io::IO, ::Type{TreeNode{T}}) where {T}
     id = read(io, T)
@@ -20,40 +29,124 @@ function Base.read(io::IO, ::Type{TreeNode{T}}) where {T}
     return TreeNode{T}(id, childstart, childend)
 end
 
+function Base.write(io::IO, x::TreeNode)
+    write(io, x.id)
+    write(io, x.childstart)
+    write(io, x.childend)
+end
+
 #####
 ##### Tree
 #####
 
 # The layout of this data structure is pretty similar to to the layout of the SPTAG C++ code.
 # I'm not sure yet if that is the best layout, but we have to start somewhere.
-struct Tree{T <: TreeNode} <: AbstractTree
-    root::T
-    nodes::Vector{T}
+mutable struct Tree{T <: Integer} <: AbstractTree
+    rootend::Int
+    nodes::Vector{TreeNode{T}}
 end
 
-Base.show(io::IO, tree::Tree) = print(io, "Tree with $(length(tree.nodes)) nodes")
+function Tree{T}(num_elements::Integer; allocator = stdallocator) where {T}
+    nodes = allocator(TreeNode{T}, num_elements)
+    nodes .= TreeNode{T}()
+    return Tree{T}(0, nodes)
+end
 
-function validate(tree::Tree{T}) where {T}
-    @unpack root, nodes = tree
-    indices_seen = falses(length(nodes))
-    dfs_stack = T[]
+rootindices(tree::Tree) = Base.OneTo(tree.rootend)
+Base.length(tree::Tree) = length(tree.nodes)
+Base.show(io::IO, tree::Tree) = print(io, "Tree with $(length(tree)) nodes")
 
-    # Add the root children first.
-    for i in childindices(root)
-        indices_seen[i] = true
-        push!(dfs_stack, nodes[i])
+children(tree::Tree, i::Integer) = children(tree, tree.nodes[i])
+children(tree::Tree, node::TreeNode) = view(tree.nodes, childindices(node))
+roots(tree) = view(tree.nodes, rootindices(tree))
+
+#####
+##### Utility Functions
+#####
+
+function onnodes(f::F, tree::Tree{T}) where {F,T}
+    stack = TreeNode{T}[]
+    append!(stack, roots(tree))
+    while !isempty(stack)
+        node = pop!(stack)
+        f(node)
+        isleaf(node) || append!(stack, children(tree, node))
     end
+end
 
-    while !isempty(dfs_stack)
-        node = pop!(dfs_stack)
-        isleaf(node) && continue
+function ispacked(tree::Tree)
+    indices_seen = falses(length(tree))
+    # Mark the root nodes as visited.
+    indices_seen[rootindices(tree)] .= true
+    onnodes(tree) do node
+        isleaf(node) && return nothing
         for i in childindices(node)
-            # Quick sanity check to make sure indices are unique.
             indices_seen[i] && error("Already seen node at index $(i)!")
             indices_seen[i] = true
-            push!(dfs_stack, nodes[i])
         end
+        return nothing
+    end
+    if count(indices_seen) != length(tree)
+        error("Not all indexes in the tree vector were visited!")
     end
     return indices_seen
 end
 
+#####
+##### Tools to help build a tree.
+#####
+
+mutable struct TreeBuilder{T <: Integer}
+    tree::Tree{T}
+    last_valid_index::Int
+end
+
+function TreeBuilder{T}(num_nodes::Integer; allocator = stdallocator) where {T}
+    return TreeBuilder(Tree{T}(num_nodes; allocator), 0)
+end
+
+remainder(builder::TreeBuilder) = (builder.last_valid_index + 1):length(builder.tree)
+function initnodes!(builder::TreeBuilder{T}, itr) where {T}
+    @assert builder.last_valid_index == 0
+    nodes = builder.tree.nodes
+    index = 0
+    for node in itr
+        index += 1
+        nodes[index] = TreeNode{T}(node)
+    end
+
+    # Update data structures.
+    builder.tree.rootend = index
+    builder.last_valid_index = index
+    return 1:index
+end
+
+"""
+    addnodes!(builder, parent::Integer, nodes)
+
+Add contents of `nodes` as children of `parent` in the tree currently being built.
+Return the indices where `nodes` were inserted as a range.
+"""
+function addnodes!(builder::TreeBuilder{T}, parent::Integer, itr) where {T}
+    @unpack tree, last_valid_index = builder
+    @unpack nodes = tree
+
+    # Make sure the parent node is not null and has no children currently assigned to it.
+    parentnode = nodes[parent]
+    isnull(parentnode) && throw(ArgumentError("Parent index $parent has not been assigned yet!"))
+    isleaf(parentnode) || throw(ArgumentError("Parent index $parent already has children!"))
+
+    count = 0
+    start = last_valid_index + 1
+    index = last_valid_index
+    for node in itr
+        index += 1
+        nodes[index] = TreeNode{T}(node)
+    end
+    stop = index
+
+    # Update the parent node to point to its children.
+    nodes[parent] = TreeNode{T}(parentnode.id, start, stop)
+    builder.last_valid_index = stop
+    return start:stop
+end

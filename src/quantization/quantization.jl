@@ -27,7 +27,7 @@ widen64(x::T) where {T} = convert(widen64(T), x)
 export PQTable, PQGraph
 export encode
 # include("pq2.jl")
-# include("clustering2.jl")
+include("clustering2.jl")
 # include("pq.jl")
 # include("pq_euclidean.jl")
 

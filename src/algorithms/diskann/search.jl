@@ -183,7 +183,7 @@ function reduce!(greedy::GreedySearch)
     while length(greedy.best) > greedy.search_list_size
         vertex = popmax!(greedy.best)
 
-        if top !== nothing && idequal(vertex, top)
+        if top !== nothing && getid(vertex) == getid(top)
             popmax!(greedy.best_unvisited)
             top = _unsafe_maximum(greedy.best_unvisited)
         end

@@ -13,10 +13,6 @@ function Base.resize!(x::PartitionUtil, sz::Int)
     return nothing
 end
 
-# If we've done a partition, than the index of the split is the last index of the `lt`
-# vector plus one.
-getsplit(x::PartitionUtil) = (x.lt[end] + 1)
-
 function partition!(
     by::F,
     x::AbstractVector,

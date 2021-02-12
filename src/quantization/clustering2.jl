@@ -1,36 +1,3 @@
-# # The goal here is to allow the same code to operate for full K-Means clustering OR
-# # sub-K-Means clustering (i.e. product quantization).
-#
-# # Like the normal `Neighbor` struct, but vectorized to group together multiple individual
-# # points on the same cache line.
-# struct VectorNeighbor{N,I,D}
-#     id::SIMD.Vec{N,I}
-#     distance::SIMD.Vec{N,D}
-# end
-#
-# function VectorNeighbor{N,I,D}() where {N,I,D}
-#     return VectorNeighbor{N,I,D}(zero(SIMD.Vec{N,I}), SIMD.Vec{N,D}(typemax(D)))
-# end
-#
-# # Scalar broadcasting.
-# Base.broadcastable(x::VectorNeighbor) = (x,)
-# Base.isless(a::VectorNeighbor{N}, b::VectorNeighbor{N}) where {N} = (a.distance < b.distance)
-# Base.length(::VectorNeighbor{N}) where {N} = N
-#
-# _Base.getid(x::VectorNeighbor) = x.id
-# _Base.getdistance(x::VectorNeighbor) = x.distance
-#
-# function update(x::VectorNeighbor{N,I,D}, d::SIMD.Vec{N,D}, i::Integer) where {N,I,D}
-#     # Gets a SIMD mask with `true` indicating positions where `d` is less than
-#     # `x.distance`.
-#     mask = d < getdistance(x)
-#     # Update `distance` and `id` to contain the smaller distance elements and their
-#     # associated data ids.
-#     distance = SIMD.vifelse(mask, d, x.distance)
-#     id = SIMD.vifelse(mask, i, getid(x))
-#     return VectorNeighbor{N,I,D}(id, distance)
-# end
-
 #####
 ##### Entry Points
 #####
@@ -43,7 +10,7 @@ function kmeans(
     max_lloyds_iterations = 10,
 ) where {N,T}
     # Oversample while choosing initial centroids.
-    initial = Euclidean{N,T}[]
+    initial = SVector{N,T}[]
     choose_initial_centroids!(
         data,
         initial,
@@ -57,7 +24,7 @@ function kmeans(
     refine!(final, initial, weights)
 
     # Run Lloyd's algorithm.
-    centroids = map(Float32, final)
+    centroids = toeltype(Float32, final)
     lloyds!(centroids, data; num_iterations = max_lloyds_iterations)
     return centroids
 end
@@ -105,7 +72,7 @@ function choose_initial_centroids!(
     D = costtype(T,U)
     costs = Array{D}(undef, size(data))
 
-    tls = initial_centroids_tls(data, centroids, idtype)
+    tls = initial_centroids_tls(data, centroids, I)
     push!(centroids, rand(data))
     adjustment = ceil(Int, num_centroids / num_iterations)
 
@@ -134,7 +101,7 @@ end
 # - `reset` (make mutating but return the original collection)
 # - `vupdate` (can also make mutating)
 # - `slices` (automatic handling of mixed vectors and matrices
-function findnearest!(x, Y, minimum; metric = distance)
+function findnearest!(x, Y, minimum; metric = Euclidean())
     minimum = reset(minimum)
     for i in slices(Y)
         minimum = vupdate(minimum, x, slice(Y, i), i; metric = metric)
@@ -142,7 +109,7 @@ function findnearest!(x, Y, minimum; metric = distance)
     return minimum
 end
 
-function computecosts!(costs, centroids, data, tls; metric = distance)
+function computecosts!(costs, centroids, data, tls; metric = Euclidean())
     dynamic_thread(slices(data), 64) do i
         minimum = findnearest!(slice(data, i), centroids, tls[]; metric = metric)
         # TODO: generalize this cost update.
@@ -241,7 +208,7 @@ end
 Return the sum of each column of `x`.
 """
 function parallel_sum(x::AbstractVector{T}) where {T}
-    tls = ThreadLocal(Ref(zero(maybe_widen(T))))
+    tls = ThreadLocal(Ref(zero(widen64(T))))
     dynamic_thread(eachindex(x), 64) do i
         localtotal = tls[]
         localtotal[] += x[i]
@@ -285,5 +252,17 @@ function parallel_sample!(
             push!(next, i)
         end
     end
+end
+
+function parallel_nearest(centroids::AbstractVector, data::AbstractVector)
+    D = costtype(centroids, data)
+    tls = ThreadLocal(Neighbor{UInt32,D}())
+    nearest = Vector{UInt32}(undef, length(data))
+
+    dynamic_thread(slices(data), 64) do i
+        minimum = findnearst!(slice(data, i), centroids, tls[])
+        nearest[i] = getid(minimum)
+    end
+    return nearest
 end
 

@@ -26,18 +26,19 @@ Return the distance between points `x` and `y`.
 function evaluate end
 
 """
-    distribute_distance(x)
+    distribute(metric)
 
-Optional metric function. Distribute a necessary version of `x` to each thread.
+Optional metric function. Distribute a necessary version of `metric` to each thread.
+Useful if metrics require local mutable scratch space.
 """
-distribute_distance(x) = x
+distribute(metric) = x
 
 """
-    distance_prehook(metric, x)
+    prehook(metric, x)
 
 Optional metric function. Perform necessary pre-distance computations on query `x`.
 """
-distance_prehook(metric, x) = nothing
+prehook(metric, x) = nothing
 
 export Euclidean
 include("euclidean.jl")
@@ -77,14 +78,14 @@ include("minmax_heap.jl")
 ##### Utilities
 #####
 
-export safe_maximum, donothing, printlnstyled, zero!, typemax!, cdiv, astype
-export Neighbor, getid, getdistance, idequal, idtype, costtype
+export safe_maximum, donothing, printlnstyled, zero!, typemax!, cdiv, toeltype
+export Neighbor, getid, getdistance, idtype, costtype
 export RobinSet
 export zeroas, medioid, nearest_neighbor
 export recall
 export prefetch, prefetch_llc, unsafe_prefetch
 export BatchedRange, batched
-export BoundedMaxHeap
+export BoundedHeap, BoundedMinHeap, BoundedMaxHeap
 include("utils.jl")
 
 #####

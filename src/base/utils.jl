@@ -11,9 +11,7 @@ typemax!(x) = fill!(x, typemax(eltype(x)))
 cdiv(a::Integer, b::Integer) = cdiv(promote(a, b)...)
 cdiv(a::T, b::T) where {T <: Integer} = one(T) + div(a - one(T), b)
 
-astype(::Type{T}, x::T) where {T} = x
-astype(::Type{T}, x) where {T} = convert(T, x)
-astype(::Type{T}) where {T} = x -> astype(T, x)
+toeltype(::Type{T}, x::AbstractArray{<:AbstractArray}) where {T} = map(i -> Float32.(i), x)
 
 #####
 ##### Neighbor
@@ -39,13 +37,6 @@ struct Neighbor{T,D}
     Neighbor{T}(id, distance::D) where {T,D} = Neighbor{T,D}(id, distance)
     Neighbor{T,D}(id, distance::D) where {T,D} = new{T,D}(convert(T, id), distance)
     Neighbor{T,D}() where {T,D} = new{T,D}(zero(T), typemax(D))
-    function Neighbor{T,Any}(id, distance) where {T}
-        err = ArgumentError("""
-        You're trying to construct a Neighbor object with `Any` as the distance parameter.
-        Doing so is a performance trap. Please fix this.
-        """)
-        throw(err)
-    end
 end
 
 # Since `Neighbor` contains two generic fields (id and distance), we need to provide hooks
@@ -66,8 +57,6 @@ costtype(::AbstractVector{T}) where {T} = costtype(T)
 getid(x::Integer) = x
 getid(x::Neighbor) = x.id
 getdistance(x::Neighbor) = x.distance
-
-idequal(a::Neighbor, b::Neighbor) = (getid(a) == getid(b))
 
 # Implement a total ordering on Neighbors
 # This is important for keeping queues straight.
@@ -108,21 +97,7 @@ Base.iterate(set::RobinSet) = iterate(keys(set.dict))
 Base.iterate(set::RobinSet, s) = iterate(keys(set.dict), s)
 
 #####
-##### Medoid
-#####
-
-function medioid(data::Vector{SVector{N,T}}) where {N,T}
-    # Thread to make fast for larger datasets.
-    tls = ThreadLocal(zero(SVector{N,Float32}))
-    dynamic_thread(data, 1024) do i
-        tls[] += i
-    end
-    medioid = sum(getall(tls)) / length(data)
-    return first(nearest_neighbor(medioid, data))
-end
-
-#####
-##### nearest_neighbor
+##### Nearest Neighbor
 #####
 
 function nearest_neighbor(query::T, data::AbstractVector; metric = Euclidean()) where {T}
@@ -146,6 +121,20 @@ function nearest_neighbor(query::T, data::AbstractVector; metric = Euclidean()) 
     candidates = getall(tls)
     _, i = findmin([x.min_dist for x in candidates])
     return candidates[i]
+end
+
+#####
+##### Medoid
+#####
+
+function medioid(data::Vector{SVector{N,T}}) where {N,T}
+    # Thread to make fast for larger datasets.
+    tls = ThreadLocal(zero(SVector{N,Float32}))
+    dynamic_thread(data, 1024) do i
+        tls[] += i
+    end
+    medioid = sum(getall(tls)) / length(data)
+    return first(nearest_neighbor(medioid, data))
 end
 
 #####
@@ -256,8 +245,8 @@ function prefetch(A::AbstractVector{T}, i, f::F = _Base.prefetch) where {T,F}
     # Divide the number of bytes by 64 to get cache lines.
     cache_lines = sizeof(T) >> 6
     ptr = pointer(A, i)
-    for i in 1:cache_lines
-        f(ptr + 64 * (i-1))
+    for j in 1:cache_lines
+        f(ptr + 64 * (j-1))
     end
     return nothing
 end
@@ -312,33 +301,42 @@ end
 ##### Bounded Max Heap
 #####
 
-struct BoundedMaxHeap{T}
-    heap::DataStructures.BinaryMaxHeap{T}
+struct BoundedHeap{T, O <: Base.Ordering}
+    heap::DataStructures.BinaryHeap{T,O}
     bound::Int
+
+    function BoundedHeap{T}(ordering::Base.Ordering, bound::Integer) where {T}
+        heap = DataStructures.BinaryHeap{T}(ordering, T[])
+        return new{T, typeof(ordering)}(heap, convert(Int, bound))
+    end
 end
 
-function BoundedMaxHeap{T}(bound::Int) where {T}
-    return BoundedMaxHeap(DataStructures.BinaryMaxHeap{T}(), bound)
-end
+const BoundedMinHeap{T} = BoundedHeap{T, Base.ForwardOrdering}
+const BoundedMaxHeap{T} = BoundedHeap{T, Base.ReverseOrdering{Base.ForwardOrdering}}
 
-isfull(H::BoundedMaxHeap) = length(H.heap) >= H.bound
+BoundedMinHeap{T}(bound::Integer) where {T} = BoundedHeap{T}(Base.ForwardOrdering(), bound)
+BoundedMaxHeap{T}(bound::Integer) where {T} = BoundedHeap{T}(Base.ReverseOrdering(), bound)
+isfull(H::BoundedHeap) = length(H) >= H.bound
 
 # slight type hijacking ...
 # we don't technically "own" valtree.
-Base.empty!(H::BoundedMaxHeap) = empty!(H.heap.valtree)
-Base.isempty(H::BoundedMaxHeap) = isempty(H.heap)
-Base.first(H::BoundedMaxHeap) = first(H.heap)
-getbound(H::BoundedMaxHeap) = H.bound
+Base.empty!(H::BoundedHeap) = empty!(H.heap.valtree)
+Base.isempty(H::BoundedHeap) = isempty(H.heap)
+Base.length(H::BoundedHeap) = length(H.heap)
+Base.first(H::BoundedHeap) = first(H.heap)
+getbound(H::BoundedHeap) = H.bound
+getordering(H::BoundedHeap) = H.heap.ordering
 
 """
-    push!(H::BoundedMaxHeap, i)
+    push!(H::BoundedHeap, i)
 
 Add `i` to `H` if (1) `H` is not full or (2) `i` is less than maximal element in `H`.
 After calling `push!`, the length of `H` will be less than or equal to its established
 bound.
 """
-function Base.push!(H::BoundedMaxHeap, i)
-    if (length(H.heap) < H.bound || i < first(H.heap))
+function Base.push!(H::BoundedHeap, i)
+    o = getordering(H)
+    if (length(H.heap) < H.bound || Base.lt(o, first(H.heap), i))
         push!(H.heap, i)
 
         # Wrap in a "while" loop to handle the case where extra things got added somehow.
@@ -350,8 +348,12 @@ function Base.push!(H::BoundedMaxHeap, i)
     return nothing
 end
 
-function destructive_extract!(H::BoundedMaxHeap)
-    sort!(H.heap.valtree; alg = Base.QuickSort)
+function destructive_extract!(H::BoundedHeap)
+    sort!(
+        H.heap.valtree;
+        alg = Base.QuickSort,
+        order = Base.ReverseOrdering(getordering(H)),
+    )
     return H.heap.valtree
 end
 
