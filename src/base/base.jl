@@ -10,7 +10,17 @@ import DataStructures
 import ProgressMeter
 import SIMD
 import StaticArrays: SVector
+import TimerOutputs
 import UnPack: @unpack
+
+export @withtimer, gettimer, resettimer!
+const timer = TimerOutputs.TimerOutput()
+macro withtimer(description, expr)
+    return :(TimerOutputs.@timeit timer $description $(esc(expr)))
+end
+
+gettimer() = timer
+resettimer!() = TimerOutputs.reset_timer!(gettimer())
 
 #####
 ##### Generic Distance

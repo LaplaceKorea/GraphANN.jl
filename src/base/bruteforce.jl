@@ -37,8 +37,13 @@ function bruteforce_search(
     return gt
 end
 
+const VecOrMat{T} = Union{AbstractVector{T}, AbstractMatrix{T}}
+
+_num_neighbors(::AbstractVector) = 1
+_num_neighbors(x::AbstractMatrix) = size(x, 1)
+
 function bruteforce_search!(
-    gt::AbstractMatrix{ID},
+    gt::VecOrMat{ID},
     queries::AbstractVector{A},
     dataset::AbstractVector{B};
     executor::F = dynamic_thread,
@@ -49,12 +54,12 @@ function bruteforce_search!(
     metric = Euclidean(),
     tls::Union{Nothing, <:ThreadLocal, <:AbstractVector} = nothing,
 ) where {A, B, I, D, ID <: Union{I, Neighbor{I, D}}, F}
-    num_neighbors = size(gt, 1)
+    num_neighbors = _num_neighbors(gt)
     num_queries = length(queries)
 
     # Allocate TLS if not supplied by the caller.
     if tls === nothing
-        tls = bruteforce_threadlocal(executor, I, D, size(gt, 1), groupsize)
+        tls = bruteforce_threadlocal(executor, I, D, num_neighbors, groupsize)
     end
 
     # Batch the query range so each thread works on a chunk of queries at a time.
@@ -90,23 +95,11 @@ function bruteforce_search!(
     return gt
 end
 
+threadlocal_wrap(::typeof(dynamic_thread), heaps) = ThreadLocal(heaps)
+threadlocal_wrap(::typeof(single_thread), heaps) = heaps
 function bruteforce_threadlocal(f::F, ::Type{I}, ::Type{D}, num_neighbors, groupsize) where {F,I,D}
     heaps = [BoundedMaxHeap{Neighbor{I,D}}(num_neighbors) for _ in 1:groupsize]
     return threadlocal_wrap(f, heaps)
-end
-
-threadlocal_wrap(::typeof(dynamic_thread), heaps) = ThreadLocal(heaps)
-threadlocal_wrap(::typeof(single_thread), heaps) = heaps
-
-# Dispatch based on if we're filling up on `Integers` or `Neighbors`.
-function populate!(gt::AbstractVector{<:Integer}, heap)
-    gt .= getid.(destructive_extract!(heap))
-    return nothing
-end
-
-function populate!(gt::AbstractVector{<:Neighbor}, heap)
-    gt .= destructive_extract!(heap)
-    return nothing
 end
 
 #####
@@ -133,12 +126,28 @@ function _nearest_neighbors!(
     return nothing
 end
 
+# Matrix Version
+_populate!(gt::AbstractVector{<:Integer}, heap) = gt .= getid.(destructive_extract!(heap))
+_populate!(gt::AbstractVector{<:Neighbor}, heap) = gt .= destructive_extract!(heap)
 function _commit!(gt::AbstractMatrix, heaps::AbstractVector, range)
     for (heap_num, query_id) in enumerate(range)
-        vgt = view(gt, :, query_id)
         heap = heaps[heap_num]
-        populate!(vgt, heap)
+        _populate!(view(gt, :, query_id), heap)
         empty!(heap)
     end
     return nothing
 end
+
+# Vector Version
+_set!(x::AbstractVector{<:Integer}, v::Neighbor, i::Integer) = x[i] = getid(v)
+_set!(x::AbstractVector{<:Neighbor}, v::Neighbor, i::Integer) = x[i] = v
+function _commit!(gt::AbstractVector, heaps::AbstractVector, range)
+    for (heap_num, query_id) in enumerate(range)
+        heap = heaps[heap_num]
+        id = only(destructive_extract!(heap))
+        _set!(gt, id, query_id)
+        empty!(heap)
+    end
+    return nothing
+end
+

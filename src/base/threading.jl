@@ -19,7 +19,7 @@ Base.IteratorSize(::ThreadPool) = Base.HasLength()
 Base.iterate(t::ThreadPool, s...) = iterate(t.threads, s...)
 
 # `allthreads()` returns a ThreadPool for (believe it or not) all threads!
-allthreads() = ThreadPool(1:Threads.nthreads())
+allthreads() = ThreadPool(Base.OneTo(Threads.nthreads()))
 
 # Ref:
 # https://github.com/oschulz/ParallelProcessingTools.jl/blob/6a354b4ac7e90942cfe1d766d739306852acb0db/src/onthreads.jl#L14
@@ -107,12 +107,22 @@ end
 struct ThreadLocal{T,U}
     # When used on conjunction with a ThreadPool, we need to make this a dictionary
     # because we aren't guarenteed that thread id's start at 1.
-    values::Dict{Int64,T}
+    values::Vector{T}
     pool::ThreadPool{U}
+    translation::Dict{Int64,Int64}
 
     # Inner constructor to resolve ambiguities
-    function ThreadLocal{T}(values::Dict{Int64,T}, pool::ThreadPool{U}) where {T, U}
-        return new{T, U}(values, pool)
+    function ThreadLocal{T}(values::Vector{T}, pool::ThreadPool{U}) where {T, U}
+        translation = Dict(j => i for (j, i) in enumerate(pool))
+        return new{T, U}(values, pool, translation)
+    end
+
+    function ThreadLocal{T}(
+        values::Vector{T},
+        pool::ThreadPool{U},
+        translation::Dict{Int,Int},
+    ) where {T,U}
+        return new{T,U}(values, pool, translation)
     end
 end
 param(::ThreadLocal{T}) where {T} = T
@@ -124,12 +134,22 @@ ThreadLocal(pool::ThreadPool; kw...) = ThreadLocal(pool, (;kw...,))
 ThreadLocal(values) = ThreadLocal(allthreads(), values)
 
 function ThreadLocal(pool::ThreadPool, values::T) where {T}
-    return ThreadLocal{T}(Dict(tid => deepcopy(values) for tid in pool), pool)
+    return ThreadLocal{T}([deepcopy(values) for _ in pool], pool)
 end
 
-Base.getindex(t::ThreadLocal, i::Integer = Threads.threadid()) = t.values[i]
-Base.setindex!(t::ThreadLocal, v) = (t.values[Threads.threadid()] = v)
-getall(t::ThreadLocal) = collect(values(t.values))
+Base.getindex(t::ThreadLocal, i::Integer = Threads.threadid()) = t.values[t.translation[i]]
+Base.setindex!(t::ThreadLocal, v) = (t.values[t.translation[Threads.threadid()]] = v)
+
+# Optimized for default case.
+function Base.getindex(t::ThreadLocal{<:Any,<:Base.OneTo}, i::Integer = Threads.threadid())
+    return t.values[i]
+end
+
+function Base.setindex!(t::ThreadLocal{<:Any,<:Base.OneTo}, v, i::Integer = Threads.threadid())
+    t.values[i] = v
+end
+
+getall(t::ThreadLocal) = t.values
 getpool(t::ThreadLocal) = t.pool
 
 getlocal(x::ThreadLocal) = x[]
@@ -138,10 +158,14 @@ getlocal(x) = x
 # In the special case of NamedTuples, allow construction of a sub thread-local
 # by property name.
 function Base.getproperty(tls::ThreadLocal{T}, sym::Symbol) where {T <: NamedTuple}
-    if sym == :values || sym == :pool
+    if sym == :values || sym == :pool || sym == :translation
         return getfield(tls, sym)
     else
-        values = Dict(k => getproperty(v, sym) for (k, v) in getfield(tls, :values))
-        return ThreadLocal{fieldtype(T, sym)}(values, getfield(tls, :pool))
+        values = [getproperty(v, sym) for v in getfield(tls, :values)]
+        return ThreadLocal{fieldtype(T, sym)}(
+            values,
+            getfield(tls, :pool),
+            getfield(tls, :translation),
+        )
     end
 end

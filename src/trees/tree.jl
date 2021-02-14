@@ -127,7 +127,10 @@ end
 Add contents of `nodes` as children of `parent` in the tree currently being built.
 Return the indices where `nodes` were inserted as a range.
 """
-function addnodes!(builder::TreeBuilder{T}, parent::Integer, itr) where {T}
+function addnodes!(builder::TreeBuilder{T}, parent::Integer, itr; force = false) where {T}
+    # Allow for common path in code using a builder.
+    iszero(parent) && return initnodes!(builder, itr)
+
     @unpack tree, last_valid_index = builder
     @unpack nodes = tree
 

@@ -193,4 +193,20 @@ Base.getindex(x::NodeCounter) = x.count
     onnodes(x -> push!(nodes_visited, GraphANN.getid(x)), tree)
     sort!(nodes_visited)
     @test nodes_visited == sort(reduce(vcat, (1:10, 11:20, 30:40)))
+
+    # Finially, test that we can call `addnodes!` with a zero parent and still
+    # get the behavior of `initnodes!`.
+
+    builder = TreeBuilder{Int64}(100)
+
+    # Pull out the `nodes` vector to manually inspect during construction.
+    tree = builder.tree
+    nodes = builder.tree.nodes
+    @test all(GraphANN._Trees.isnull, nodes)
+
+    range = GraphANN._Trees.addnodes!(builder, 0, 1:10)
+    @test range == 1:10
+    counter = NodeCounter()
+    onnodes(counter, tree)
+    @test counter[] == 10
 end

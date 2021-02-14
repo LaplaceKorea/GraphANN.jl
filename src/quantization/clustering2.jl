@@ -2,31 +2,86 @@
 ##### Entry Points
 #####
 
-function kmeans(
+struct KMeansRunner{N,T,D,NT <: NamedTuple,U,V}
+    # intermediate centroids
+    initial::Vector{SVector{N,T}}
+    refined::Vector{SVector{N,T}}
+    final::Vector{SVector{N,Float32}}
+    # Cost of each data point
+    costs::Vector{D}
+    accumulators::NT
+    # Thread local storage for intermediate computations.
+    choose_tls::ThreadLocal{U}
+    lloyds_tls::ThreadLocal{V}
+end
+
+function KMeansRunner(
+    data::AbstractVector{SVector{N,T}};
+    idtype::Type{I} = UInt32,
+) where {N,T,I}
+    D = costtype(SVector{N,T}, SVector{N, Float32})
+    costs = Vector{D}(undef, length(data))
+    counts = zeros(Int, 1)
+
+    # TODO: think of a more compasable way of pre-allocating thread local storage.
+    choose_tls = initial_centroids_tls(data, I)
+    lloyds_tls = ThreadLocal(;
+        minimums = Neighbor{I,D}(),
+        sums = zeros(SVector{N,Float32}, 1),
+        points_per = zeros(Int, 1),
+    )
+
+    initial = SVector{N,T}[]
+    refined = SVector{N,T}[]
+    final = SVector{N,Float32}[]
+
+    accumulators = (
+        sums = zeros(SVector{N,Float32}, 1),
+        points_per = zeros(Int, 1)
+    )
+
+    return KMeansRunner(initial, refined, final, costs, accumulators, choose_tls, lloyds_tls)
+end
+
+function kmeans!(
     data::AbstractVector{SVector{N,T}},
+    runner::KMeansRunner{N,T},
     num_centroids;
     initial_oversample = 3,
     initial_iterations = 3,
     max_lloyds_iterations = 10,
+    executor = dynamic_thread,
 ) where {N,T}
     # Oversample while choosing initial centroids.
-    initial = SVector{N,T}[]
-    choose_initial_centroids!(
+    initial = runner.initial
+    @withtimer "choosing" choose_initial_centroids!(
         data,
         initial,
+        runner.costs,
+        runner.choose_tls,
         initial_oversample * num_centroids;
         num_iterations = initial_iterations,
     )
 
     # Refine the initial selection.
-    final = Vector{SVector{N,T}}(undef, num_centroids)
     weights = parallel_count(initial, data)
-    refine!(final, initial, weights)
+    refined = runner.refined
+    resize!(refined, num_centroids)
+    @withtimer "refining" refine!(refined, initial, weights)
 
     # Run Lloyd's algorithm.
-    centroids = toeltype(Float32, final)
-    lloyds!(centroids, data; num_iterations = max_lloyds_iterations)
-    return centroids
+    final = runner.final
+    resize!(final, length(refined))
+    final .= refined
+    @withtimer "lloyds" lloyds!(
+        final,
+        data,
+        runner.accumulators,
+        runner.lloyds_tls;
+        num_iterations = max_lloyds_iterations,
+        executor = executor
+    )
+    return final
 end
 
 #####
@@ -42,6 +97,8 @@ reset(::Neighbor{T,D}) where {T,D} = Neighbor{T,D}()
 ##### Pick Initial Centroids
 #####
 
+initial_centroids_tls(x::AbstractVector, ::Type{I}) where {I} = initial_centroids_tls(x, x, I)
+
 """
     initial_centroids_tls(data, centroids, idtype::Type)
 
@@ -55,35 +112,34 @@ end
 
 # For the first pass, assume `data` and `centroids` are just Vectors.
 function choose_initial_centroids!(
-    data::AbstractArray{T},
-    centroids::AbstractArray{U},
+    data::AbstractVector{T},
+    centroids::AbstractVector{U},
+    costs::AbstractVector,
+    tls::ThreadLocal,
     num_centroids::Integer;
     num_iterations = 1,
     idtype::Type{I} = UInt32,
 ) where {T,U,I}
-    # Centroids can either be supplied as a 2D array (in which case, broadcasting or
-    # zipping might occur based on the type of `data`) or as a Vector, in which case
-    # `data` should be a vector as well.
-    @assert in(ndims(centroids), (1, 2))
-    @assert in(ndims(data), (1, 2))
-
-    # TODO: Figure out how to cleanly allocate thread local storage.
-    # For example, how do we know if `costs` should be a vector or matrix.
-    D = costtype(T,U)
-    costs = Array{D}(undef, size(data))
-
-    tls = initial_centroids_tls(data, centroids, I)
+    empty!(centroids)
     push!(centroids, rand(data))
+    resize!(costs, length(data))
     adjustment = ceil(Int, num_centroids / num_iterations)
+    next = Set{I}()
 
     for iteration in 1:num_iterations
         # Compute the costs for all data points.
-        @time computecosts!(costs, centroids, data, tls.minimum)
+        #@time computecosts!(costs, centroids, data, tls.minimum)
+        slicedata(centroids, data, tls.minimum) do i, minimum
+            costs[i] = getdistance(minimum)
+        end
         total = parallel_sum(costs)
         # Sample next points.
         parallel_sample!(costs, total, tls.next, adjustment)
         # Union updates
-        next = mapreduce(x -> x.next, union, getall(tls))
+        empty!(next)
+        for x in getall(tls)
+            union!(next, x.next)
+        end
         for i in next
             push!(centroids, data[i])
         end
@@ -107,14 +163,6 @@ function findnearest!(x, Y, minimum; metric = Euclidean())
         minimum = vupdate(minimum, x, slice(Y, i), i; metric = metric)
     end
     return minimum
-end
-
-function computecosts!(costs, centroids, data, tls; metric = Euclidean())
-    dynamic_thread(slices(data), 64) do i
-        minimum = findnearest!(slice(data, i), centroids, tls[]; metric = metric)
-        # TODO: generalize this cost update.
-        costs[i] = getdistance(minimum)
-    end
 end
 
 function refine!(final, centroids, weights)
@@ -158,19 +206,33 @@ end
 
 function lloyds!(
     centroids::AbstractArray{T},
-    data;
+    data,
+    accumulators::NamedTuple,
+    tls::ThreadLocal;
+    executor = dynamic_thread,
     num_iterations = 1,
     idtype::Type{I} = UInt32
 ) where {T,I}
-    D = costtype(T, eltype(data))
-    tls = ThreadLocal(;
-        minimums = Neighbor{I,D}(),
-        sums = zeros(T, size(centroids)),
-        points_per = zeros(Int, size(centroids)),
-    )
+    # for now - just populate randomly.
+    num_centroids = length(centroids)
+    for i in eachindex(centroids)
+        centroids[i] = rand(data)
+    end
+
+    # reset thread local storage
+    for t in getall(tls)
+        resize!(t.sums, num_centroids)
+        zero!(t.sums)
+        resize!(t.points_per, num_centroids)
+        zero!(t.points_per)
+    end
+
+    @unpack sums, points_per = accumulators
+    resize!(sums, num_centroids)
+    resize!(points_per, num_centroids)
 
     for iter in 1:num_iterations
-        dynamic_thread(slices(data), 1024) do i
+        executor(slices(data), 1024) do i
             threadlocal = tls[]
             @unpack minimums = threadlocal
             v = slice(data, i)
@@ -183,17 +245,28 @@ function lloyds!(
             threadlocal.points_per[id] += 1
         end
 
-        sums = mapreduce(x -> x.sums, +, getall(tls))
-        points_per = mapreduce(x -> x.points_per, +, getall(tls))
+        zero!(sums)
+        zero!(points_per)
+        for x in getall(tls)
+            for i in 1:num_centroids
+                sums[i] += x.sums[i]
+                points_per[i] += x.points_per[i]
+            end
+        end
 
+        # Update all centroids to be the mean of their assigned points.
         for i in eachindex(sums, points_per, centroids)
             sum = sums[i]
             num_points = points_per[i]
             # TODO: Dummy check for now.
             # Need to determine the correct thing to do if a centroid has no assigned
             # points.
-            @assert !iszero(num_points)
-            centroids[i] = sum / num_points
+            if iszero(num_points)
+                # Not the best fallback in the world ...
+                centroids[i] = rand(data)
+            else
+                centroids[i] = sum / num_points
+            end
         end
     end
 end
@@ -201,6 +274,19 @@ end
 #####
 ##### Parallel Algorithms
 #####
+
+function slicedata(
+    f::F,
+    centroids::AbstractVector,
+    data::AbstractVector,
+    minimums::ThreadLocal;
+    metric = Euclidean()
+) where {F}
+    dynamic_thread(slices(data), 64) do i
+        minimum = findnearest!(slice(data, i), centroids, minimums[]; metric = metric)
+        f(i, minimum)
+    end
+end
 
 """
     parallel_sum(x::AbstractArray) -> Vector
@@ -224,17 +310,15 @@ closest to each centroid.
 """
 function parallel_count(centroids, data)
     D = costtype(eltype(centroids), eltype(data))
-    tls = ThreadLocal(;
-        minimum = Neighbor{UInt32,D}(),
-        counts = zeros(Int, size(centroids)),
-    )
+    minimums = ThreadLocal(Neighbor{UInt32,D}())
+    counts = ThreadLocal(zeros(Int, size(centroids)))
 
-    dynamic_thread(slices(data), 64) do i
-        threadlocal = tls[]
-        minimum = findnearest!(slice(data, i), centroids, threadlocal.minimum)
-        threadlocal.counts[getid(minimum)] += 1
+    slicedata(centroids, data, minimums) do i, minimum
+        c = counts[]
+        c[getid(minimum)] += 1
     end
-    return mapreduce(x -> x.counts, +, getall(tls))
+
+    return reduce(+, getall(counts))
 end
 
 function parallel_sample!(
@@ -252,17 +336,5 @@ function parallel_sample!(
             push!(next, i)
         end
     end
-end
-
-function parallel_nearest(centroids::AbstractVector, data::AbstractVector)
-    D = costtype(centroids, data)
-    tls = ThreadLocal(Neighbor{UInt32,D}())
-    nearest = Vector{UInt32}(undef, length(data))
-
-    dynamic_thread(slices(data), 64) do i
-        minimum = findnearst!(slice(data, i), centroids, tls[])
-        nearest[i] = getid(minimum)
-    end
-    return nearest
 end
 
