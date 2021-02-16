@@ -1,53 +1,53 @@
-@testset "Testing Bruteforce Search" begin
-    @testset "Testing Bruteforce Utilities" begin
+@testset "Testing Exhaustive Search" begin
+    @testset "Testing Exhaustive Utilities" begin
         # the `_num_neighbors` function should differentiate vectors and matrices.
         x = [1,2,3]
-        @test GraphANN._Base._num_neighbors(x) == 1
+        @test GraphANN.Algorithms._num_neighbors(x) == 1
         for i in 1:10
             y = rand(Float32, rand(1:10), rand(1:10))
-            @test GraphANN._Base._num_neighbors(y) == size(y, 1)
+            @test GraphANN.Algorithms._num_neighbors(y) == size(y, 1)
         end
 
         # Test `threadlocal_wrap`.
         x = [1,2,3]
-        y = GraphANN._Base.threadlocal_wrap(GraphANN.dynamic_thread, x)
+        y = GraphANN.Algorithms.threadlocal_wrap(GraphANN.dynamic_thread, x)
         @test isa(y, GraphANN.ThreadLocal{typeof(x)})
 
         # should be identity function and return the exact same object.
-        y = GraphANN._Base.threadlocal_wrap(GraphANN.single_thread, x)
+        y = GraphANN.Algorithms.threadlocal_wrap(GraphANN.single_thread, x)
         @test y === x
 
-        # -- bruteforce_threadlocal
-        # single threaded
-        num_neighbors = 10
-        groupsize = 16
-        x = GraphANN._Base.bruteforce_threadlocal(
-            GraphANN.single_thread,
-            UInt64,
-            Float32,
-            num_neighbors,
-            groupsize,
-        )
-        @test isa(x, Vector{GraphANN.BoundedMaxHeap{GraphANN.Neighbor{UInt64, Float32}}})
-        @test length(x) == groupsize
-        @test all(i -> GraphANN._Base.getbound(i) == num_neighbors, x)
+        # # -- exhaustive_threadlocal
+        # # single threaded
+        # num_neighbors = 10
+        # groupsize = 16
+        # x = GraphANN.Algorithms.exhaustive_threadlocal(
+        #     GraphANN.single_thread,
+        #     UInt64,
+        #     Float32,
+        #     num_neighbors,
+        #     groupsize,
+        # )
+        # @test isa(x, Vector{GraphANN.BoundedMaxHeap{GraphANN.Neighbor{UInt64, Float32}}})
+        # @test length(x) == groupsize
+        # @test all(i -> GraphANN._Base.getbound(i) == num_neighbors, x)
 
-        # multi-threaded
-        x = GraphANN._Base.bruteforce_threadlocal(
-            GraphANN.dynamic_thread,
-            UInt32,
-            Int32,
-            num_neighbors,
-            groupsize,
-        )
+        # # multi-threaded
+        # x = GraphANN.Algorithms.exhaustive_threadlocal(
+        #     GraphANN.dynamic_thread,
+        #     UInt32,
+        #     Int32,
+        #     num_neighbors,
+        #     groupsize,
+        # )
 
-        @test isa(x, GraphANN.ThreadLocal)
-        # all thread local objects should
-        storage = GraphANN.getall(x)
-        @test all(i -> length(i) == groupsize, storage)
-        for y in storage
-            @test all(i -> GraphANN._Base.getbound(i) == num_neighbors, y)
-        end
+        # @test isa(x, GraphANN.ThreadLocal)
+        # # all thread local objects should
+        # storage = GraphANN.getall(x)
+        # @test all(i -> length(i) == groupsize, storage)
+        # for y in storage
+        #     @test all(i -> GraphANN._Base.getbound(i) == num_neighbors, y)
+        # end
 
         # -- _populate!, _set!, and commit!
 
@@ -64,7 +64,7 @@
 
         # populate a vector with all neighbors.
         gt = Vector{GraphANN.Neighbor{UInt32,Int32}}(undef, num_neighbors)
-        GraphANN._Base._populate!(gt, heap)
+        GraphANN.Algorithms._populate!(gt, heap)
         for (i, n) in enumerate(gt)
             @test n == GraphANN.Neighbor{UInt32,Int32}(i, Int32(i))
         end
@@ -75,7 +75,7 @@
             push!(heap, GraphANN.Neighbor{UInt32,Int32}(i, Int32(i)))
         end
         gt = Vector{UInt32}(undef, num_neighbors)
-        GraphANN._Base._populate!(gt, heap)
+        GraphANN.Algorithms._populate!(gt, heap)
         for (i, n) in enumerate(gt)
             @test n == i
         end
@@ -83,11 +83,11 @@
         # test `_set!`
         y = GraphANN.Neighbor{UInt32,Int32}(10, Int32(100))
         gt = Vector{GraphANN.Neighbor{UInt32,Int32}}(undef, 1)
-        GraphANN._Base._set!(gt, y, 1)
+        GraphANN.Algorithms._set!(gt, y, 1)
         @test gt[1] == y
 
         gt = Vector{UInt32}(undef, 1)
-        GraphANN._Base._set!(gt, y, 1)
+        GraphANN.Algorithms._set!(gt, y, 1)
         @test gt[1] == GraphANN.getid(y)
 
         # finally, test all flavors of `_commit!`
@@ -122,13 +122,13 @@
         # neighbor mode
         populate!(heaps)
         gt = Matrix{GraphANN.Neighbor{UInt64,Float64}}(undef, 10, 2)
-        GraphANN._Base._commit!(gt, heaps, 1:2)
+        GraphANN.Algorithms._commit!(gt, heaps, 1:2)
         check(gt)
 
         # integer mode
         populate!(heaps)
         gt = Matrix{UInt64}(undef, 10, 2)
-        GraphANN._Base._commit!(gt, heaps, 1:2)
+        GraphANN.Algorithms._commit!(gt, heaps, 1:2)
         check(gt)
 
         # _commit! vector mode
@@ -138,19 +138,19 @@
         ]
         populate!(heaps)
         gt = Vector{GraphANN.Neighbor{UInt64,Float64}}(undef, 2)
-        GraphANN._Base._commit!(gt, heaps, 1:2)
+        GraphANN.Algorithms._commit!(gt, heaps, 1:2)
         @test gt[1] == GraphANN.Neighbor{UInt64,Float64}(1, Float64(1))
         @test gt[2] == GraphANN.Neighbor{UInt64,Float64}(101, Float64(101))
 
         populate!(heaps)
         gt = Vector{UInt64}(undef, 2)
-        GraphANN._Base._commit!(gt, heaps, 1:2)
+        GraphANN.Algorithms._commit!(gt, heaps, 1:2)
         @test gt[1] == 1
         @test gt[2] == 101
     end
 
     function compare_ids(ids)
-        # NOTE: no index-0 to index-1 translation because `bruteforce_search` automatically
+        # NOTE: no index-0 to index-1 translation because `exhaustive_search` automatically
         # converts to index-0>
         gt = GraphANN.load_vecs(groundtruth_path)
 
@@ -187,18 +187,18 @@
     dataset = GraphANN.load_vecs(SVector{128,Float32}, dataset_path)
     queries = GraphANN.load_vecs(SVector{128,Float32}, query_path)
 
-    # Note - `bruteforce_search` already returns nearest neighbors in index-0, so no need
+    # Note - `exhaustive_search` already returns nearest neighbors in index-0, so no need
     # to convert the ground truth to index-1.
     gt = GraphANN.load_vecs(groundtruth_path)
 
     # Using Float32
-    ids = GraphANN.bruteforce_search(queries, dataset; metric = GraphANN.Euclidean())
+    ids = GraphANN.exhaustive_search(queries, dataset; metric = GraphANN.Euclidean())
     compare_ids(ids)
 
     # Using UInt8
     queries_u8 = [map(UInt8, i) for i in queries]
     dataset_u8 = [map(UInt8, i) for i in dataset]
-    ids = GraphANN.bruteforce_search(
+    ids = GraphANN.exhaustive_search(
         queries_u8,
         dataset_u8;
         metric = GraphANN.Euclidean(),

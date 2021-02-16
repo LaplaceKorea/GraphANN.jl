@@ -127,6 +127,11 @@ struct ThreadLocal{T,U}
 end
 param(::ThreadLocal{T}) where {T} = T
 
+# Many algorithms are designed to either take thread local of some struct for storage when
+# using a multi-threaded implementation, or just the simple data structure itself if
+# performing single threaded operation.
+const MaybeThreadLocal{T} = Union{T, <:ThreadLocal{T}}
+
 # Convenience, wrap around a NamedTuple
 # Need to define a few methods to get around ambiguities.
 ThreadLocal(; kw...) = ThreadLocal(allthreads(), (;kw...,))
@@ -150,6 +155,9 @@ function Base.setindex!(t::ThreadLocal{<:Any,<:Base.OneTo}, v, i::Integer = Thre
 end
 
 getall(t::ThreadLocal) = t.values
+# Often, a `NamedTuple` can be passed to routines instead of a `ThreadLocal` if the routine
+# is using a single thread.
+getall(nt::NamedTuple) = (nt,)
 getpool(t::ThreadLocal) = t.pool
 
 getlocal(x::ThreadLocal) = x[]

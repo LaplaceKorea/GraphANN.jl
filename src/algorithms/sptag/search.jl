@@ -84,8 +84,8 @@ visited!(x::TagSearch, node) = push!(x.visited, getid(node))
 
 function init!(algo::TagSearch, tree::Tree, data, query; metric = Euclidean())
     empty!(algo)
-    @unpack root, nodes = tree
-    for i in childindices(root)
+    @unpack nodes = tree
+    for i in _Trees.rootindices(tree)
         child = nodes[i]
         candidate = Neighbor(algo, child, evaluate(metric, data[getid(child)], query))
         pushcandidate!(treectx, algo, candidate)
@@ -95,12 +95,12 @@ end
 function _Base.search(
     algo::TagSearch,
     tree::Tree,
-    data::AbstractVector{T},
-    query::U,
+    data::AbstractVector,
+    query,
     numleaves::Integer
-) where {T,U}
+)
     metric = Euclidean()
-    @unpack root, nodes = tree
+    @unpack nodes = tree
 
     # Start processing!
     leaves_seen = 0
@@ -198,7 +198,6 @@ function _Base.searchall(
     num_neighbors = _Base.getbound(algo.results)
     dest = Array{eltype(meta.graph),2}(undef, num_neighbors, num_queries)
     for (col, query) in enumerate(queries)
-        _Base.distance_prehook(metric, query)
         search(algo, meta, tree, query; kw...)
 
         # Copy over the results to the destination
@@ -227,7 +226,6 @@ function _Base.searchall(
         query = queries[col]
         algo = tls[]
 
-        _Base.distance_prehook(metric, query)
         search(algo, meta, tree, query; kw...)
 
         # Copy over the results to the destination
@@ -237,4 +235,21 @@ function _Base.searchall(
         end
     end
     return dest
+end
+
+#####
+##### Tree Search
+#####
+
+function __tree_search(
+    algo::TagSearch,
+    tree::Tree,
+    data::AbstractVector,
+    query;
+    numleaves::Integer = 1000,
+)
+    metric = Euclidean()
+    init!(algo, tree, data, query)
+    search(algo, tree, data, query, numleaves)
+    return getid.(DataStructures.extract_all!(algo.graph_queue))[1:_Base.getbound(algo.results)]
 end

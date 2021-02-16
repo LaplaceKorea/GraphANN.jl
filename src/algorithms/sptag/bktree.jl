@@ -12,6 +12,7 @@ function build_bktree(
     data::AbstractVector{SVector{N,T}};
     fanout = 8,
     leafsize = 32,
+    stacksplit = 10000,
     idtype::Type{I} = UInt32
 ) where {N,T,I}
     D = costtype(SVector{N,T})
@@ -21,103 +22,185 @@ function build_bktree(
     permutation = collect(I(1):I(length(data)))
     builder = _Trees.TreeBuilder{I}(length(data))
 
-    # Pre-allocate storage for bruteforce search.
-    bf_groupsize = 32
-    bf_tls = _Base.bruteforce_threadlocal(dynamic_thread, I, Float32, 1, bf_groupsize)
-    bf_gt = Vector{I}(undef, length(data))
+    # Step 1 - coarse grained pass.
+    # Single threaded outer loop, multi-threaded inner loops.
+    stack = coarse_pass!(builder, permutation, data, fanout, stacksplit)
 
-    # initlaize kmeans data
-    kmeans_runner = _Quantization.KMeansRunner(data; idtype = I)
+    # Step 2 - fine-grained pass.
+    # Multi-threaded outer loop, single-threaded inner loops.
+    fine_pass!(builder, permutation, stack, data, fanout, leafsize, stacksplit)
+    return builder
+end
 
-    stack = [(parent = 0, range = 1:length(data))]
-    meter = ProgressMeter.Progress(length(data), 1)
+function coarse_pass!(
+    builder::_Trees.TreeBuilder{I},
+    permutation::Vector{I},
+    data::AbstractVector{SVector{N,T}},
+    fanout::Integer,
+    stacksplit::Integer,
+) where {I,N,T}
+    largestack = [(parent = 0, range = 1:length(data))]
+    smallstack = Vector{eltype(largestack)}()
+
+    kmeans_runner = _Quantization.KMeansRunner(data, dynamic_thread)
+    exhaustive_runner = ExhaustiveRunner(
+        Neighbor{I,Float32},
+        length(data),
+        one;
+        executor = dynamic_thread,
+        costtype = Float32,
+    )
+
+    # Inner function - add a coarsely clustered partition to the small stack.
+    process_stack!(
+        x -> push!(smallstack, x),
+        largestack,
+        builder,
+        data,
+        permutation,
+        kmeans_runner,
+        exhaustive_runner,
+        fanout,
+        stacksplit,
+    )
+
+    return smallstack
+end
+
+function fine_pass!(
+    builder::_Trees.TreeBuilder{I},
+    permutation::AbstractVector{I},
+    stack::AbstractVector,
+    data::AbstractVector{SVector{N,T}},
+    fanout::Integer,
+    leafsize::Integer,
+    stacksplit::Integer,
+) where {I,N,T}
+    kmeans_runners = ThreadLocal(_Quantization.KMeansRunner(data, single_thread))
+    exhaustive_runners = ExhaustiveRunner(
+        Neighbor{I,Float32},
+        stacksplit,
+        one;
+        executor = single_thread,
+        costtype = Float32,
+    ) |> ThreadLocal
+    local_stacks = ThreadLocal(Vector{eltype(stack)}())
+    callback = ((parent, range),) -> _Trees.addnodes!(builder, parent, view(permutation, range))
+
+    dynamic_thread(eachindex(stack)) do i
+        local_stack = local_stacks[]
+        push!(local_stack, stack[i])
+
+        process_stack!(
+            callback,
+            local_stack,
+            builder,
+            data,
+            permutation,
+            kmeans_runners[],
+            exhaustive_runners[],
+            fanout,
+            leafsize,
+        )
+    end
+end
+
+function process_stack!(
+    f::F,
+    stack::AbstractVector{<:NamedTuple{(:parent,:range)}},
+    builder::_Trees.TreeBuilder,
+    data::AbstractVector{SVector{N,T}},
+    permutation::AbstractVector{<:Integer},
+    kmeans_runner,
+    bruteforce_runner,
+    fanout::Integer,
+    leafsize::Integer
+) where {F,N,T}
     while !isempty(stack)
         @unpack parent, range = pop!(stack)
+
+        # Leaf check.
+        # If the range is less than the target leaf size, call the passed function.
         if length(range) < leafsize
-            ProgressMeter.next!(meter; step = length(range))
-            _Trees.addnodes!(builder, parent, view(permutation, range))
-            shrink!(permutation, length(range))
+            f((; parent, range))
             continue
         end
 
         dataview = doubleview(data, permutation, range)
-        @withtimer "kmeans" begin
-            if length(range) < 4096
-                centroids = _Quantization.kmeans!(dataview, kmeans_runner, fanout; executor = single_thread)
-            else
-                centroids = _Quantization.kmeans!(dataview, kmeans_runner, fanout; executor = dynamic_thread)
-            end
-        end
+        centroids = _Quantization.kmeans(dataview, kmeans_runner, fanout)
+        # Map the indices returned by `kmeans` to their closest data points.
+        resize!(bruteforce_runner, length(centroids))
+        centroid_indices = search!(
+            bruteforce_runner,
+            centroids,
+            dataview;
+            meter = nothing,
+        )
 
-        # Find the data points that are closest to the centroids.
-        @withtimer "nearest" begin
-            resize!(bf_gt, length(centroids))
-            bruteforce_search!(
-                bf_gt,
-                centroids,
-                dataview;
-                idtype = I,
-                tls = bf_tls,
-                meter = nothing,
-            )
-            unique!(bf_gt)
-        end
-
+        # Handle cases where we have repeated indices.
         # Remember that `bruteforce_search` computes its results in Index-0.
         # Thus, we need to increment every entry in the computed nearest data points.
-        bf_gt .+= one(eltype(bf_gt))
-        for (i, j) in enumerate(bf_gt)
-            centroids[i] = data[j]
+        unique!(centroid_indices)
+        centroid_indices .+= one(eltype(centroid_indices))
+        for (i, j) in enumerate(centroid_indices)
+            centroids[i] = dataview[j]
         end
-        resize!(centroids, length(bf_gt))
-        ProgressMeter.next!(meter; step = length(centroids))
-        usedrange = _Trees.addnodes!(builder, parent, bf_gt)
-        move_to_end!(permutation, bf_gt)
-        shrink!(permutation, length(bf_gt))
+        resize!(centroids, length(centroid_indices))
+
+        # Add the data point indices to the tree, move selected centroids to the end
+        # of the current range to aid in procesing the next level.
+        permview = view(permutation, range)
+        parent_indices = _Trees.addnodes!(
+            builder,
+            parent,
+            (permview[i] for i in centroid_indices),
+        )
+        move_to_end!(permview, centroid_indices)
 
         # Now that we've found our centroids and added them to the tree, we need to
         # sort the remaining elements in this range by the centroid they are assigned to.
-        remaining_range = first(range):(last(range) - length(bf_gt))
-        remaining_range = shrink!(range, length(bf_gt))
+        # NOTE: Calling `search!` again will invalidate the `centroid_indices` vector,
+        # so don't use it any more.
+        remaining_range = shrink!(range, length(centroid_indices))
         dataview = doubleview(data, permutation, remaining_range)
-        @withtimer "assignments" begin
-            resize!(bf_gt, length(remaining_range))
-            assignments = bruteforce_search!(
-                bf_gt,
-                dataview,
-                centroids;
-                idtype = I,
-                tls = bf_tls,
-                meter = nothing,
-            )
-            assignments .+= one(eltype(assignments))
-        end
-
-        # Sort by the centroids that are closest.
-        permview = view(permutation, remaining_range)
-        @withtimer "sorting" sort!(
-            Dual(assignments, permview);
-            alg = Base.QuickSort,
-            by = first,
+        resize!(bruteforce_runner, length(remaining_range))
+        assignments = search!(
+            bruteforce_runner,
+            dataview,
+            centroids;
+            meter = nothing,
         )
+        assignments .+= one(eltype(assignments))
+
+        # Sort data points by the centroid that they map to.
+        permview = view(permutation, remaining_range)
+        sort!(Dual(assignments, permview); alg = Base.QuickSort, by = first)
 
         # Finally, scan through the remaining range and assign child ranges.
         start = 1
         for i in 1:length(centroids)
             stop = findfirstfrom(!isequal(i), assignments, start)
+            # If for some reason - no points were assigned to this centroid, just continue.
             start == stop && continue
 
+            # Affine transformation from local indices to global indices.
             subrange = remaining_range[start]:(remaining_range[stop - 1])
-            push!(stack, (parent = usedrange[i], range = subrange))
+            push!(stack, (parent = parent_indices[i], range = subrange))
             start = stop
         end
     end
-    return builder
 end
 
-function move_to_end!(v::AbstractVector, idx)
+
+#####
+##### Utils
+#####
+
+Base.@propagate_inbounds function move_to_end!(v::AbstractVector, itr)
+    # `itr` is usually pretty short, so use InsertionSort as the algorithm.
+    sort!(itr; rev = true, alg = Base.InsertionSort)
     last = lastindex(v) + 1
-    for (i, j) in enumerate(idx)
+    for (i, j) in enumerate(itr)
         swapindex = last - i
         v[swapindex], v[j] = v[j], v[swapindex]
     end
@@ -125,7 +208,7 @@ end
 
 function findfirstfrom(predicate::F, A, start) where {F}
     for i in Int(start):Int(lastindex(A))
-        predicate(A[i]) && return i
+        predicate(@inbounds(A[i])) && return i
     end
     return lastindex(A) + 1
 end

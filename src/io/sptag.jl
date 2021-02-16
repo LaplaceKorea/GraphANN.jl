@@ -151,12 +151,16 @@ function load_bktree(io::IO)
     read!(io, nodes)
     nodes .= adjust.(nodes)
 
+    # SPTAG applies a dummy-node at the end of the vector.
+    # Here, we drop the dummy node so that the resulting tree passes our internal checks.
+    resize!(nodes, length(nodes) - 1)
+
     if !eof(io)
         error("Something went wrong when loading BKTree. End of file not reached!")
     end
 
     # TODO: remove sentinel nodes that show up at the end of the file ...
-    tree = Tree(root, nodes)
+    tree = Tree{UInt32}(root.childend, nodes)
     return (; number_of_trees, tree_start_indices, tree)
 end
 

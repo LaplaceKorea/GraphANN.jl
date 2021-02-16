@@ -1,11 +1,11 @@
 #####
-##### BruteForce
+##### Exhaustive
 #####
 
 raw"""
-    bruteforce_search(queries, dataset, [num_neighbors]; [groupsize]) -> Matrix{UInt64}
+    exhaustive_search(queries, dataset, [num_neighbors]; [groupsize]) -> Matrix{UInt64}
 
-Perform a bruteforce nearest search operation of `queries` on `dataset`, finding the closest
+Perform a exhaustive nearest search operation of `queries` on `dataset`, finding the closest
 `num_neighbors` neighbors.
 
 Returns a `Matrix{UInt64}` where column `i` lists the ids of the `num_neighbors` nearest
@@ -17,7 +17,7 @@ neighbors of `query[i]` in descending order (i.e., index (i,1) is the nearest ne
 This process will go much faster if all the available threads on the machine are used.
 I.E., `export JULIA_NUM_THREADS=$(nproc)`
 
-The bruteforce search is implemented by grouping queries into groups of `groupsize` and
+The exhaustive search is implemented by grouping queries into groups of `groupsize` and
 then scaning the entire dataset to find the nearest neighbors for each query in the group.
 
 Making this number too small will result in extremely excessive memory traffic, while making
@@ -25,60 +25,115 @@ it too large will hurt performance in the cache.
 
 The default is `groupsize = 32`.
 """
-function bruteforce_search(
-    queries::AbstractVector,
-    dataset::AbstractVector,
+function exhaustive_search(
+    queries::AbstractVector{A},
+    dataset::AbstractVector{B},
     num_neighbors::Integer = 100;
     idtype::Type{I} = UInt32,
+    costtype::Type{D} = costtype(A, B),
+    executor = dynamic_thread,
+    groupsize = 32,
     kw...
-) where {I}
-    gt = Array{I,2}(undef, num_neighbors, length(queries))
-    bruteforce_search!(gt, queries, dataset; idtype = I, kw...)
-    return gt
+) where {A,B,I,D}
+    runner = ExhaustiveRunner(
+        I,
+        length(queries),
+        num_neighbors;
+        executor = executor,
+        costtype = D,
+        max_groupsize = groupsize,
+    )
+    search!(runner, queries, dataset; groupsize, kw...)
+    return runner.groundtruth
 end
 
 const VecOrMat{T} = Union{AbstractVector{T}, AbstractMatrix{T}}
+const IntOrNeighbor{I} = Union{I, <:Neighbor{I}}
+inttype(::Type{I}) where {I <: Integer} = I
+inttype(::Type{<:Neighbor{I}}) where {I <: Integer} = I
+
+mutable struct ExhaustiveRunner{V <: VecOrMat{<:IntOrNeighbor}, T <: MaybeThreadLocal{<:AbstractVector}, F}
+    groundtruth::V
+    exhaustive_local::T
+    executor::F
+end
+
+function ExhaustiveRunner(
+    ::Type{ID},
+    num_queries::Integer,
+    num_neighbors::U = one;
+    executor::F = single_thread,
+    costtype::Type{D} = Float32,
+    max_groupsize = 32,
+) where {ID <: IntOrNeighbor, U <: Union{Integer, typeof(one)}, F, D}
+    # Preallocate destination.
+    I = inttype(ID)
+    if isa(num_neighbors, Integer)
+        groundtruth = Matrix{I}(undef, num_neighbors, num_queries)
+    else
+        groundtruth = Vector{I}(undef, num_queries)
+    end
+
+    # Create thread local storage.
+    heaps = [BoundedMaxHeap{Neighbor{I,D}}(_num_neighbors(num_neighbors)) for _ in 1:max_groupsize]
+    exhaustive_local = threadlocal_wrap(executor, heaps)
+    return ExhaustiveRunner(groundtruth, exhaustive_local, executor)
+end
+
+threadlocal_wrap(::typeof(dynamic_thread), heaps) = ThreadLocal(heaps)
+threadlocal_wrap(::typeof(single_thread), heaps) = heaps
 
 _num_neighbors(::AbstractVector) = 1
 _num_neighbors(x::AbstractMatrix) = size(x, 1)
+_num_neighbors(::typeof(one)) = 1
+_num_neighbors(x::Integer) = x
 
-function bruteforce_search!(
-    gt::VecOrMat{ID},
-    queries::AbstractVector{A},
-    dataset::AbstractVector{B};
-    executor::F = dynamic_thread,
+# Allow resizing when using a vector to store the single nearest neighbor.
+function Base.resize!(runner::ExhaustiveRunner{<:AbstractVector}, sz::Integer)
+    resize!(runner.groundtruth, sz)
+end
+
+function sizecheck(groundtruth::AbstractVector, num_neighbors, num_queries)
+    @assert num_neighbors == 1
+    @assert num_queries == length(groundtruth)
+end
+
+function sizecheck(groundtruth::AbstractMatrix, num_neighbors, num_queries)
+    @assert size(groundtruth) == (num_neighbors, num_queries)
+end
+
+function search!(
+    runner::ExhaustiveRunner,
+    queries::AbstractVector,
+    dataset::AbstractVector;
     groupsize = 32,
     meter = ProgressMeter.Progress(length(queries), 1),
-    idtype::Type{I} = UInt32,
-    costtype::Type{D} = costtype(A, B),
     metric = Euclidean(),
-    tls::Union{Nothing, <:ThreadLocal, <:AbstractVector} = nothing,
-) where {A, B, I, D, ID <: Union{I, Neighbor{I, D}}, F}
-    num_neighbors = _num_neighbors(gt)
+)
+    # Destructure runner
+    @unpack groundtruth, exhaustive_local, executor = runner
+    num_neighbors = _num_neighbors(groundtruth)
     num_queries = length(queries)
 
-    # Allocate TLS if not supplied by the caller.
-    if tls === nothing
-        tls = bruteforce_threadlocal(executor, I, D, num_neighbors, groupsize)
-    end
+    sizecheck(groundtruth, num_neighbors, num_queries)
 
     # Batch the query range so each thread works on a chunk of queries at a time.
     # The dynamic load balancer will give one batch at a time to each worker.
     batched_iter = BatchedRange(1:num_queries, groupsize)
 
-    # N.B. Need to use the "let" trick on `tls` since it is captured in the closure passed
-    # to the `executor`.
+    # N.B. Need to use the "let" trick on `exhaustive_local` since it is captured in the
+    # closure passed to the `executor`.
     #
     # If we don't, then the `_nearest_neighbors!` and `_commit!` inner functions require
     # dynamic dispatch.
-    let tls = tls
+    let exhaustive_local = exhaustive_local
         executor(batched_iter) do range
-            heaps = getlocal(tls)
+            heaps = _Base.getlocal(exhaustive_local)
 
             # Compute nearest neighbors for this batch across the whole dataset.
             # Implement this as an inner function to help out type inference.
             _nearest_neighbors!(heaps, dataset, queries, range, metric)
-            _commit!(gt, heaps, range)
+            _commit!(groundtruth, heaps, range)
 
             # Note: ProgressMeter is threadsafe - so calling it here is okay.
             # With modestly sized dataset, the arrival time of threads to this point should be
@@ -92,21 +147,14 @@ function bruteforce_search!(
         end
     end
     meter !== nothing && ProgressMeter.finish!(meter)
-    return gt
-end
-
-threadlocal_wrap(::typeof(dynamic_thread), heaps) = ThreadLocal(heaps)
-threadlocal_wrap(::typeof(single_thread), heaps) = heaps
-function bruteforce_threadlocal(f::F, ::Type{I}, ::Type{D}, num_neighbors, groupsize) where {F,I,D}
-    heaps = [BoundedMaxHeap{Neighbor{I,D}}(num_neighbors) for _ in 1:groupsize]
-    return threadlocal_wrap(f, heaps)
+    return groundtruth
 end
 
 #####
-##### Inner bruteforce functions
+##### Inner functions
 #####
 
-# Define there to help out inference in the loop body
+# Define there to help out inference in the "exhaustive_search!" closure.
 function _nearest_neighbors!(
     heaps::AbstractVector{BoundedMaxHeap{T}},
     dataset::AbstractVector,
@@ -126,6 +174,7 @@ function _nearest_neighbors!(
     return nothing
 end
 
+# Populate destinations based on eltype (i.e., `Integer` or `Neighbor`).
 # Matrix Version
 _populate!(gt::AbstractVector{<:Integer}, heap) = gt .= getid.(destructive_extract!(heap))
 _populate!(gt::AbstractVector{<:Neighbor}, heap) = gt .= destructive_extract!(heap)

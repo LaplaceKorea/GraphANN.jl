@@ -388,3 +388,4 @@ end
 
 ziptimes(a::Number, b::Number) = a * b
 ziptimes(a::AbstractVector, b::AbstractVector) = a .* b
+

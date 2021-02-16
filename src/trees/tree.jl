@@ -89,8 +89,29 @@ function ispacked(tree::Tree)
     if count(indices_seen) != length(tree)
         error("Not all indexes in the tree vector were visited!")
     end
-    return indices_seen
+    return true
 end
+
+function allids(tree::Tree)
+    ids_seen = falses(length(tree))
+    passed = true
+    onnodes(tree) do node
+        id = getid(node)
+        if ids_seen[id]
+            passed = false
+        end
+        ids_seen[id] = true
+        return nothing
+    end
+    num_ids_seen = count(ids_seen)
+    if num_ids_seen != length(tree)
+        passed = false
+        println("Only saw $num_ids_seen out of $(length(tree)) nodes!")
+    end
+    return passed
+end
+
+hasid(tree::Tree, id) = any(x -> getid(x) == id, tree.nodes)
 
 #####
 ##### Tools to help build a tree.
@@ -99,25 +120,31 @@ end
 mutable struct TreeBuilder{T <: Integer}
     tree::Tree{T}
     last_valid_index::Int
+    # Add a lock to facilitate building the tree with multiple threads.
+    # Needs to be reentrant since `addnodes!` can potentially call `initnodes!`, but
+    # `initnodes!` may be called on its own - leading to potentially two acquires.
+    lock::ReentrantLock
 end
 
 function TreeBuilder{T}(num_nodes::Integer; allocator = stdallocator) where {T}
-    return TreeBuilder(Tree{T}(num_nodes; allocator), 0)
+    return TreeBuilder(Tree{T}(num_nodes; allocator), 0, ReentrantLock())
 end
 
-remainder(builder::TreeBuilder) = (builder.last_valid_index + 1):length(builder.tree)
 function initnodes!(builder::TreeBuilder{T}, itr) where {T}
-    @assert builder.last_valid_index == 0
-    nodes = builder.tree.nodes
-    index = 0
-    for node in itr
-        index += 1
-        nodes[index] = TreeNode{T}(node)
-    end
+    index = Base.@lock builder.lock begin
+        @assert builder.last_valid_index == 0
+        nodes = builder.tree.nodes
+        index = 0
+        for node in itr
+            index += 1
+            nodes[index] = TreeNode{T}(node)
+        end
 
-    # Update data structures.
-    builder.tree.rootend = index
-    builder.last_valid_index = index
+        # Update data structures.
+        builder.tree.rootend = index
+        builder.last_valid_index = index
+        index
+    end
     return 1:index
 end
 
@@ -126,30 +153,35 @@ end
 
 Add contents of `nodes` as children of `parent` in the tree currently being built.
 Return the indices where `nodes` were inserted as a range.
+
+This function is safe to call with multiple threads.
 """
 function addnodes!(builder::TreeBuilder{T}, parent::Integer, itr; force = false) where {T}
-    # Allow for common path in code using a builder.
-    iszero(parent) && return initnodes!(builder, itr)
+    range = Base.@lock builder.lock begin
+        # Allow for common path in code using a builder.
+        iszero(parent) && return initnodes!(builder, itr)
 
-    @unpack tree, last_valid_index = builder
-    @unpack nodes = tree
+        @unpack tree, last_valid_index = builder
+        @unpack nodes = tree
 
-    # Make sure the parent node is not null and has no children currently assigned to it.
-    parentnode = nodes[parent]
-    isnull(parentnode) && throw(ArgumentError("Parent index $parent has not been assigned yet!"))
-    isleaf(parentnode) || throw(ArgumentError("Parent index $parent already has children!"))
+        # Make sure the parent node is not null and has no children currently assigned to it.
+        parentnode = nodes[parent]
+        isnull(parentnode) && throw(ArgumentError("Parent index $parent has not been assigned yet!"))
+        isleaf(parentnode) || throw(ArgumentError("Parent index $parent already has children!"))
 
-    count = 0
-    start = last_valid_index + 1
-    index = last_valid_index
-    for node in itr
-        index += 1
-        nodes[index] = TreeNode{T}(node)
+        count = 0
+        start = last_valid_index + 1
+        index = last_valid_index
+        for node in itr
+            index += 1
+            nodes[index] = TreeNode{T}(node)
+        end
+        stop = index
+
+        # Update the parent node to point to its children.
+        nodes[parent] = TreeNode{T}(parentnode.id, start, stop)
+        builder.last_valid_index = stop
+        start:stop
     end
-    stop = index
-
-    # Update the parent node to point to its children.
-    nodes[parent] = TreeNode{T}(parentnode.id, start, stop)
-    builder.last_valid_index = stop
-    return start:stop
+    return range
 end

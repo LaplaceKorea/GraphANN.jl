@@ -3,11 +3,9 @@ module _Quantization
 # local deps
 using .._Base
 using .._Graphs
-# using .._Points
 
 # Special imports
 import .._Base: cast
-# import .._Points: squish, LazyWrap, LazyArrayWrap, Packed, set!
 
 # deps
 import LightGraphs
@@ -23,12 +21,6 @@ widen64(::Type{<:Signed}) = Int64
 widen64(::Type{<:AbstractFloat}) = Float64
 widen64(x::T) where {T} = convert(widen64(T), x)
 
-# Product Quantization
-export PQTable, PQGraph
-export encode
-# include("pq2.jl")
-include("clustering2.jl")
-# include("pq.jl")
-# include("pq_euclidean.jl")
+include("clustering.jl")
 
 end

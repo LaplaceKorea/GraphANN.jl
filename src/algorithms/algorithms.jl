@@ -16,9 +16,6 @@ using .._Trees
 using .._Prefetcher
 using .._Quantization
 
-# direct imports
-import .._Trees: remainder
-
 # deps
 import DataStructures
 import LightGraphs
@@ -26,6 +23,10 @@ import ProgressMeter
 import Setfield
 import StaticArrays: SVector, @SVector
 import UnPack: @unpack, @pack!
+
+# exhaustive search
+export exhaustive_search, exhaustive_search!
+include("exhaustive.jl")
 
 # diskann
 include("diskann/search.jl")

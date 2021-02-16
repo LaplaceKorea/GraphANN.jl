@@ -72,7 +72,7 @@ include("pm.jl")
 ##### Threading
 #####
 
-export ThreadPool, ThreadLocal, TaskHandle
+export ThreadPool, ThreadLocal, MaybeThreadLocal, TaskHandle
 export getall, getpool, allthreads, single_thread, dynamic_thread, on_threads
 include("threading.jl")
 #distribute_distance(x::ThreadLocal) = x[]
@@ -97,13 +97,6 @@ export prefetch, prefetch_llc, unsafe_prefetch
 export BatchedRange, batched
 export BoundedHeap, BoundedMinHeap, BoundedMaxHeap
 include("utils.jl")
-
-#####
-##### Bruteforce Search
-#####
-
-export bruteforce_search, bruteforce_search!
-include("bruteforce.jl")
 
 #####
 ##### Partition utilities
