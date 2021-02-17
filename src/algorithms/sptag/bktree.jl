@@ -43,7 +43,7 @@ function coarse_pass!(
 
     kmeans_runner = _Quantization.KMeansRunner(data, dynamic_thread)
     exhaustive_runner = ExhaustiveRunner(
-        Neighbor{I,Float32},
+        I,
         length(data),
         one;
         executor = dynamic_thread,
@@ -77,7 +77,7 @@ function fine_pass!(
 ) where {I,N,T}
     kmeans_runners = ThreadLocal(_Quantization.KMeansRunner(data, single_thread))
     exhaustive_runners = ExhaustiveRunner(
-        Neighbor{I,Float32},
+        I,
         stacksplit,
         one;
         executor = single_thread,

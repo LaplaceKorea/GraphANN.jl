@@ -25,7 +25,7 @@ function build_by_trees!(
     # since eacy vertex will appear as its own nearest neighbor, effectively removing
     # it from consideration.
     compensated_neighbors = num_neighbors + 1
-    tls = ThreadLocal(
+    tls = ThreadLocal(;
         # Over-allocate the destination space in the `ExhaustiveRunner`.
         # Then, we can pass the `skip_size_check` argument to exhaustive search to only
         # populate sub sections of the result.
