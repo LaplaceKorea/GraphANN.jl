@@ -1,5 +1,5 @@
 #####
-##### Exhaustive
+##### Exhaustive Search
 #####
 
 raw"""
@@ -67,15 +67,14 @@ function ExhaustiveRunner(
     max_groupsize = 32,
 ) where {ID <: IntOrNeighbor, U <: Union{Integer, typeof(one)}, F, D}
     # Preallocate destination.
-    I = inttype(ID)
     if isa(num_neighbors, Integer)
-        groundtruth = Matrix{I}(undef, num_neighbors, num_queries)
+        groundtruth = Matrix{ID}(undef, num_neighbors, num_queries)
     else
-        groundtruth = Vector{I}(undef, num_queries)
+        groundtruth = Vector{ID}(undef, num_queries)
     end
 
     # Create thread local storage.
-    heaps = [BoundedMaxHeap{Neighbor{I,D}}(_num_neighbors(num_neighbors)) for _ in 1:max_groupsize]
+    heaps = [BoundedMaxHeap{Neighbor{inttype(ID),D}}(_num_neighbors(num_neighbors)) for _ in 1:max_groupsize]
     exhaustive_local = threadlocal_wrap(executor, heaps)
     return ExhaustiveRunner(groundtruth, exhaustive_local, executor)
 end
@@ -109,42 +108,35 @@ function search!(
     groupsize = 32,
     meter = ProgressMeter.Progress(length(queries), 1),
     metric = Euclidean(),
+    skip_size_check = false,
+    num_neighbors = _num_neighbors(runner.groundtruth)
 )
     # Destructure runner
     @unpack groundtruth, exhaustive_local, executor = runner
-    num_neighbors = _num_neighbors(groundtruth)
     num_queries = length(queries)
 
-    sizecheck(groundtruth, num_neighbors, num_queries)
+    skip_size_check || sizecheck(groundtruth, num_neighbors, num_queries)
 
     # Batch the query range so each thread works on a chunk of queries at a time.
     # The dynamic load balancer will give one batch at a time to each worker.
     batched_iter = BatchedRange(1:num_queries, groupsize)
+    executor(batched_iter) do range
+        heaps = _Base.getlocal(exhaustive_local)
 
-    # N.B. Need to use the "let" trick on `exhaustive_local` since it is captured in the
-    # closure passed to the `executor`.
-    #
-    # If we don't, then the `_nearest_neighbors!` and `_commit!` inner functions require
-    # dynamic dispatch.
-    let exhaustive_local = exhaustive_local
-        executor(batched_iter) do range
-            heaps = _Base.getlocal(exhaustive_local)
+        # Compute nearest neighbors for this batch across the whole dataset.
+        # Implement this as an inner function to help out type inference.
+        _nearest_neighbors!(heaps, dataset, queries, range, metric)
+        _commit!(groundtruth, heaps, range)
 
-            # Compute nearest neighbors for this batch across the whole dataset.
-            # Implement this as an inner function to help out type inference.
-            _nearest_neighbors!(heaps, dataset, queries, range, metric)
-            _commit!(groundtruth, heaps, range)
-
-            # Note: ProgressMeter is threadsafe - so calling it here is okay.
-            # With modestly sized dataset, the arrival time of threads to this point should be
-            # staggered enough that lock contention shouldn't be an issue.
-            #
-            # For reference, it takes ~200 seconds to compute 100 nearest neighbors for a
-            # batch of 32 queries on Sift100M.
-            #
-            # That is FAR longer than any time will be spent fighting over this lock.
-            meter !== nothing && ProgressMeter.next!(meter; step = length(range))
-        end
+        # Note: ProgressMeter is threadsafe - so calling it here is okay.
+        # With modestly sized dataset, the arrival time of threads to this point should be
+        # staggered enough that lock contention shouldn't be an issue.
+        #
+        # For reference, it takes ~200 seconds to compute 100 nearest neighbors for a
+        # batch of 32 queries on Sift100M.
+        #
+        # That is FAR longer than any time will be spent fighting over this lock.
+        meter !== nothing && ProgressMeter.next!(meter; step = length(range))
     end
     meter !== nothing && ProgressMeter.finish!(meter)
     return groundtruth
@@ -155,14 +147,15 @@ end
 #####
 
 # Define there to help out inference in the "exhaustive_search!" closure.
-function _nearest_neighbors!(
+Base.@propagate_inbounds function _nearest_neighbors!(
     heaps::AbstractVector{BoundedMaxHeap{T}},
     dataset::AbstractVector,
     queries::AbstractVector,
     range,
     metric,
 ) where {T <: Neighbor}
-    for (base_id, base) in enumerate(dataset)
+    @inbounds for base_id in eachindex(dataset)
+        base = dataset[base_id]
         for (heap_num, query_id) in enumerate(range)
             query = queries[query_id]
             dist = evaluate(metric, query, base)
@@ -178,6 +171,7 @@ end
 # Matrix Version
 _populate!(gt::AbstractVector{<:Integer}, heap) = gt .= getid.(destructive_extract!(heap))
 _populate!(gt::AbstractVector{<:Neighbor}, heap) = gt .= destructive_extract!(heap)
+
 function _commit!(gt::AbstractMatrix, heaps::AbstractVector, range)
     for (heap_num, query_id) in enumerate(range)
         heap = heaps[heap_num]

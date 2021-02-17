@@ -1,20 +1,17 @@
 function _run_tpt_tests(data::AbstractVector{SVector{N,T}}) where {N,T}
     numsamples = 1000
     leafsize = 500
-    tree = GraphANN.Algorithms.TPTree{4, UInt32}(
-        length(data);
-        leafsize = leafsize,
-        numtrials = 100,
-        numsamples = numsamples,
-    )
+    numtrials = 1000
+    permutation = UInt32.(eachindex(data))
+    runner = GraphANN.Algorithms.TPTreeRunner{4}(permutation)
 
-    @test GraphANN.Algorithms.num_split_dimensions(tree) == 4
-    @inferred GraphANN.Algorithms.getdims!(data, tree, 1:length(data))
-    dims = GraphANN.Algorithms.getdims!(data, tree, 1:length(data))
+    @test GraphANN.Algorithms.num_split_dimensions(runner) == 4
+    @inferred GraphANN.Algorithms.getdims!(data, runner, 1:length(data), numsamples)
+    dims = GraphANN.Algorithms.getdims!(data, runner, 1:length(data), numsamples)
     @test isa(dims, NTuple{4,Int})
 
     # Make sure that the maximum variances are being computed correctly.
-    dataview = view(data, tree.samples)
+    dataview = view(data, runner.samples)
     @test length(dataview) == numsamples
     variances = Statistics.var.(eachrow(reinterpret(reshape, T, dataview)))
 
@@ -23,24 +20,29 @@ function _run_tpt_tests(data::AbstractVector{SVector{N,T}}) where {N,T}
     @test all(dims .== perm)
 
     # Next, get normalized weights to maximize the varianze
-    @inferred GraphANN.Algorithms.getweights!(data, tree, dims, 1:length(data))
-    weights, meanval = GraphANN.Algorithms.getweights!(data, tree, dims, 1:length(data))
+    @inferred GraphANN.Algorithms.getweights!(data, runner, dims, 1:length(data), numtrials)
+    weights, meanval = GraphANN.Algorithms.getweights!(data, runner, dims, 1:length(data), numtrials)
 
     # Make sure the return vector is normalized
     @test isapprox(sum(abs2, weights), 1)
     @test isa(weights, SVector{4, Float32})
 
     # Next - try to sort the whole data.
-    # Use a callback to record all the leaf ranges.
     # Ensure that all leaves are smaller than the requested leaf size and that the
     # whole data range is covered.
-    ranges = Vector{UnitRange{UInt32}}()
-    f = x -> push!(ranges, x)
-    single_thread = GraphANN.single_thread
-    dynamic_thread = GraphANN.dynamic_thread
-    GraphANN.Algorithms.partition!(f, data, tree; executor = single_thread, init = true)
+    ranges = GraphANN.Algorithms.partition!(
+        data,
+        permutation,
+        Val(4);
+        leafsize = leafsize,
+        numtrials = numtrials,
+        numsamples = numsamples,
+        # Set this low enough so we exercise both the code paths.
+        single_thread_threshold = div(length(data), 10),
+        init = true
+    )
 
-    function checkranges(ranges, data, tree)
+    function checkranges(ranges, data, runner)
         @test !isempty(ranges)
         @test sum(length, ranges) == length(data)
         @test all(x -> length(x) <= leafsize, ranges)
@@ -48,28 +50,32 @@ function _run_tpt_tests(data::AbstractVector{SVector{N,T}}) where {N,T}
         @test sort(mapreduce(collect, vcat, ranges)) == 1:length(data)
 
         # Check the `permutation` field. Make sure it is, in fact, still a permutation.
-        permutation = tree.permutation
+        permutation = runner.permutation
         @test length(permutation) == length(data)
         @test allunique(permutation)
         @test all(x -> in(x, 1:length(data)), permutation)
         @test !issorted(permutation)
     end
-    checkranges(ranges, data, tree)
+    checkranges(ranges, data, runner)
 
     # Run again but don't initialize.
     # Make sure this algorithm is safe to run multiple times.
     empty!(ranges)
-    GraphANN.Algorithms.partition!(f, data, tree; executor = single_thread, init = false)
-    checkranges(ranges, data, tree)
-
-    # Try again running on multiple threads.
-    # Make sure something doesn't go HORRIBLY wrong (just subtly wrong ... )
-    empty!(ranges)
-    GraphANN.Algorithms.partition!(f, data, tree; executor = dynamic_thread, init = false)
-    checkranges(ranges, data, tree)
+    ranges = GraphANN.Algorithms.partition!(
+        data,
+        permutation,
+        Val(4);
+        leafsize = leafsize,
+        numtrials = numtrials,
+        numsamples = numsamples,
+        # Set this low enough so we exercise both the code paths.
+        single_thread_threshold = div(length(data), 10),
+        init = false
+    )
+    checkranges(ranges, data, runner)
 end
 
-@testset "Testing TPTree" begin
+@testset "Testing TPTreeRunner" begin
     dims = (1, 4, 5)
     vals = SVector(0.5, 0.2, 0.4)
     x = [1,2,3,4,5]
@@ -97,47 +103,56 @@ end
     data = GraphANN.load_vecs(GraphANN.SVector{128,Float32}, dataset_path)
     numsamples = 1000
     leafsize = 500
-    tree = GraphANN.Algorithms.TPTree{4, UInt32}(
-        length(data);
-        leafsize = leafsize,
-        numtrials = 100,
-        numsamples = numsamples,
-    )
-
-    single_thread = GraphANN.single_thread
+    numtrials = 100
     num_neighbors = 100
+    permutation = UInt32.(eachindex(data))
 
     # Just group together every 500 data points.
     base_distances = Matrix{Float32}(undef, num_neighbors, length(data))
     for range in GraphANN.batched(1:length(data), leafsize)
-        gt = Matrix{GraphANN.Neighbor{UInt32,Float32}}(undef, num_neighbors, length(range))
+        erunner = GraphANN.Algorithms.ExhaustiveRunner(
+            GraphANN.Neighbor{UInt32,Float32},
+            length(range),
+            num_neighbors,
+        )
+
         dataview = view(data, range)
-        GraphANN.bruteforce_search!(gt, dataview, dataview; meter = nothing)
+        gt = GraphANN.Algorithms.search!(erunner, dataview, dataview; meter = nothing)
         base_view = view(base_distances, :, range)
         base_view .= GraphANN.getdistance.(gt)
     end
 
     num_tests = 5
-    ranges = Vector{UnitRange{UInt32}}()
-    f = x -> push!(ranges, x)
 
     for i in 1:num_tests
-        empty!(ranges)
-        GraphANN.Algorithms.partition!(f, data, tree; executor = single_thread, init = true)
+        ranges = GraphANN.Algorithms.partition!(
+            data,
+            permutation,
+            Val(4);
+            leafsize = leafsize,
+            numtrials = numtrials,
+            numsamples = numsamples,
+            init = true,
+            single_thread_threshold = div(length(data), 10),
+        )
         clustered_distances = Matrix{Float32}(undef, num_neighbors, length(data))
         for range in ranges
             # Pre-allocate the result matrix for `bruteforce_search` with eltype `Neighbor`.
             # This will ensure that we get the distances.
-            gt = Matrix{GraphANN.Neighbor{UInt32,Float32}}(undef, num_neighbors, length(range))
-            dataview = GraphANN.Algorithms.viewdata(data, tree, range)
+            erunner = GraphANN.Algorithms.ExhaustiveRunner(
+                GraphANN.Neighbor{UInt32,Float32},
+                length(range),
+                num_neighbors,
+            )
+            dataview = GraphANN.Algorithms.doubleview(data, permutation, range)
             @test length(dataview) == length(range)
-            GraphANN.bruteforce_search!(gt, dataview, dataview; meter = nothing)
+            gt = GraphANN.Algorithms.search!(erunner, dataview, dataview; meter = nothing)
 
             # Note: We need to translate from the indices returned by `bruteforce_search!` to
             # original indices in the dataset.
             # The position-wise corresponding global indices can be found by the `viewperm`
             # function.
-            permview = GraphANN.Algorithms.viewperm(tree, range)
+            permview = view(permutation, range)
             clustered_view = view(clustered_distances, :, permview)
             clustered_view .= GraphANN.getdistance.(gt)
         end

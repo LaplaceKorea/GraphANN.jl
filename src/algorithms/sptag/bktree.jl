@@ -3,7 +3,6 @@
 # High level steps.
 # 1. Maintain a permutation vector that tracks positions in a tree to data ids.
 # 2. Initialize the tree with root centroids.
-
 doubleview(a, b, c) = view(a, view(b, c))
 shrink!(a::AbstractVector, amount::Integer) = resize!(a, length(a) - amount)
 shrink!(a::AbstractUnitRange{T}, amount::Integer) where {T} = first(a):(last(a) - T(amount))
@@ -13,7 +12,7 @@ function build_bktree(
     fanout = 8,
     leafsize = 32,
     stacksplit = 10000,
-    idtype::Type{I} = UInt32
+    idtype::Type{I} = UInt32,
 ) where {N,T,I}
     D = costtype(SVector{N,T})
 
@@ -87,10 +86,10 @@ function fine_pass!(
     local_stacks = ThreadLocal(Vector{eltype(stack)}())
     callback = ((parent, range),) -> _Trees.addnodes!(builder, parent, view(permutation, range))
 
+    # Multi-thread the outer loop.
     dynamic_thread(eachindex(stack)) do i
         local_stack = local_stacks[]
         push!(local_stack, stack[i])
-
         process_stack!(
             callback,
             local_stack,
@@ -213,6 +212,7 @@ function findfirstfrom(predicate::F, A, start) where {F}
     return lastindex(A) + 1
 end
 
+# Utility to sort one vector with respect to another.
 struct Dual{TA, TB, A <: AbstractVector{TA}, B <: AbstractVector{TB}} <: AbstractVector{Tuple{TA,TB}}
     a::A
     b::B

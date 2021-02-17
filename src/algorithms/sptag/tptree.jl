@@ -2,58 +2,19 @@
 ##### Entry Point
 #####
 
-"""
-    TPTree{K,I}
-
-Preallocation utility for partitioning a dataset using approximate Trinary-projection trees.
-
-## Type Parameters
-* `K` - Number of dimensouns to consider for TPT splits.
-* `I` - Integer type for index permutations.
-
-## Fields
-* `permutation` - Permutation of the indices of a dataset.
-* `leafsize` - Maximum size of the leaf groupings of the dataset.
-* `numtrials` - Number of random vectors tried to find the weights that yield maximum
-    variance across a partition.
-* `numsamples` - Maximum number of points sampled per partition.
-* `partitioner` - Pre-allocated utility to help split a partition.
-* `samples` - Pre-allocated buffer holding the indices of items samples.
-* `scratch` - Misc. pre-allocated buffer.
-"""
-struct TPTree{K,I <: Unsigned}
+struct TPTreeRunner{K,I}
     permutation::Vector{I}
-    # Partition Parameters
-    leafsize::Int64
-    numtrials::Int64
-    numsamples::Int64
-    # Scratch Space
     partitioner::PartitionUtil{I}
     samples::Vector{Int}
     scratch::Vector{Int}
 end
 
-function TPTree{K,I}(
-    length::Integer;
-    leafsize = 500,
-    numtrials = 100,
-    numsamples = 1000,
-) where {K, I <: Unsigned}
-    permutation = collect(I(1):I(length))
-    partitioner = PartitionUtil{I}()
-    samples = Int[]
-    scratch = Int[]
-
-    return TPTree{K,I}(
-        permutation,
-        leafsize,
-        numtrials,
-        numsamples,
-        partitioner,
-        samples,
-        scratch,
-    )
+function TPTreeRunner{K}(permutation::AbstractVector{I}) where {K,I}
+    return TPTreeRunner{K,I}(permutation, PartitionUtil{I}(), Int[], Int[])
 end
+
+viewdata(data, runner::TPTreeRunner, range) = doubleview(data, runner.permutation, range)
+num_split_dimensions(::TPTreeRunner{K}) where {K} = K
 
 Base.@propagate_inbounds function evalsplit(
     y::AbstractVector{T1},
@@ -67,53 +28,96 @@ Base.@propagate_inbounds function evalsplit(
     return s
 end
 
-viewdata(data, tree) = view(data, tree.permutation)
-viewdata(data, tree, range::AbstractUnitRange) = view(data, view(tree.permutation, range))
-
-viewperm(tree) = tree.permutation
-viewperm(tree, range::AbstractUnitRange) = view(tree.permutation, range)
-num_split_dimensions(::TPTree{K}) where {K} = K
-
-_Base.partition!(data, tree::TPTree, x...; kw...) = partition!(println, data, tree, x...; kw...)
 function _Base.partition!(
-    f::F,
     data::AbstractVector,
-    tree::TPTree{K};
-    executor = dynamic_thread,
+    permutation::AbstractVector{I},
+    dimsplit::Val{K};
+    leafsize = 1000,
+    numtrials = 500,
+    numsamples = 1000,
+    single_thread_threshold = 10000,
     init = true
-) where {F, K}
-    # Unload data structures, parameters, and scratch space
-    @unpack permutation = tree
-    @unpack leafsize, numtrials, numsamples = tree
-    @unpack samples, partitioner = tree
-
+) where {F, I, K}
     # Resize the permutation vector if requested.
     if init
         resize!(permutation, length(data))
         permutation .= 1:length(data)
     end
 
+    # Like with the BKTree, use a two pass algorithm to improve parllelism.
+    # Unload data structures, parameters, and scratch space.
+    coarse_runner = TPTreeRunner{K}(permutation)
+
     # Do the processing in an explicit stack to avoid ANY potential issues with our
     # stack space blowing up.
     #
     # Bootstrap by queuing the whole dataset.
     stack = [(1, length(data))]
+    shortstack = Vector{eltype(stack)}()
+    process_stack!(
+        (lo, hi) -> push!(shortstack, (lo, hi)),
+        stack,
+        coarse_runner,
+        data,
+        single_thread_threshold,
+        numtrials,
+        numsamples;
+        executor = dynamic_thread,
+    )
+
+    # Now do the fine-grained pass.
+    lock = ReentrantLock()
+    leaves = Vector{UnitRange{Int}}()
+    threadlocal = ThreadLocal(
+        localstack = Vector{eltype(stack)}(),
+        runner = TPTreeRunner{K}(permutation),
+    )
+    callback = (lo, hi) -> Base.@lock(lock, push!(leaves, lo:hi))
+
+    dynamic_thread(eachindex(shortstack)) do i
+        @unpack localstack, runner = threadlocal[]
+        push!(localstack, shortstack[i])
+        process_stack!(
+            callback,
+            localstack,
+            runner,
+            data,
+            leafsize,
+            numtrials,
+            numsamples;
+            executor = single_thread,
+        )
+    end
+    return leaves
+end
+
+function process_stack!(
+    f::F,
+    stack::AbstractVector{Tuple{Int,Int}},
+    runner::TPTreeRunner{K},
+    data::AbstractVector,
+    leafsize::Integer,
+    numtrials::Integer,
+    numsamples::Integer;
+    executor = dynamic_thread,
+) where {F,K}
+    @unpack permutation, partitioner = runner
     while !isempty(stack)
         lo, hi = pop!(stack)
 
         # If we've reached the leaf size, then simply store this pair as a leaf and return.
-        if (hi - lo + 1) <= tree.leafsize
-            f(lo:hi)
+        if (hi - lo + 1) <= leafsize
+            f(lo, hi)
             continue
         end
 
         # Sample data points in this range and get the dimension indices that have the
         # highest variance
         range = lo:hi
-        dims = getdims!(data, tree, range)
+        dims = getdims!(data, runner, range, numsamples)
 
         # Among the largest variance dims, generate a partition that maximizes separation.
-        weights, mean = getweights!(data, tree, dims, range)
+        weights, mean = getweights!(data, runner, dims, range, numtrials)
 
         # Sort `permutation` into two chunks, those whose projection is less than the best mean,
         # and those whose projection is greater than the best mean.
@@ -153,25 +157,26 @@ function _Base.partition!(
     return nothing
 end
 
+
 #####
 ##### Helper Functions
 #####
 
-function getdims!(data::AbstractVector, tree::TPTree, range::AbstractUnitRange)
-    @unpack samples, numsamples = tree
-    dataview = viewdata(data, tree, range)
+function getdims!(data::AbstractVector, runner::TPTreeRunner, range::AbstractUnitRange, numsamples::Integer)
+    @unpack samples = runner
+    dataview = viewdata(data, runner, range)
     resize!(samples, numsamples)
     Random.rand!(samples, eachindex(dataview))
     # Statistics.var will use an efficient online algorithm that will in fact comput
     # the element wise variance.
     #variances = Statistics.var(view(dataview, samples))
     _, variances = _Base.meanvar(dataview[i] for i in samples; default = zeros(eltype(data)))
-    dims = max_variance_dims(tree, variances)
+    dims = max_variance_dims(runner, variances)
     return dims
 end
 
-function max_variance_dims(tree::TPTree{K}, variances) where {K}
-    @unpack scratch = tree
+function max_variance_dims(runner::TPTreeRunner{K}, variances) where {K}
+    @unpack scratch = runner
     resize!(scratch, length(variances))
     scratch .= 1:length(variances)
 
@@ -187,9 +192,9 @@ function max_variance_dims(tree::TPTree{K}, variances) where {K}
     return ntuple(i -> scratch[i], Val(K))
 end
 
-function getweights!(data::AbstractVector, tree::TPTree{K}, dims, range) where {K}
-    @unpack numtrials, samples = tree
-    dataview = viewdata(data, tree, range)
+function getweights!(data::AbstractVector, runner::TPTreeRunner{K}, dims, range, numtrials) where {K}
+    @unpack samples = runner
+    dataview = viewdata(data, runner, range)
 
     # Prepare some of the local scratch spaces.
     bestweights = @SVector zeros(Float32, K)

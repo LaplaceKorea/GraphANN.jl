@@ -306,7 +306,10 @@ struct BoundedHeap{T, O <: Base.Ordering}
     bound::Int
 
     function BoundedHeap{T}(ordering::Base.Ordering, bound::Integer) where {T}
-        heap = DataStructures.BinaryHeap{T}(ordering, T[])
+        # pre-allocate space for the underlying vector.
+        vector = Vector{T}(undef, bound + 1)
+        empty!(vector)
+        heap = DataStructures.BinaryHeap{T}(ordering, vector)
         return new{T, typeof(ordering)}(heap, convert(Int, bound))
     end
 end

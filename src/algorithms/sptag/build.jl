@@ -5,17 +5,14 @@ function build_by_trees!(
     num_iterations = 1,
     num_neighbors = 32,
     leafsize = 500,
-    executor = dynamic_thread
+    single_thread_threshold = 10000,
 ) where {I, T}
     D = costtype(T, T)
 
     # Preallocate utility for accelerating the partitioning phase
-    tree = TPTree{5,I}(length(data))
+    permutation = collect(I(1):I(lastindex(data)))
 
-    # Make the leaf callback simply queue up ranges.
-    ranges = Vector{UnitRange{I}}()
-    groupsize = 32
-
+    # Make the leaf callback simply queue up ranges.  ranges = Vector{UnitRange{I}}()
     # Pre-allocate destination matrices for the brute-force nearest neighbor searches.
     # Since the size of the nearest neighbor searches is bounded by the leaf size, we
     # can pre-allocate for the worst case and use views to make these arrays as small
@@ -28,53 +25,55 @@ function build_by_trees!(
     # since eacy vertex will appear as its own nearest neighbor, effectively removing
     # it from consideration.
     compensated_neighbors = num_neighbors + 1
-    tls = ThreadLocal(;
-        groundtruth = Array{Neighbor{I,D}, 2}(undef, compensated_neighbors, leafsize),
-        bruteforce_tls = _Base.bruteforce_threadlocal(
-            single_thread,
-            I,
-            D,
-            compensated_neighbors,
-            groupsize
+    tls = ThreadLocal(
+        # Over-allocate the destination space in the `ExhaustiveRunner`.
+        # Then, we can pass the `skip_size_check` argument to exhaustive search to only
+        # populate sub sections of the result.
+        runner = ExhaustiveRunner(
+            Neighbor{I,D},
+            leafsize,
+            compensated_neighbors;
+            executor = single_thread,
+            costtype = D
         ),
+        scratch = Neighbor{I,D}[],
     )
 
     for i in 1:num_iterations
-        empty!(ranges)
-        partition_meter = ProgressMeter.Progress(length(data), 1, "Building Tree ... ")
-        @time partition!(data, tree; init = false) do leaf
-            ProgressMeter.next!(partition_meter; step = length(leaf))
-            push!(ranges, leaf)
-        end
+        ranges = partition!(
+            data,
+            permutation,
+            Val(5);
+            init = false,
+            leafsize = leafsize,
+            single_thread_threshold = single_thread_threshold,
+        )
 
-        ProgressMeter.finish!(partition_meter)
         neighbor_meter = ProgressMeter.Progress(length(data), 1, "Processing Tree ... ")
-
-        executor(eachindex(ranges), 16) do i
+        dynamic_thread(eachindex(ranges), 16) do i
             @inbounds range = ranges[i]
-            threadlocal = tls[]
+            @unpack runner, scratch = tls[]
 
             ub = min(compensated_neighbors, length(range))
-            gt = view(threadlocal.groundtruth, 1:ub, 1:length(range))
-            dataview = viewdata(data, tree, range)
-
-            bruteforce_search!(gt, dataview, dataview;
-                executor = single_thread,
-                idtype = I,
-                costtype = D,
+            dataview = doubleview(data, permutation, range)
+            groundtruth = search!(
+                runner,
+                dataview,
+                dataview;
                 meter = nothing,
-                tls = threadlocal.bruteforce_tls,
-                groupsize = groupsize,
+                num_neighbors = ub,
+                skip_size_check = true,
             )
+            gt = view(groundtruth, 1:ub, 1:length(range))
 
             # Update graph to maintain nearest neighbors.
-            update!(data, graph, gt, viewperm(tree, range))
+            update!(data, graph, gt, view(permutation, range); candidates = scratch)
             ProgressMeter.next!(neighbor_meter; step = length(range))
         end
     end
 end
 
-function update!(data, graph, gt::AbstractMatrix{T}, permutation::AbstractVector{<:Integer}) where {T <: Neighbor}
+function update!(data, graph, gt::AbstractMatrix{T}, permutation::AbstractVector{<:Integer}; candidates = T[]) where {T <: Neighbor}
     # First step - translate the indices in `gt` from the local versions to the global
     # vertices using the permutation vector.
     for i in eachindex(gt)
@@ -85,7 +84,7 @@ function update!(data, graph, gt::AbstractMatrix{T}, permutation::AbstractVector
 
     # Now that the global ID's have been computed, we need to extract the nearest neighbors
     # between the current neighbors and the new candidates.
-    candidates = T[]
+    empty!(candidates)
     numneighbors = size(gt, 1) - 1
     for (i, v) in enumerate(permutation)
         neighbors = LightGraphs.outneighbors(graph, v)
@@ -103,7 +102,7 @@ function update!(data, graph, gt::AbstractMatrix{T}, permutation::AbstractVector
                 push!(candidates, neighbor)
             end
         end
-        sort!(candidates)
+        sort!(candidates; alg = Base.InsertionSort)
         empty!(graph, v)
         for i in 1:numneighbors
             LightGraphs.add_edge!(graph, v, getid(candidates[i]))
