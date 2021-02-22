@@ -7,7 +7,7 @@ function build_by_trees!(
     leafsize = 500,
     single_thread_threshold = 10000,
 ) where {I, T}
-    D = costtype(T, T)
+    D = costtype(T)
 
     # Preallocate utility for accelerating the partitioning phase
     permutation = collect(I(1):I(lastindex(data)))
@@ -43,6 +43,7 @@ function build_by_trees!(
         ranges = partition!(
             data,
             permutation,
+            numtrials = 1000,
             Val(5);
             init = false,
             leafsize = leafsize,
@@ -50,7 +51,7 @@ function build_by_trees!(
         )
 
         neighbor_meter = ProgressMeter.Progress(length(data), 1, "Processing Tree ... ")
-        dynamic_thread(eachindex(ranges), 16) do i
+        dynamic_thread(eachindex(ranges), 4) do i
             @inbounds range = ranges[i]
             @unpack runner, scratch = tls[]
 
@@ -102,6 +103,7 @@ function update!(data, graph, gt::AbstractMatrix{T}, permutation::AbstractVector
                 push!(candidates, neighbor)
             end
         end
+
         sort!(candidates; alg = Base.InsertionSort)
         empty!(graph, v)
         for i in 1:numneighbors
@@ -109,3 +111,142 @@ function update!(data, graph, gt::AbstractMatrix{T}, permutation::AbstractVector
         end
     end
 end
+
+#####
+##### Graph Refinement
+#####
+
+function refine!(
+    graph,
+    tree,
+    data::AbstractVector{T};
+    target_degree = 32,
+    batchsize = 50000,
+    num_refine_steps = 2,
+) where {T}
+    D = costtype(T)
+    tls = ThreadLocal(;
+        runner = TagSearch(2000; costtype = D, idtype = eltype(graph)),
+        nextlists = NextListBuffer{eltype(graph)}(
+            target_degree,
+            2 * ceil(Int, batchsize / Threads.nthreads()),
+        ),
+        #pruner = Pruner{Neighbor{eltype(graph), D}}(),
+        buffer = Vector{Neighbor{eltype(graph), D}}()
+    )
+
+    for i in 1:num_refine_steps
+        _refine!(graph, tree, data, tls, target_degree, batchsize)
+    end
+end
+
+@noinline function _refine!(
+    graph,
+    tree,
+    data::AbstractVector{T},
+    tls,
+    target_degree::Integer,
+    batchsize::Integer;
+) where {T}
+    meta = MetaGraph(graph, data)
+    num_batches = cdiv(length(data), batchsize)
+    progress_meter = ProgressMeter.Progress(num_batches, 1, "Refining Index ... ")
+    for r in batched(1:length(data), batchsize)
+        itertime = @elapsed dynamic_thread(r, INDEX_BALANCE_FACTOR) do vertex
+            storage = tls[]
+            @unpack runner, nextlists, pruner = storage
+            point = data[vertex]
+            search(
+                runner,
+                meta,
+                tree,
+                point;
+                maxcheck = 8192,
+                propagation_limit = 1_000_000,
+                #init = LightGraphs.outneighbors(graph, vertex),
+            )
+
+            # As a precaution, make sure the list of updates for this node is empty.
+            candidates = destructive_extract!(runner.results)
+            nextlist = get!(nextlists)
+            empty!(nextlist)
+            vertex_data = data[vertex]
+
+            neighbors = LightGraphs.outneighbors(graph, vertex)
+            buffer = storage.buffer
+            empty!(buffer)
+            for u in neighbors
+                push!(buffer, Neighbor(runner, u, evaluate(Euclidean(), vertex_data, data[u])))
+            end
+            sort!(buffer; alg = Base.InsertionSort)
+
+            resize!(buffer, target_degree)
+            count = 0
+            for candidate in candidates
+                getid(candidate) == vertex && continue
+                good = true
+                for k in 1:count
+                    if evaluate(Euclidean(), data[buffer[k]], data[candidate]) <= getdistance(candidate)
+                        good = false
+                        break
+                    end
+                end
+
+                if good
+                    count += 1
+                    buffer[count] = candidate
+                end
+                count == target_degree && break
+            end
+            resize!(buffer, count)
+            resize!(nextlist, count)
+            nextlist .= getid.(buffer)
+            # initialize!(
+            #     identity,
+            #     x -> getid(x) != vertex,
+            #     pruner,
+            #     destructive_extract!(runner.results),
+            # )
+
+            # # Manually lower the `for` loop to iteration so we can get the internal state of the
+            # # pruner iterator.
+            # #
+            # # This lets us start at the current location in the iterator to reduce the number
+            # # of comparisons.
+            # next = iterate(pruner)
+            # while next !== nothing
+            #     (i, state) = next
+            #     push!(nextlist, getid(i))
+
+            #     # Note: We're indexing `data` with `Neighbor` objects, but that's fine because
+            #     # we've defined that behavior in `utils.jl`.
+            #     f = x -> evaluate(Euclidean(), data[i], data[x]) <= getdistance(x)
+            #     prune!(f, pruner; start = state)
+            #     length(nextlist) >= target_degree && break
+
+            #     # Next step in the iteration interface
+            #     next = iterate(pruner, state)
+            # end
+
+            storage.nextlists[vertex] = nextlist
+        end
+
+        # Apply the refined nextlists to the graph.
+        synctime = @elapsed on_threads(allthreads()) do
+            storage = tls[]
+            for (u, neighbors) in pairs(storage.nextlists)
+                copyto!(graph, u, neighbors)
+            end
+
+            # Reset nextlists for next iteration.
+            empty!(storage.nextlists)
+        end
+
+        ProgressMeter.next!(
+            progress_meter;
+            showvalues = ((:iter_time, itertime), (:sync_time, synctime)),
+        )
+    end
+end
+
+

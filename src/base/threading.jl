@@ -138,8 +138,14 @@ ThreadLocal(; kw...) = ThreadLocal(allthreads(), (;kw...,))
 ThreadLocal(pool::ThreadPool; kw...) = ThreadLocal(pool, (;kw...,))
 ThreadLocal(values) = ThreadLocal(allthreads(), values)
 
+threadcopy(x) = deepcopy(x)
+@generated function threadcopy(x::NamedTuple{names}) where {names}
+    exprs = [:(threadcopy(x.$name)) for name in names]
+    return :(NamedTuple{names}(($(exprs...),)))
+end
+
 function ThreadLocal(pool::ThreadPool, values::T) where {T}
-    return ThreadLocal{T}([deepcopy(values) for _ in pool], pool)
+    return ThreadLocal{T}([threadcopy(values) for _ in pool], pool)
 end
 
 Base.getindex(t::ThreadLocal, i::Integer = Threads.threadid()) = t.values[t.translation[i]]

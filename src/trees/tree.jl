@@ -64,6 +64,10 @@ roots(tree) = view(tree.nodes, rootindices(tree))
 ##### Utility Functions
 #####
 
+struct TreeError <: Exception
+    msg::String
+end
+
 function onnodes(f::F, tree::Tree{T}) where {F,T}
     stack = TreeNode{T}[]
     append!(stack, roots(tree))
@@ -81,37 +85,37 @@ function ispacked(tree::Tree)
     onnodes(tree) do node
         isleaf(node) && return nothing
         for i in childindices(node)
-            indices_seen[i] && error("Already seen node at index $(i)!")
+            indices_seen[i] && throw(TreeError("Already seen node at index $(i)!"))
             indices_seen[i] = true
         end
         return nothing
     end
     if count(indices_seen) != length(tree)
-        error("Not all indexes in the tree vector were visited!")
+        throw(TreeError("Not all indexes in the tree vector were visited!"))
     end
     return true
 end
 
 function allids(tree::Tree)
     ids_seen = falses(length(tree))
-    passed = true
     onnodes(tree) do node
         id = getid(node)
-        if ids_seen[id]
-            passed = false
-        end
+        (id <= 0 || id > length(tree)) && throw(TreeError("Node $id is out of bounds!"))
+        ids_seen[id] && throw(TreeError("Already saw node $(id)!"))
         ids_seen[id] = true
-        return nothing
     end
     num_ids_seen = count(ids_seen)
     if num_ids_seen != length(tree)
-        passed = false
-        println("Only saw $num_ids_seen out of $(length(tree)) nodes!")
+        throw("Missed seeing $(length(tree) - num_ids_seen) nodes!")
     end
-    return passed
+    return true
 end
 
-hasid(tree::Tree, id) = any(x -> getid(x) == id, tree.nodes)
+function validate(tree)
+    ispacked(tree)
+    allids(tree)
+    return true
+end
 
 #####
 ##### Tools to help build a tree.
@@ -130,9 +134,28 @@ function TreeBuilder{T}(num_nodes::Integer; allocator = stdallocator) where {T}
     return TreeBuilder(Tree{T}(num_nodes; allocator), 0, ReentrantLock())
 end
 
+function finish(builder::TreeBuilder)
+    if builder.last_valid_index != length(builder.tree)
+        throw(TreeError("Tree has not finished being built!"))
+    end
+    validate(builder.tree)
+    return builder.tree
+end
+
+function partialfinish(builder::TreeBuilder)
+    if builder.last_valid_index != length(builder.tree)
+        throw(TreeError("Tree has not finished being built!"))
+    end
+    ispacked(builder.tree)
+    return builder.tree
+end
+
 function initnodes!(builder::TreeBuilder{T}, itr) where {T}
     index = Base.@lock builder.lock begin
-        @assert builder.last_valid_index == 0
+        if builder.last_valid_index != 0
+            @show builder.last_valid_index
+            error()
+        end
         nodes = builder.tree.nodes
         index = 0
         for node in itr
@@ -184,4 +207,48 @@ function addnodes!(builder::TreeBuilder{T}, parent::Integer, itr; force = false)
         start:stop
     end
     return range
+end
+
+struct NodeOffset
+    val::Int
+end
+
+function Base.:+(node::TreeNode{T}, off::NodeOffset) where {T}
+    if isleaf(node)
+        return node
+    else
+        @unpack val = off
+        return TreeNode{T}(getid(node), node.childstart + val, node.childend + val)
+    end
+end
+
+"""
+    addtree!(builder::TreeBuilder, parent, subtree::Tree)
+
+Insert `subtree` into `builder` under `parent`.
+"""
+function addtree!(builder::TreeBuilder{T}, parent::Integer, subtree::Tree) where {T}
+    return Base.@lock builder.lock begin
+        # Since we have a whole tree we're splicing in, we can essentially just copy and
+        # paste into the next free region in the WIP tree.
+        #
+        # However, we do need to apply an appropriate offset for child indices.
+        @unpack tree, last_valid_index = builder
+        @unpack nodes = tree
+
+        # Step 1 - Update the parent to the correct region.
+        parentnode = nodes[parent]
+        root_insert_start = last_valid_index + 1
+        root_insert_end = root_insert_start + subtree.rootend - 1
+        nodes[parent] = TreeNode{T}(getid(parentnode), root_insert_start, root_insert_end)
+
+        # Step 2 - Insert subtree into tree by applying an offset to all the child ranges.
+        offset = NodeOffset(last_valid_index)
+        for node in subtree.nodes
+            last_valid_index += 1
+            nodes[last_valid_index] = node + offset
+        end
+        @pack! builder = last_valid_index
+        offset.val
+    end
 end

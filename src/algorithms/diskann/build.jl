@@ -440,7 +440,7 @@ end
     @unpack alpha, target_degree = parameters
 
     # TODO: Shuffle visit order.
-    num_batches = ceil(Int, length(data) / batchsize)
+    num_batches = cdiv(length(data), batchsize)
     progress_meter = ProgressMeter.Progress(num_batches, 1, "Computing Index...")
     for r in batched(1:length(data), batchsize)
         # Use dynamic load balancing.

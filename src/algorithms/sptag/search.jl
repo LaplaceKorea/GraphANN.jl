@@ -30,7 +30,7 @@ end
 
 function TagSearch(
     heapsize::Integer;
-    idstype::Type{I} = UInt32,
+    idtype::Type{I} = UInt32,
     costtype::Type{D} = Int32,
 ) where {I,D}
     tree_queue = DataStructures.BinaryMinHeap{Neighbor{TreeNode{I}, D}}()
@@ -82,7 +82,7 @@ isfull(x::TagSearch) = _Base.isfull(x.results)
 isvisited(x::TagSearch, node) = in(getid(node), x.visited)
 visited!(x::TagSearch, node) = push!(x.visited, getid(node))
 
-function init!(algo::TagSearch, tree::Tree, data, query; metric = Euclidean())
+function init!(algo::TagSearch, tree::Tree, data, query; metric = Euclidean(), init = ())
     empty!(algo)
     @unpack nodes = tree
     for i in _Trees.rootindices(tree)
@@ -90,6 +90,13 @@ function init!(algo::TagSearch, tree::Tree, data, query; metric = Euclidean())
         candidate = Neighbor(algo, child, evaluate(metric, data[getid(child)], query))
         pushcandidate!(treectx, algo, candidate)
     end
+
+    # Maybe initially seed some points in the graph queue.
+    for i in init
+        candidate = Neighbor(algo, i, evaluate(metric, data[i], query))
+        pushcandidate!(graphctx, algo, candidate)
+    end
+    return nothing
 end
 
 function _Base.search(
@@ -97,7 +104,7 @@ function _Base.search(
     tree::Tree,
     data::AbstractVector,
     query,
-    numleaves::Integer
+    numleaves::Integer;
 )
     metric = Euclidean()
     @unpack nodes = tree
@@ -137,11 +144,12 @@ function _Base.search(
     tree::Tree,
     query;
     maxcheck = 2000,
-    propagation_limit = 128
+    propagation_limit = 128,
+    init = (),
+    metric = Euclidean(),
 )
-    metric = Euclidean()
     @unpack graph, data = meta
-    init!(algo, tree, data, query; metric = metric)
+    init!(algo, tree, data, query; metric = metric, init = init)
     search(algo, tree, data, query, 50)
 
     leaves_seen = 0

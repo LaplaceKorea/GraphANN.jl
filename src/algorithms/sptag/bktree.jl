@@ -28,7 +28,7 @@ function build_bktree(
     # Step 2 - fine-grained pass.
     # Multi-threaded outer loop, single-threaded inner loops.
     fine_pass!(builder, permutation, stack, data, fanout, leafsize, stacksplit)
-    return builder
+    return _Trees.finish(builder)
 end
 
 function coarse_pass!(
@@ -83,17 +83,29 @@ function fine_pass!(
         executor = single_thread,
         costtype = Float32,
     ) |> ThreadLocal
+
     local_stacks = ThreadLocal(Vector{eltype(stack)}())
-    callback = ((parent, range),) -> _Trees.addnodes!(builder, parent, view(permutation, range))
+    # Create local parent - builder pair stacks for each thread to avoid fighting over
+    # the single lock for the top level builder.
+    #subtree_stacks = ThreadLocal(Vector{Tuple{Int, _Trees.Tree{I}}}())
 
     # Multi-thread the outer loop.
     dynamic_thread(eachindex(stack)) do i
+        # Create a whole sub-tree for this range to be merged at the very end.
+        topparent, toprange = stack[i]
+        subbuilder = _Trees.TreeBuilder{I}(length(toprange))
+        callback = ((parent, range),) -> _Trees.addnodes!(subbuilder, parent, view(permutation, range))
+
+        # As far as the sub-process is concerned, it's working on an entirely new tree,
+        # so set the initial parent to "0".
+        #
+        # This will get corrected when the splice in this sub-tree into the top level tree.
         local_stack = local_stacks[]
-        push!(local_stack, stack[i])
+        push!(local_stack, (parent = 0, range = toprange))
         process_stack!(
             callback,
             local_stack,
-            builder,
+            subbuilder,
             data,
             permutation,
             kmeans_runners[],
@@ -101,6 +113,8 @@ function fine_pass!(
             fanout,
             leafsize,
         )
+
+        _Trees.addtree!(builder, topparent, _Trees.partialfinish(subbuilder))
     end
 end
 

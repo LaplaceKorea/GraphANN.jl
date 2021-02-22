@@ -152,7 +152,6 @@ function pushcandidate!(greedy::GreedySearch, vertex)
     if getid(unsafe_peek(greedy)) == getid(vertex)
         maybe_prefetch(greedy, vertex)
     end
-
     return nothing
 end
 

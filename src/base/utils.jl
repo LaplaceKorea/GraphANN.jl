@@ -368,22 +368,23 @@ end
 # `stdlib`, but slightly modified to take a default return value in the case of an empty
 # iterable rather than relying on the iterable implementing `eltype`.
 # N.B. Inference can be finicky with this function. Use with care.
-function meanvar(iterable, corrected::Bool = true; default = zero(eltype(iterable)))
+function meanvar(::Type{T}, iterable, corrected::Bool = true) where {T}
     y = iterate(iterable)
     if y === nothing
-        return (mean = default, variance = default)
+        return (mean = zero(T), variance = zero(T))
     end
     count = 1
     value, state = y
     y = iterate(iterable, state)
-    M = value / 1
-    S = real(zero(M))
+    M = convert(T, value)
+    S = zero(M)
     while y !== nothing
         value, state = y
+        valueT = convert(T, value)
         y = iterate(iterable, state)
         count += 1
-        new_M = M + (value - M) / count
-        S = S + ziptimes(value - M, value - new_M)
+        new_M = M + (valueT - M) / count
+        S = S + ziptimes(valueT - M, valueT - new_M)
         M = new_M
     end
     return (mean = M, variance = S / (count - Int(corrected)))

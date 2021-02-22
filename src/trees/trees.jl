@@ -5,7 +5,7 @@ using .._Base
 
 # deps
 import DataStructures
-import UnPack: @unpack
+import UnPack: @unpack, @pack!
 
 abstract type AbstractTree end
 
