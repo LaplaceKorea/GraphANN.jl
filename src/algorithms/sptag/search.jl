@@ -58,7 +58,10 @@ end
 isdone(::TreeCtx, algo::TagSearch) = isempty(algo.tree_queue)
 isdone(::GraphCtx, algo::TagSearch) = isempty(algo.graph_queue)
 
-# Don't mark any nodes visited during tree search as "visited".
+isvisited(x::TagSearch, node) = in(getid(node), x.visited)
+visited!(x::TagSearch, node) = push!(x.visited, getid(node))
+
+# Don't mark any nodes during tree search as "visited".
 function pushcandidate!(::TreeCtx, algo::TagSearch, candidate::Neighbor)
     return push!(algo.tree_queue, candidate)
 end
@@ -69,8 +72,9 @@ function pushcandidate!(::GraphCtx, algo::TagSearch, candidate::Neighbor)
 end
 
 function maybe_pushcandidate!(ctx::AbstractTagCtx, algo::TagSearch, candidate::Neighbor)
-    isvisited(algo, candidate) || pushcandidate!(ctx, algo, candidate)
-    return nothing
+    isvisited(algo, candidate) && return false
+    pushcandidate!(ctx, algo, candidate)
+    return true
 end
 
 getcandidate!(::TreeCtx, x::TagSearch) = pop!(x.tree_queue)
@@ -79,10 +83,7 @@ pushresult!(x::TagSearch, candidate::Neighbor) = push!(x.results, candidate)
 
 isfull(x::TagSearch) = _Base.isfull(x.results)
 
-isvisited(x::TagSearch, node) = in(getid(node), x.visited)
-visited!(x::TagSearch, node) = push!(x.visited, getid(node))
-
-function init!(algo::TagSearch, tree::Tree, data, query; metric = Euclidean(), init = ())
+function init!(algo::TagSearch, tree::Tree, data, query; metric = Euclidean())
     empty!(algo)
     @unpack nodes = tree
     for i in _Trees.rootindices(tree)
@@ -91,11 +92,6 @@ function init!(algo::TagSearch, tree::Tree, data, query; metric = Euclidean(), i
         pushcandidate!(treectx, algo, candidate)
     end
 
-    # Maybe initially seed some points in the graph queue.
-    for i in init
-        candidate = Neighbor(algo, i, evaluate(metric, data[i], query))
-        pushcandidate!(graphctx, algo, candidate)
-    end
     return nothing
 end
 
@@ -118,18 +114,13 @@ function _Base.search(
         # Unconditionally add to the queue to process for the graph.
         pair = Neighbor(algo, getid(neighbor), getdistance(neighbor))
         if isleaf(node)
-            if !isvisited(algo, node)
-                leaves_seen += 1
-                pushcandidate!(graphctx, algo, pair)
-            end
-            leaves_seen > numleaves && break
+            leaves_seen += Int(maybe_pushcandidate!(graphctx, algo, pair))
+            leaves_seen >= numleaves && break
         else
             maybe_pushcandidate!(graphctx, algo, pair)
             for i in childindices(getnode(neighbor))
-                # TODO: Validate tree so we don't have any zero nodes.
                 child = nodes[i]
                 @unpack id = child
-                iszero(id) && continue
                 candidate = Neighbor(algo, child, evaluate(metric, data[id], query))
                 maybe_pushcandidate!(treectx, algo, candidate)
             end
@@ -145,12 +136,13 @@ function _Base.search(
     query;
     maxcheck = 2000,
     propagation_limit = 128,
-    init = (),
+    initial_pivots = 50,
+    dynamic_pivots = 4,
     metric = Euclidean(),
 )
     @unpack graph, data = meta
-    init!(algo, tree, data, query; metric = metric, init = init)
-    search(algo, tree, data, query, 50)
+    init!(algo, tree, data, query; metric = metric)
+    search(algo, tree, data, query, initial_pivots)
 
     leaves_seen = 0
     no_better_propagation = 0
@@ -176,14 +168,12 @@ function _Base.search(
         # Check progress
         for v in LightGraphs.outneighbors(graph, getid(u))
             d = evaluate(metric, data[v], query)
-            maybe_pushcandidate!(graphctx, algo, Neighbor(algo, v, d))
-            leaves_seen += 1
+            leaves_seen += Int(maybe_pushcandidate!(graphctx, algo, Neighbor(algo, v, d)))
         end
         leaves_seen > maxcheck && break
-        isempty(algo.tree_queue) && break
 
         if getdistance(first(algo.graph_queue)) > getdistance(first(algo.tree_queue))
-            leaves_seen += search(algo, tree, data, query, 4)
+            leaves_seen += search(algo, tree, data, query, dynamic_pivots)
         end
     end
     return leaves_seen

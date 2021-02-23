@@ -131,7 +131,6 @@ function refine!(
             target_degree,
             2 * ceil(Int, batchsize / Threads.nthreads()),
         ),
-        #pruner = Pruner{Neighbor{eltype(graph), D}}(),
         buffer = Vector{Neighbor{eltype(graph), D}}()
     )
 
@@ -154,7 +153,7 @@ end
     for r in batched(1:length(data), batchsize)
         itertime = @elapsed dynamic_thread(r, INDEX_BALANCE_FACTOR) do vertex
             storage = tls[]
-            @unpack runner, nextlists, pruner = storage
+            @unpack runner, nextlists = storage
             point = data[vertex]
             search(
                 runner,
@@ -162,31 +161,27 @@ end
                 tree,
                 point;
                 maxcheck = 8192,
-                propagation_limit = 1_000_000,
-                #init = LightGraphs.outneighbors(graph, vertex),
+                propagation_limit = cdiv(8192, 64),
             )
 
             # As a precaution, make sure the list of updates for this node is empty.
             candidates = destructive_extract!(runner.results)
             nextlist = get!(nextlists)
-            empty!(nextlist)
             vertex_data = data[vertex]
 
             neighbors = LightGraphs.outneighbors(graph, vertex)
-            buffer = storage.buffer
-            empty!(buffer)
-            for u in neighbors
-                push!(buffer, Neighbor(runner, u, evaluate(Euclidean(), vertex_data, data[u])))
-            end
-            sort!(buffer; alg = Base.InsertionSort)
+            resize!(nextlist, length(neighbors))
+            nextlist .= neighbors
+            f = x -> evaluate(Euclidean(), vertex_data, data[x])
+            sort!(nextlist; alg = Base.InsertionSort, by = f)
 
-            resize!(buffer, target_degree)
+            resize!(nextlist, target_degree)
             count = 0
             for candidate in candidates
                 getid(candidate) == vertex && continue
                 good = true
                 for k in 1:count
-                    if evaluate(Euclidean(), data[buffer[k]], data[candidate]) <= getdistance(candidate)
+                    if evaluate(Euclidean(), data[nextlist[k]], data[candidate]) <= getdistance(candidate)
                         good = false
                         break
                     end
@@ -194,40 +189,11 @@ end
 
                 if good
                     count += 1
-                    buffer[count] = candidate
+                    nextlist[count] = getid(candidate)
                 end
                 count == target_degree && break
             end
-            resize!(buffer, count)
             resize!(nextlist, count)
-            nextlist .= getid.(buffer)
-            # initialize!(
-            #     identity,
-            #     x -> getid(x) != vertex,
-            #     pruner,
-            #     destructive_extract!(runner.results),
-            # )
-
-            # # Manually lower the `for` loop to iteration so we can get the internal state of the
-            # # pruner iterator.
-            # #
-            # # This lets us start at the current location in the iterator to reduce the number
-            # # of comparisons.
-            # next = iterate(pruner)
-            # while next !== nothing
-            #     (i, state) = next
-            #     push!(nextlist, getid(i))
-
-            #     # Note: We're indexing `data` with `Neighbor` objects, but that's fine because
-            #     # we've defined that behavior in `utils.jl`.
-            #     f = x -> evaluate(Euclidean(), data[i], data[x]) <= getdistance(x)
-            #     prune!(f, pruner; start = state)
-            #     length(nextlist) >= target_degree && break
-
-            #     # Next step in the iteration interface
-            #     next = iterate(pruner, state)
-            # end
-
             storage.nextlists[vertex] = nextlist
         end
 
