@@ -141,7 +141,6 @@ end
 # Points for Hijacking:
 # - `reset` (make mutating but return the original collection)
 # - `vupdate` (can also make mutating)
-# - `slices` (automatic handling of mixed vectors and matrices
 function findnearest!(x, Y, minimum; metric = Euclidean())
     minimum = reset(minimum)
     for i in eachindex(Y)

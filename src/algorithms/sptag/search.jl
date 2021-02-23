@@ -20,7 +20,6 @@ const graphctx = GraphCtx()
 getnode(x::Neighbor{<:TreeNode}) = x.id
 _Base.getid(x::Neighbor{<:TreeNode}) = getid(getnode(x))
 
-# SPTAG based search
 struct TagSearch{I, D, V <: AbstractSet}
     tree_queue::DataStructures.BinaryMinHeap{Neighbor{TreeNode{I}, D}}
     graph_queue::DataStructures.BinaryMinHeap{Neighbor{I, D}}
@@ -101,8 +100,8 @@ function _Base.search(
     data::AbstractVector,
     query,
     numleaves::Integer;
+    metric = Euclidean(),
 )
-    metric = Euclidean()
     @unpack nodes = tree
 
     # Start processing!
@@ -129,6 +128,7 @@ function _Base.search(
     return leaves_seen
 end
 
+early_exit(leaves_seen, maxcheck) = (leaves_seen > maxcheck)
 function _Base.search(
     algo::TagSearch,
     meta::MetaGraph,
@@ -139,6 +139,7 @@ function _Base.search(
     initial_pivots = 50,
     dynamic_pivots = 4,
     metric = Euclidean(),
+    early_exit = always_false,
 )
     @unpack graph, data = meta
     init!(algo, tree, data, query; metric = metric)
@@ -165,12 +166,14 @@ function _Base.search(
             end
         end
 
-        # Check progress
+        # Maybe check the number of leaves seen here and abort early.
+        early_exit(leaves_seen, maxcheck) && break
+
+        # Expand neighborhood
         for v in LightGraphs.outneighbors(graph, getid(u))
             d = evaluate(metric, data[v], query)
             leaves_seen += Int(maybe_pushcandidate!(graphctx, algo, Neighbor(algo, v, d)))
         end
-        leaves_seen > maxcheck && break
 
         if getdistance(first(algo.graph_queue)) > getdistance(first(algo.tree_queue))
             leaves_seen += search(algo, tree, data, query, dynamic_pivots)
@@ -190,11 +193,12 @@ function _Base.searchall(
     queries::AbstractVector;
     kw...
 )
-    metric = Euclidean()
+    @unpack graph = meta
     num_queries = length(queries)
     # TODO: This is so gross ...
     num_neighbors = _Base.getbound(algo.results)
-    dest = Array{eltype(meta.graph),2}(undef, num_neighbors, num_queries)
+
+    dest = Array{eltype(graph),2}(undef, num_neighbors, num_queries)
     for (col, query) in enumerate(queries)
         search(algo, meta, tree, query; kw...)
 
@@ -235,19 +239,3 @@ function _Base.searchall(
     return dest
 end
 
-#####
-##### Tree Search
-#####
-
-function __tree_search(
-    algo::TagSearch,
-    tree::Tree,
-    data::AbstractVector,
-    query;
-    numleaves::Integer = 1000,
-)
-    metric = Euclidean()
-    init!(algo, tree, data, query)
-    search(algo, tree, data, query, numleaves)
-    return getid.(DataStructures.extract_all!(algo.graph_queue))[1:_Base.getbound(algo.results)]
-end

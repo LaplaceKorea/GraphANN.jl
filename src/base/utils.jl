@@ -1,6 +1,7 @@
 # get rid of that pesky "can't reduce over empty collection" error.
 safe_maximum(f::F, itr, default = 0) where {F} = isempty(itr) ? default : maximum(f, itr)
-donothing(x...) = nothing
+donothing(x...; kw...) = nothing
+always_false(x...; kw...) = false
 printlnstyled(x...; kw...) = printstyled(x..., "\n"; kw...)
 
 # Convenience definitions

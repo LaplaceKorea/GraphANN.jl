@@ -1,12 +1,29 @@
+Base.@kwdef struct SPTAGBuildParams
+    ### High level parameters
+    target_degree::Int = 32
+
+    ### Parameters related to tree building.
+    # Number of randomized trees to help with the initial graph.
+    num_trees::Int = 8
+    tree_leaf_size::Int = 2000
+    single_thread_threshold::Int = 10000
+
+    ### Parameters for refinement.
+    refine_iterations::Int = 2
+    refine_batchsize::Int = 18000
+    refine_maxcheck::Int = 8192
+    refine_propagation::Int = cdiv(8192, 64)
+    refine_history::Int = 2000
+end
+
 # First phase - build the initial KNN graph by partitioning.
 function build_by_trees!(
     graph::UniDirectedGraph{I},
     data::AbstractVector{T};
-    num_iterations = 1,
-    num_neighbors = 32,
-    leafsize = 500,
-    single_thread_threshold = 10000,
+    params = SPTAGBuildParams(),
+    metric = Euclidean(),
 ) where {I, T}
+    @unpack num_trees, tree_leaf_size, target_degree, single_thread_threshold = params
     D = costtype(T)
 
     # Preallocate utility for accelerating the partitioning phase
@@ -24,14 +41,14 @@ function build_by_trees!(
     # Add 1 to the `num_neighbors` when constructing the thread local groundtruth buffer
     # since eacy vertex will appear as its own nearest neighbor, effectively removing
     # it from consideration.
-    compensated_neighbors = num_neighbors + 1
+    compensated_neighbors = target_degree + 1
     tls = ThreadLocal(;
         # Over-allocate the destination space in the `ExhaustiveRunner`.
         # Then, we can pass the `skip_size_check` argument to exhaustive search to only
         # populate sub sections of the result.
         runner = ExhaustiveRunner(
             Neighbor{I,D},
-            leafsize,
+            tree_leaf_size,
             compensated_neighbors;
             executor = single_thread,
             costtype = D
@@ -39,14 +56,14 @@ function build_by_trees!(
         scratch = Neighbor{I,D}[],
     )
 
-    for i in 1:num_iterations
+    for i in 1:num_trees
         ranges = partition!(
             data,
             permutation,
             numtrials = 1000,
             Val(5);
             init = false,
-            leafsize = leafsize,
+            leafsize = tree_leaf_size,
             single_thread_threshold = single_thread_threshold,
         )
 
@@ -68,13 +85,27 @@ function build_by_trees!(
             gt = view(groundtruth, 1:ub, 1:length(range))
 
             # Update graph to maintain nearest neighbors.
-            update!(data, graph, gt, view(permutation, range); candidates = scratch)
+            update!(
+                data,
+                graph,
+                gt,
+                view(permutation, range);
+                candidates = scratch,
+                metric = metric,
+            )
             ProgressMeter.next!(neighbor_meter; step = length(range))
         end
     end
 end
 
-function update!(data, graph, gt::AbstractMatrix{T}, permutation::AbstractVector{<:Integer}; candidates = T[]) where {T <: Neighbor}
+function update!(
+    data,
+    graph,
+    gt::AbstractMatrix{T},
+    permutation::AbstractVector{<:Integer};
+    candidates = T[],
+    metric = Euclidean(),
+) where {T <: Neighbor}
     # First step - translate the indices in `gt` from the local versions to the global
     # vertices using the permutation vector.
     for i in eachindex(gt)
@@ -97,7 +128,7 @@ function update!(data, graph, gt::AbstractMatrix{T}, permutation::AbstractVector
         candidates .= view(gt, 2:size(gt,1), i)
 
         for u in neighbors
-            distance = evaluate(Euclidean(), vdata, data[u])
+            distance = evaluate(metric, vdata, data[u])
             neighbor = T(u, distance)
             if !in(neighbor, candidates)
                 push!(candidates, neighbor)
@@ -120,22 +151,25 @@ function refine!(
     graph,
     tree,
     data::AbstractVector{T};
-    target_degree = 32,
-    batchsize = 50000,
-    num_refine_steps = 2,
+    params::SPTAGBuildParams = SPTAGBuildParams(),
+    metric = Euclidean(),
 ) where {T}
+    @unpack target_degree, refine_history, refine_iterations, refine_batchsize = params
     D = costtype(T)
+
+    # Datastructure pre-allocation.
     tls = ThreadLocal(;
-        runner = TagSearch(2000; costtype = D, idtype = eltype(graph)),
+        runner = TagSearch(refine_history; costtype = D, idtype = eltype(graph)),
         nextlists = NextListBuffer{eltype(graph)}(
             target_degree,
-            2 * ceil(Int, batchsize / Threads.nthreads()),
+            2 * ceil(Int, refine_batchsize / Threads.nthreads()),
         ),
         buffer = Vector{Neighbor{eltype(graph), D}}()
     )
 
-    for i in 1:num_refine_steps
-        _refine!(graph, tree, data, tls, target_degree, batchsize)
+    # Refinement iterations.
+    for i in 1:refine_iterations
+        _refine!(graph, tree, data, tls; params, metric)
     end
 end
 
@@ -143,14 +177,16 @@ end
     graph,
     tree,
     data::AbstractVector{T},
-    tls,
-    target_degree::Integer,
-    batchsize::Integer;
+    tls;
+    params::SPTAGBuildParams = SPTAGBuildParams(),
+    metric = Euclidean(),
 ) where {T}
+    @unpack target_degree, refine_batchsize, refine_maxcheck, refine_propagation = params
+
     meta = MetaGraph(graph, data)
-    num_batches = cdiv(length(data), batchsize)
+    num_batches = cdiv(length(data), refine_batchsize)
     progress_meter = ProgressMeter.Progress(num_batches, 1, "Refining Index ... ")
-    for r in batched(1:length(data), batchsize)
+    for r in batched(1:length(data), refine_batchsize)
         itertime = @elapsed dynamic_thread(r, INDEX_BALANCE_FACTOR) do vertex
             storage = tls[]
             @unpack runner, nextlists = storage
@@ -160,8 +196,8 @@ end
                 meta,
                 tree,
                 point;
-                maxcheck = 8192,
-                propagation_limit = cdiv(8192, 64),
+                maxcheck = refine_maxcheck,
+                propagation_limit = refine_propagation,
             )
 
             # As a precaution, make sure the list of updates for this node is empty.
@@ -172,7 +208,7 @@ end
             neighbors = LightGraphs.outneighbors(graph, vertex)
             resize!(nextlist, length(neighbors))
             nextlist .= neighbors
-            f = x -> evaluate(Euclidean(), vertex_data, data[x])
+            f = x -> evaluate(metric, vertex_data, data[x])
             sort!(nextlist; alg = Base.InsertionSort, by = f)
 
             resize!(nextlist, target_degree)
@@ -181,7 +217,7 @@ end
                 getid(candidate) == vertex && continue
                 good = true
                 for k in 1:count
-                    if evaluate(Euclidean(), data[nextlist[k]], data[candidate]) <= getdistance(candidate)
+                    if evaluate(metric, data[nextlist[k]], data[candidate]) <= getdistance(candidate)
                         good = false
                         break
                     end

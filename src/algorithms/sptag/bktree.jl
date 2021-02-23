@@ -41,7 +41,7 @@ function coarse_pass!(
     largestack = [(parent = 0, range = 1:length(data))]
     smallstack = Vector{eltype(largestack)}()
 
-    kmeans_runner = _Quantization.KMeansRunner(data, dynamic_thread)
+    kmeans_runner = KMeansRunner(data, dynamic_thread)
     exhaustive_runner = ExhaustiveRunner(
         I,
         length(data),
@@ -75,7 +75,7 @@ function fine_pass!(
     leafsize::Integer,
     stacksplit::Integer,
 ) where {I,N,T}
-    kmeans_runners = ThreadLocal(_Quantization.KMeansRunner(data, single_thread))
+    kmeans_runners = ThreadLocal(KMeansRunner(data, single_thread))
     exhaustive_runners = ExhaustiveRunner(
         I,
         stacksplit,
@@ -140,7 +140,7 @@ function process_stack!(
         end
 
         dataview = doubleview(data, permutation, range)
-        centroids = _Quantization.kmeans(dataview, kmeans_runner, fanout)
+        centroids = kmeans(dataview, kmeans_runner, fanout)
         # Map the indices returned by `kmeans` to their closest data points.
         resize!(bruteforce_runner, length(centroids))
         centroid_indices = search!(

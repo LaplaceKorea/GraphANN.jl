@@ -73,9 +73,8 @@ include("pm.jl")
 #####
 
 export ThreadPool, ThreadLocal, MaybeThreadLocal, TaskHandle
-export getall, getpool, allthreads, single_thread, dynamic_thread, on_threads
+export getall, getlocal, getpool, allthreads, single_thread, dynamic_thread, on_threads
 include("threading.jl")
-#distribute_distance(x::ThreadLocal) = x[]
 
 #####
 ##### MinMaxHeap
@@ -88,7 +87,7 @@ include("minmax_heap.jl")
 ##### Utilities
 #####
 
-export safe_maximum, donothing, printlnstyled, zero!, typemax!, cdiv, toeltype
+export safe_maximum, donothing, printlnstyled, always_false, zero!, typemax!, cdiv, toeltype
 export Neighbor, getid, getdistance, idtype, costtype
 export RobinSet
 export zeroas, medioid, nearest_neighbor

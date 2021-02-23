@@ -169,17 +169,17 @@ getpool(t::ThreadLocal) = t.pool
 getlocal(x::ThreadLocal) = x[]
 getlocal(x) = x
 
-# In the special case of NamedTuples, allow construction of a sub thread-local
-# by property name.
-function Base.getproperty(tls::ThreadLocal{T}, sym::Symbol) where {T <: NamedTuple}
-    if sym == :values || sym == :pool || sym == :translation
-        return getfield(tls, sym)
-    else
-        values = [getproperty(v, sym) for v in getfield(tls, :values)]
-        return ThreadLocal{fieldtype(T, sym)}(
-            values,
-            getfield(tls, :pool),
-            getfield(tls, :translation),
-        )
-    end
-end
+# # In the special case of NamedTuples, allow construction of a sub thread-local
+# # by property name.
+# function Base.getproperty(tls::ThreadLocal{T}, sym::Symbol) where {T <: NamedTuple}
+#     if sym == :values || sym == :pool || sym == :translation
+#         return getfield(tls, sym)
+#     else
+#         values = [getproperty(v, sym) for v in getfield(tls, :values)]
+#         return ThreadLocal{fieldtype(T, sym)}(
+#             values,
+#             getfield(tls, :pool),
+#             getfield(tls, :translation),
+#         )
+#     end
+# end

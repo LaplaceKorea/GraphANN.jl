@@ -45,5 +45,6 @@ function partition!(
         index = (a > b) ? a : gt[i]
         x[index] = temp[i]
     end
-    return first(gt)
+    index = findfirst(!isequal(last(lt)), gt)
+    return index === nothing ? (lastindex(x) + 1) : gt[index]
 end

@@ -14,7 +14,7 @@ using .._Base
 using .._Graphs
 using .._Trees
 using .._Prefetcher
-using .._Quantization
+using .._Clustering
 
 # deps
 import DataStructures

@@ -2,7 +2,7 @@ using GraphANN
 using Test
 
 # Extra stdlib imports
-using InteractiveUtils  # for `code_native`
+using Random
 using Serialization
 using Statistics
 
@@ -27,33 +27,34 @@ const groundtruth_path = joinpath(datadir, "siftsmall_groundtruth.ivecs")
 const diskann_index = joinpath(datadir, "siftsmall_base_20_20_1.2.index")
 const diskann_query_ids = joinpath(datadir, "diskann_query_ids.jls")
 
-# include("base/pm.jl")
-# include("base/utils.jl")
-# include("base/threading.jl")
-# include("base/minmax_heap.jl")
-# include("points/euclidean.jl")
-#include("points/clustering.jl")
-#include("quantization/clustering.jl")
-#include("quantization/pq.jl")
-# include("graphs/adjacency.jl")
-# include("graphs/graphs.jl")
-include("trees/trees.jl")
-# include("query/greedy.jl")
-# include("algorithms/exhaustive.jl")
-# include("algorithms/sptag.jl")
+# Base
+include("base/pm.jl")
+include("base/utils.jl")
+include("base/threading.jl")
+include("base/minmax_heap.jl")
+include("base/euclidean.jl")
+include("base/partition.jl")
 
-# # Query (comparison with DiskANN)
-# include("query/query.jl")
-#
-# # Prefetch machinery
-# include("prefetch/queue.jl")
-# include("prefetch/prefetch.jl")
-#
-# # Index building
-# include("index/index.jl")
-#
-# # Loads
-# include("io/vecs.jl")
-# include("io/sptag.jl")
-#
+# Graphs
+include("graphs/adjacency.jl")
+include("graphs/graphs.jl")
+
+# Trees
+include("trees/trees.jl")
+
+# Clustering
+include("clustering/kmeans.jl")
+
+# Prefetch
+include("prefetch/queue.jl")
+include("prefetch/prefetch.jl")
+
+# Algorithms
+include("algorithms/exhaustive.jl")
+include("algorithms/diskann.jl")
+include("algorithms/sptag.jl")
+
+# IO
+include("io/vecs.jl")
+include("io/sptag.jl")
 

@@ -9,7 +9,7 @@ include("base/base.jl"); using ._Base
 include("graphs/graphs.jl"); using ._Graphs
 include("trees/trees.jl"); using ._Trees
 include("prefetch/prefetch.jl"); using ._Prefetcher
-include("quantization/quantization.jl"); using ._Quantization
+include("clustering/clustering.jl"); using ._Clustering
 include("io/io.jl"); using ._IO
 
 # Core implementation

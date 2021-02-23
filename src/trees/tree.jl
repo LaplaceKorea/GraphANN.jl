@@ -152,10 +152,7 @@ end
 
 function initnodes!(builder::TreeBuilder{T}, itr) where {T}
     index = Base.@lock builder.lock begin
-        if builder.last_valid_index != 0
-            @show builder.last_valid_index
-            error()
-        end
+        @assert iszero(builder.last_valid_index)
         nodes = builder.tree.nodes
         index = 0
         for node in itr

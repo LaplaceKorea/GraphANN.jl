@@ -11,7 +11,8 @@ function _run_tpt_tests(data::AbstractVector{SVector{N,T}}) where {N,T}
     @test isa(dims, NTuple{4,Int})
 
     # Make sure that the maximum variances are being computed correctly.
-    dataview = view(data, runner.samples)
+    samples = 1:numsamples
+    dataview = view(data, samples)
     @test length(dataview) == numsamples
     variances = Statistics.var.(eachrow(reinterpret(reshape, T, dataview)))
 
@@ -20,8 +21,8 @@ function _run_tpt_tests(data::AbstractVector{SVector{N,T}}) where {N,T}
     @test all(dims .== perm)
 
     # Next, get normalized weights to maximize the varianze
-    @inferred GraphANN.Algorithms.getweights!(data, runner, dims, 1:length(data), numtrials)
-    weights, meanval = GraphANN.Algorithms.getweights!(data, runner, dims, 1:length(data), numtrials)
+    @inferred GraphANN.Algorithms.getweights!(data, runner, dims, 1:length(data), numsamples, numtrials)
+    weights, meanval = GraphANN.Algorithms.getweights!(data, runner, dims, 1:length(data),numsamples, numtrials)
 
     # Make sure the return vector is normalized
     @test isapprox(sum(abs2, weights), 1)
@@ -166,7 +167,7 @@ end
         # data point, checking the accuracy improvement of the tree-based clustering over
         # random clustering at each of those points.
         num_nearest = [1, 5, 10, 20, 50, 100]
-        threshold = [1.0, 0.8, 0.85, 0.9, 0.92, 0.92]
+        threshold = [1.0, 0.8, 0.85, 0.9, 0.92, 0.93]
         for (t, n) in zip(threshold, num_nearest)
             clustered_sums = sum.(eachcol(view(clustered_distances, 1:n, :)))
             base_sums = sum.(eachcol(view(base_distances, 1:n, :)))

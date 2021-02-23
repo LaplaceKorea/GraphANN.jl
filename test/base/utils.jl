@@ -1,4 +1,5 @@
-@testset "Testing Utils" begin
+@testset "Testing Utilities" begin
+@testset "Misc Utils" begin
     #-- safe_maximum
     x = [1,2,3,-1]
     @test GraphANN._Base.safe_maximum(identity, x) == 3
@@ -8,10 +9,18 @@
     @test GraphANN._Base.safe_maximum(identity, [], "hello world") == "hello world"
 
     #-- donothing
-    @test GraphANN._Base.donothing() == nothing
-    @test GraphANN._Base.donothing(1) == nothing
-    @test GraphANN._Base.donothing(1, 2) == nothing
-    @test GraphANN._Base.donothing(1, 2, 3) == nothing
+    @test GraphANN._Base.donothing() === nothing
+    @test GraphANN._Base.donothing(1) === nothing
+    @test GraphANN._Base.donothing(1, 2) === nothing
+    @test GraphANN._Base.donothing(1, 2, 3) === nothing
+    @test GraphANN._Base.donothing(1, 2, 3; kwarg = "hello") === nothing
+
+    #-- always_false
+    @test GraphANN._Base.always_false() === false
+    @test GraphANN._Base.always_false(1) === false
+    @test GraphANN._Base.always_false(1, 2) === false
+    @test GraphANN._Base.always_false(1, 2, 3) === false
+    @test GraphANN._Base.always_false(1, 2, 3; kwarg = "hello") === false
 
     #-- zero! and typemax!
     x = rand(Int64, 10)
@@ -43,7 +52,7 @@
     end
 end
 
-@testset "Testing Neighbor" begin
+@testset "Neighbor" begin
     Neighbor = GraphANN.Neighbor
     getid = GraphANN.getid
     getdistance = GraphANN.getdistance
@@ -112,7 +121,7 @@ end
     @test x[i] == 20
 end
 
-@testset "Testing RobinSet" begin
+@testset "RobinSet" begin
     x = GraphANN.RobinSet{Int}()
     @test length(x) == 0
     push!(x, 10)
@@ -146,7 +155,7 @@ end
     @test in(2, x) == false
 end
 
-@testset "Testing Nearest Neighbor" begin
+@testset "Nearest Neighbor" begin
     # Strategy - generate a bunch of random vectors.
     # Then, make one vector very close to the query with only a small perturbation.
     # This modified vector should be the nearest neighbor.
@@ -171,7 +180,7 @@ end
     @test ind == 51
 end
 
-@testset "Testing Prefetch" begin
+@testset "Prefetch" begin
     x = [1,2,3]
     # First, just make sure this prefetch instruction exists.
     @test GraphANN.prefetch(pointer(x, 1)) == nothing
@@ -185,7 +194,7 @@ end
     @test GraphANN.prefetch(x, 5, GraphANN.prefetch_llc) == nothing
 end
 
-@testset "Testing BatchedRange" begin
+@testset "BatchedRange" begin
     range = 1:100
     x = GraphANN.BatchedRange(range, 10)
     @test length(x) == 10
@@ -218,7 +227,7 @@ end
 end
 
 # NOTE: A lot of these tests are influenced by the heap tests in DataStructures.jl
-@testset "Testing Bounded Heap" begin
+@testset "Bounded Heap" begin
     vs = [4, 1, 3, 2, 16, 9, 10, 14, 8, 7]
     vs2 = collect(enumerate(vs))
     ordering = Base.Order.By(last)
@@ -293,10 +302,10 @@ end
     end
 end
 
-@testset "Testing meanvar" begin
+@testset "meanvar" begin
     for T in (Float32, UInt8), i in 1:100, corrected in (true, false)
         x = rand(T, 100)
-        m, v = GraphANN._Base.meanvar(x, corrected)
+        m, v = GraphANN._Base.meanvar(Float32, x, corrected)
         @test isapprox(m, Statistics.mean(x))
         @test isapprox(v, Statistics.var(x; corrected = corrected))
     end
@@ -304,11 +313,11 @@ end
     # Test inference works for things like generators.
     # Pass a somewhat complicated generator but provide a type-stable default.
     y = rand(1:100, 10)
-    @inferred GraphANN._Base.meanvar(sin(Float32(i) ^ 2) for i in y; default = zero(Float32))
+    @inferred GraphANN._Base.meanvar(Float32, sin(Float32(i) ^ 2) for i in y)
 
     # This should also work for vectors of StaticVectors
     samples = [@SVector rand(Float32, 16) for _ in 1:100]
-    means, variances = GraphANN._Base.meanvar(samples)
+    means, variances = GraphANN._Base.meanvar(SVector{16, Float32}, samples)
 
     @test isa(means, SVector{16, Float32})
     @test isa(variances, SVector{16, Float32})
@@ -318,7 +327,8 @@ end
     @test isapprox(means, Statistics.mean.(eachrow(samples_2d)))
     @test isapprox(variances, Statistics.var.(eachrow(samples_2d)))
 
-    @inferred GraphANN._Base.meanvar(samples)
+    @inferred GraphANN._Base.meanvar(eltype(samples), samples)
     y = rand(1:length(samples), 10)
-    @inferred GraphANN._Base.meanvar(samples[i] for i in y; default = zero(eltype(samples)))
+    @inferred GraphANN._Base.meanvar(eltype(samples), samples[i] for i in y)
 end
+end # outer @testset
