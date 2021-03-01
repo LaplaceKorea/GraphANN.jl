@@ -83,15 +83,32 @@ function load(::Type{DefaultAdjacencyList{T}}, io::IO) where {T}
     return UniDirectedGraph{T}(adj)
 end
 
-function load(::Type{FlatAdjacencyList{T}}, io::IO) where {T}
+function load(
+    ::Type{FlatAdjacencyList{T}},
+    io::IO;
+    pad_to = nothing,
+    allocator = stdallocator
+) where {T}
     @unpack elsize, nv, ne, max_degree = read_header(io)
     @assert elsize == sizeof(T)
+
+    # If padding is requested, determine the number of elements of type T corresponds to
+    # the requested padding.
+    if pad_to !== nothing
+        num_elements = div(pad_to, sizeof(T))
+        if num_elements * sizeof(T) != pad_to
+            throw(ArgumentError(
+                "Requested padding bytes of $pad_to is not evenly divisible by elements of type $T"
+            ))
+        end
+        max_degree = cdiv(max_degree, num_elements) * num_elements
+    end
 
     outdegrees = Vector{T}(undef, nv)
     read!(io, outdegrees)
 
     # Allocate destination array.
-    g = UniDirectedGraph{T}(FlatAdjacencyList{T}(nv, max_degree))
+    g = UniDirectedGraph{T}(FlatAdjacencyList{T}(nv, max_degree; allocator))
     buffer = T[]
     ProgressMeter.@showprogress 1 for v in 1:nv
         resize!(buffer, outdegrees[v])
@@ -123,25 +140,6 @@ function load(
     A = allocator(T, ne)
     read!(io, A)
     eof(io) || error("There seems to be more room in the file!")
-
-    # Reconstruct the graph from the degree information.
-    #spans = Vector{Span{T}}()
-    #sizehint!(spans, nv)
-
-    # progress_meter = ProgressMeter.Progress(nv, 1)
-    # index = 1
-    # ProgressMeter.@showprogress 1 for v in 1:nv
-    #     degree = degrees[v]
-    #     push!(spans, Span(pointer(A, index), degree))
-    #     index += degree
-    # end
-
-    # # Post processing sanity check
-    # index != (ne + 1) && error("""
-    #     Incorrect final index.
-    #     Should be: $(ne + 1). Is: ($index).
-    #     """
-    # )
 
     adj = DenseAdjacencyList{T}(A, offsets)
     return UniDirectedGraph{T}(adj)

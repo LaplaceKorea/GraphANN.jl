@@ -1,7 +1,8 @@
 # Note - this should shadow the `TreeNode` type in the C++ code, which uses `Int32/UInt32`
 # for the internal fields.
 #
-# Apparently, leaf nodes use Int32(-1) / typemax(UInt32) to encode the child nodes.
+# In the C++ code, leaf nodes use Int32(-1) / typemax(UInt32) to encode the child nodes.
+# Locally, we use "0" for the child fields of leaves.
 struct TreeNode{T <: Integer}
     id::T
     childstart::T
@@ -45,6 +46,8 @@ mutable struct Tree{T <: Integer} <: AbstractTree
     rootend::Int
     nodes::Vector{TreeNode{T}}
 end
+
+Base.getindex(tree::Tree, i::Integer) = tree.nodes[i]
 
 function Tree{T}(num_elements::Integer; allocator = stdallocator) where {T}
     nodes = allocator(TreeNode{T}, num_elements)

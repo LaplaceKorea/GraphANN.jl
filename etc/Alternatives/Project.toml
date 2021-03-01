@@ -1,0 +1,8 @@
+name = "Alternatives"
+uuid = "765d28b4-845b-4136-a3ca-aee3ff08da56"
+authors = ["Hildebrand, Mark <mark.hildebrand@intel.com>"]
+version = "0.1.0"
+
+[deps]
+GraphANN = "38438e65-754f-449b-9041-06b96401f6e7"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"

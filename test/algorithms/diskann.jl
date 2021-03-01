@@ -133,7 +133,7 @@ end
 @testset "Testing Index" begin
     # Load the dataset into memory
     dataset = GraphANN.load_vecs(SVector{128,Float32}, dataset_path)::Vector{SVector{128,Float32}}
-    dataset_u8 = map(x -> convert(SVector{128,UInt8}, x), dataset)
+    dataset_u8 = map(x -> GraphANN.toeltype(UInt8, x), dataset)
 
     # Index generation using both Float32 and UInt8
     meta = test_index(dataset)

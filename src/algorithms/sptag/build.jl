@@ -57,7 +57,7 @@ function build_by_trees!(
     )
 
     for i in 1:num_trees
-        ranges = partition!(
+        @withtimer "Building TPTree" ranges = partition!(
             data,
             permutation,
             numtrials = 1000,
@@ -68,7 +68,7 @@ function build_by_trees!(
         )
 
         neighbor_meter = ProgressMeter.Progress(length(data), 1, "Processing Tree ... ")
-        dynamic_thread(eachindex(ranges), 4) do i
+        @withtimer "Computing TPTree Neighbors" dynamic_thread(eachindex(ranges), 4) do i
             @inbounds range = ranges[i]
             @unpack runner, scratch = tls[]
 
@@ -164,7 +164,6 @@ function refine!(
             target_degree,
             2 * ceil(Int, refine_batchsize / Threads.nthreads()),
         ),
-        buffer = Vector{Neighbor{eltype(graph), D}}()
     )
 
     # Refinement iterations.
@@ -177,7 +176,7 @@ end
     graph,
     tree,
     data::AbstractVector{T},
-    tls;
+    tls::ThreadLocal;
     params::SPTAGBuildParams = SPTAGBuildParams(),
     metric = Euclidean(),
 ) where {T}
@@ -200,18 +199,13 @@ end
                 propagation_limit = refine_propagation,
             )
 
-            # As a precaution, make sure the list of updates for this node is empty.
-            candidates = destructive_extract!(runner.results)
+            # Obtain a nextlist to populate with new neighbors.
             nextlist = get!(nextlists)
-            vertex_data = data[vertex]
-
-            neighbors = LightGraphs.outneighbors(graph, vertex)
-            resize!(nextlist, length(neighbors))
-            nextlist .= neighbors
-            f = x -> evaluate(metric, vertex_data, data[x])
-            sort!(nextlist; alg = Base.InsertionSort, by = f)
-
             resize!(nextlist, target_degree)
+
+            vertex_data = data[vertex]
+            candidates = destructive_extract!(runner.results)
+
             count = 0
             for candidate in candidates
                 getid(candidate) == vertex && continue
@@ -235,13 +229,13 @@ end
 
         # Apply the refined nextlists to the graph.
         synctime = @elapsed on_threads(allthreads()) do
-            storage = tls[]
-            for (u, neighbors) in pairs(storage.nextlists)
+            @unpack nextlists = tls[]
+            for (u, neighbors) in pairs(nextlists)
                 copyto!(graph, u, neighbors)
             end
 
             # Reset nextlists for next iteration.
-            empty!(storage.nextlists)
+            empty!(nextlists)
         end
 
         ProgressMeter.next!(
@@ -250,5 +244,4 @@ end
         )
     end
 end
-
 

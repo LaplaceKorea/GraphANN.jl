@@ -102,7 +102,10 @@ end
     # Again, this ratio of runtime is determined heuristically.
     # With at least 2 threads, we should get close to a 2x speedup.
     @test Threads.nthreads() >= 2
-    @test mt_runtime < 0.6 * st_runtime
+
+    # N.B. Coverages messes with threading so the runtime isn't actually shorter.
+    # Only apply this test when running without coverage enabled.
+    @test_no_cc mt_runtime < 0.6 * st_runtime
 
     # Finally, multi-threaded UInt8
     centroids = GraphANN.kmeans(data_u8, runner, num_centroids)

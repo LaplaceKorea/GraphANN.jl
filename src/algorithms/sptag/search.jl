@@ -86,7 +86,7 @@ function init!(algo::TagSearch, tree::Tree, data, query; metric = Euclidean())
     empty!(algo)
     @unpack nodes = tree
     for i in _Trees.rootindices(tree)
-        child = nodes[i]
+        child = tree[i]
         candidate = Neighbor(algo, child, evaluate(metric, data[getid(child)], query))
         pushcandidate!(treectx, algo, candidate)
     end
@@ -102,9 +102,6 @@ function _Base.search(
     numleaves::Integer;
     metric = Euclidean(),
 )
-    @unpack nodes = tree
-
-    # Start processing!
     leaves_seen = 0
     while !isdone(treectx, algo)
         @inbounds neighbor = getcandidate!(treectx, algo)
@@ -117,8 +114,7 @@ function _Base.search(
             leaves_seen >= numleaves && break
         else
             maybe_pushcandidate!(graphctx, algo, pair)
-            for i in childindices(getnode(neighbor))
-                child = nodes[i]
+            for child in _Trees.children(tree, node)
                 @unpack id = child
                 candidate = Neighbor(algo, child, evaluate(metric, data[id], query))
                 maybe_pushcandidate!(treectx, algo, candidate)
@@ -139,7 +135,8 @@ function _Base.search(
     initial_pivots = 50,
     dynamic_pivots = 4,
     metric = Euclidean(),
-    early_exit = always_false,
+    early_exit =
+    always_false,
 )
     @unpack graph, data = meta
     init!(algo, tree, data, query; metric = metric)

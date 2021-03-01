@@ -119,3 +119,7 @@ GraphANN.save_vecs("another_groundtruth.ivecs", gt)
 - pointer to person who has asure PM systems.
 - have code if they want (Julia/C++ discussion).
 - SPTAG and the parameters for construction.
+
+Running both algorithms on PM and Disk and DRAM, get data points for all.
+
+Packing for FlatAdjacencyList.

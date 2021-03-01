@@ -51,7 +51,7 @@ function coarse_pass!(
     )
 
     # Inner function - add a coarsely clustered partition to the small stack.
-    process_stack!(
+    @withtimer "BKTree Coarse Pass" process_stack!(
         x -> push!(smallstack, x),
         largestack,
         builder,
@@ -90,7 +90,7 @@ function fine_pass!(
     #subtree_stacks = ThreadLocal(Vector{Tuple{Int, _Trees.Tree{I}}}())
 
     # Multi-thread the outer loop.
-    dynamic_thread(eachindex(stack)) do i
+    @withtimer "BKTree Fine Pass" dynamic_thread(eachindex(stack)) do i
         # Create a whole sub-tree for this range to be merged at the very end.
         topparent, toprange = stack[i]
         subbuilder = _Trees.TreeBuilder{I}(length(toprange))
@@ -139,26 +139,16 @@ function process_stack!(
             continue
         end
 
-        dataview = doubleview(data, permutation, range)
-        centroids = kmeans(dataview, kmeans_runner, fanout)
-        # Map the indices returned by `kmeans` to their closest data points.
-        resize!(bruteforce_runner, length(centroids))
-        centroid_indices = search!(
+        # dataview = doubleview(data, permutation, range)
+        # centroids = kmeans(dataview, kmeans_runner, fanout)
+        centroids, centroid_indices = find_centroids(
+            data,
+            permutation,
+            range,
+            kmeans_runner,
             bruteforce_runner,
-            centroids,
-            dataview;
-            meter = nothing,
+            fanout,
         )
-
-        # Handle cases where we have repeated indices.
-        # Remember that `bruteforce_search` computes its results in Index-0.
-        # Thus, we need to increment every entry in the computed nearest data points.
-        unique!(centroid_indices)
-        centroid_indices .+= one(eltype(centroid_indices))
-        for (i, j) in enumerate(centroid_indices)
-            centroids[i] = dataview[j]
-        end
-        resize!(centroids, length(centroid_indices))
 
         # Add the data point indices to the tree, move selected centroids to the end
         # of the current range to aid in procesing the next level.
@@ -166,7 +156,7 @@ function process_stack!(
         parent_indices = _Trees.addnodes!(
             builder,
             parent,
-            (permview[i] for i in centroid_indices),
+            view(permview, centroid_indices),
         )
         move_to_end!(permview, centroid_indices)
 
@@ -204,6 +194,42 @@ function process_stack!(
     end
 end
 
+function find_centroids(
+    data::AbstractVector,
+    permutation::AbstractVector,
+    range::AbstractUnitRange,
+    kmeans_runner,
+    bruteforce_runner,
+    fanout::Integer,
+)
+    dataview = doubleview(data, permutation, range)
+    centroids = kmeans(dataview, kmeans_runner, fanout)
+
+    # Map the indices returned by `kmeans` to their closest data points.
+    resize!(bruteforce_runner, length(centroids))
+    centroid_indices = search!(
+        bruteforce_runner,
+        centroids,
+        dataview;
+        meter = nothing,
+    )
+
+    # Handle cases where we have repeated indices.
+    # To save on allocating a "Set" for the standard `unique!` function, we instead
+    # sort our small centroid collection and call `Base._groupedunique!`, which will
+    # operate inplace on `centroids` and automatically resize at the end.
+    sort!(centroid_indices; alg = Base.InsertionSort)
+    Base._groupedunique!(centroid_indices)
+
+    # Remember that `bruteforce_search` computes its results in Index-0.
+    # Thus, we need to increment every entry in the computed nearest data points.
+    centroid_indices .+= one(eltype(centroid_indices))
+    for (i, j) in enumerate(centroid_indices)
+        centroids[i] = dataview[j]
+    end
+    resize!(centroids, length(centroid_indices))
+    return centroids, centroid_indices
+end
 
 #####
 ##### Utils

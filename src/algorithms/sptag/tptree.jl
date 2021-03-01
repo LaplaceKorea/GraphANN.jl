@@ -65,7 +65,7 @@ function _Base.partition!(
     # Bootstrap by queuing the whole dataset.
     stack = [(1, length(data))]
     shortstack = Vector{eltype(stack)}()
-    process_stack!(
+    @withtimer "TPTree Coarse Pass" process_stack!(
         (lo, hi) -> push!(shortstack, (lo, hi)),
         stack,
         coarse_runner,
@@ -85,8 +85,7 @@ function _Base.partition!(
         runner = TPTreeRunner{K}(permutation),
     )
 
-    #callback = (lo, hi) -> push!(leaves[], lo:hi)
-    dynamic_thread(eachindex(shortstack)) do i
+    @withtimer "TPTree Fine Pass" dynamic_thread(eachindex(shortstack)) do i
         @unpack localstack, runner = threadlocal[]
         push!(localstack, shortstack[i])
         process_stack!(

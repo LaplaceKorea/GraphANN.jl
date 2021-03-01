@@ -54,12 +54,12 @@ end
 # Well, it started out simple ... you pass in a UInt8, Float32, whatever you want, that
 # that's what you got in return.
 #
-# But eventually, I wanted it to return `Vector{<:Euclidean}` and, well, it just got worse
+# But eventually, I wanted it to return `Vector{<:SVector}` and, well, it just got worse
 # from there.
 function load_vecs(::Type{T}, file; maxlines = nothing, allocator = stdallocator) where {T}
     linecount = 0
     index = 1
-    v, dim = open(file) do io
+    _v, _dim = open(file) do io
         # First, read the dimensionality of the vectors in this file.
         # Make sure it is the same for all vectors.
         dim = read(io, Int32)
@@ -75,7 +75,7 @@ function load_vecs(::Type{T}, file; maxlines = nothing, allocator = stdallocator
         # preallocate the storage.
         linesize = sizeof(Int32) + dim * sizeof(vecs_read_type(T))
         num_lines, rem = divrem(filesize(file), linesize)
-        @assert rem == 0
+        @assert iszero(rem)
         if (maxlines !== nothing)
             num_lines = min(num_lines, maxlines)
         end
@@ -102,7 +102,7 @@ function load_vecs(::Type{T}, file; maxlines = nothing, allocator = stdallocator
         ProgressMeter.finish!(meter)
         return v, dim
     end
-    return vecs_reshape(T, v, dim)
+    return vecs_reshape(T, _v, _dim)
 end
 
 function save_vecs(

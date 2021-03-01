@@ -24,13 +24,6 @@ import Setfield
 import StaticArrays: SVector, @SVector
 import UnPack: @unpack, @pack!
 
-import LightGraphs
-graph_cost(meta::MetaGraph) = graph_cost(meta.graph, meta.data)
-function graph_cost(graph, data::AbstractVector{T}) where {T}
-    s = [Float64(evaluate(Euclidean(), data[edge.src], data[edge.dst])) for edge in LightGraphs.edges(graph)]
-    return sum(s)
-end
-
 # exhaustive search
 export exhaustive_search, exhaustive_search!
 include("exhaustive.jl")

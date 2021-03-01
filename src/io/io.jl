@@ -5,14 +5,20 @@ export load_vecs, save_vecs
 
 # local deps
 import .._Base: MetaGraph, stdallocator, medioid
-import .._Graphs: UniDirectedGraph, FlatAdjacencyList
+import .._Graphs: _Graphs, UniDirectedGraph, FlatAdjacencyList
 import .._Trees: TreeNode, Tree
+
+# stdlib
+import Mmap
 
 # deps
 import LightGraphs
 import ProgressMeter
 import StaticArrays: SVector
 import UnPack: @unpack
+
+export load_bin
+include("native.jl")
 
 # Support for DiskANN generated binary files.
 include("diskann.jl")

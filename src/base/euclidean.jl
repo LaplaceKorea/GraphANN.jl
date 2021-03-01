@@ -205,7 +205,7 @@ end
 # faster ...
 function _sum(x::SIMD.Vec{N,T}) where {N,T}
     s = zero(T)
-    @inbounds @fastmath for i in 1:N
+    @inbounds for i in 1:N
         s += x[i]
     end
     return s

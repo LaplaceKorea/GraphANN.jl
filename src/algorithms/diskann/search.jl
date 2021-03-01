@@ -208,14 +208,14 @@ function _Base.search(
     # Destructure argument
     @unpack graph, data = meta
     pushcandidate!(algo, Neighbor(algo, start.index, evaluate(metric, query, start.value)))
-    while !done(algo)
+    @inbounds while !done(algo)
         p = getid(unsafe_peek(algo))
         neighbors = LightGraphs.outneighbors(graph, p)
 
         # Prefetch all new datapoints.
         # IMPORTANT: This is critical for performance!
-        for vertex in neighbors
-            @inbounds prefetch(data, vertex)
+        @inbounds for vertex in neighbors
+            prefetch(data, vertex)
         end
 
         # Prune
@@ -338,15 +338,15 @@ function _Base.searchall(
     dest = Array{eltype(meta.graph),2}(undef, num_neighbors, num_queries)
 
     dynamic_thread(getpool(tls), eachindex(queries), 64) do col
-        _metric = _Base.distribute_distance(metric)
+        #_metric = _Base.distribute_distance(metric)
         query = queries[col]
         algo = tls[]
 
         # -- optional telemetry
         callbacks.prequery()
 
-        _Base.distance_prehook(_metric, query)
-        search(algo, meta, start, query; callbacks = callbacks, metric = _metric)
+        #_Base.distance_prehook(_metric, query)
+        search(algo, meta, start, query; callbacks = callbacks, metric = metric)
 
         # Copy over the results to the destination
         results = destructive_extract!(algo.best, num_neighbors)
