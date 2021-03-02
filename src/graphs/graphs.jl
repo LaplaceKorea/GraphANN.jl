@@ -18,9 +18,6 @@ include("adjacency.jl")
 export UniDirectedGraph
 include("unidirected.jl")
 
-export save, load
-include("io.jl")
-
 export random_regular
 include("generators.jl")
 

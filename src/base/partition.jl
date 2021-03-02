@@ -31,13 +31,13 @@ function partition!(
 
     # Compute prefix sum.
     cumsum!(lt, lt)
-    gt[1] += lt[end]
+    gt[begin] += lt[end]
     cumsum!(gt, gt)
 
     # Write back.
     # If `lt[i] > lt[i-1]`, then we know `by(temp[i]) == true`.
     # Thus, we set `x[lt[i]] = temp[i]`.
-    # Otherwise, if `lt[i] == lt[i-1]`, then it must be the case that `by(tempi[i]) == false`
+    # Otherwise, if `lt[i] == lt[i-1]`, then it must be the case that `by(temp[i]) == false`
     # and the correct index at which to store `temp[i]` is `gt[i]`.
     executor(eachindex(x, gt, lt, temp), 1024) do i
         a = lt[i]

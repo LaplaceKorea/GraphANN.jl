@@ -46,36 +46,36 @@ const diskann_query_ids = joinpath(diskann_dir, "diskann_query_ids.jls")
 const sptag_index = joinpath(sptag_dir, "siftsmall", "graph.bin")
 const sptag_tree = joinpath(sptag_dir, "siftsmall", "tree.bin")
 
-# # Base
-# include("base/pm.jl")
-# include("base/utils.jl")
-# include("base/threading.jl")
-# include("base/minmax_heap.jl")
-# include("base/euclidean.jl")
-# include("base/partition.jl")
-#
-# # Graphs
-# include("graphs/adjacency.jl")
-# include("graphs/graphs.jl")
-#
-# # Trees
-# include("trees/trees.jl")
-#
-# # Clustering
-# include("clustering/kmeans.jl")
-#
-# # Prefetch
-# include("prefetch/queue.jl")
-# include("prefetch/prefetch.jl")
-#
-# # Algorithms
-# include("algorithms/exhaustive.jl")
-# include("algorithms/diskann.jl")
-# include("algorithms/sptag/bktree.jl")
-# include("algorithms/sptag/tptree.jl")
+# Base
+include("base/pm.jl")
+include("base/utils.jl")
+include("base/threading.jl")
+include("base/minmax_heap.jl")
+include("base/euclidean.jl")
+include("base/partition.jl")
+
+# Graphs
+include("graphs/adjacency.jl")
+include("graphs/graphs.jl")
+
+# Trees
+include("trees/trees.jl")
+
+# Clustering
+include("clustering/kmeans.jl")
+
+# Prefetch
+include("prefetch/queue.jl")
+include("prefetch/prefetch.jl")
+
+# Algorithms
+include("algorithms/exhaustive.jl")
+include("algorithms/diskann.jl")
+include("algorithms/sptag/bktree.jl")
+include("algorithms/sptag/tptree.jl")
 include("algorithms/sptag.jl")
 
-# # IO
-# include("io/vecs.jl")
-# include("io/sptag.jl")
+# IO
+include("io/vecs.jl")
+include("io/sptag.jl")
 

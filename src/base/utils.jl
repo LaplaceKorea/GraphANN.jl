@@ -12,7 +12,8 @@ typemax!(x) = fill!(x, typemax(eltype(x)))
 cdiv(a::Integer, b::Integer) = cdiv(promote(a, b)...)
 cdiv(a::T, b::T) where {T <: Integer} = one(T) + div(a - one(T), b)
 
-toeltype(::Type{T}, x::AbstractArray{<:AbstractArray}) where {T} = map(i -> Float32.(i), x)
+toeltype(::Type{T}, x::AbstractArray) where {T} = map(i -> convert(T, i), x)
+toeltype(::Type{T}, x::AbstractArray{<:AbstractArray}) where {T} = map(i -> toeltype(T, i), x)
 
 #####
 ##### Neighbor
@@ -21,8 +22,8 @@ toeltype(::Type{T}, x::AbstractArray{<:AbstractArray}) where {T} = map(i -> Floa
 # NOTE: Don't define conversion functions like:
 # `convert(Neighbor{Float32}, ::Neighbor{Int32})`.
 # If this function gets called, it means some data structure wasn't initialized right.
-# We don't want to find this because we don't want this kind of implicit conversion to
-# happen since it will usually result in less than optimal code.
+# We don't want this kind of implicit conversion to happen since it will usually result in
+# less than optimal code.
 
 """
     Neighbor

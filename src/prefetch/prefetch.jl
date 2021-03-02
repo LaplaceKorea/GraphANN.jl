@@ -28,7 +28,7 @@ Base.getindex(A::PrefetchedMeta, i...) = getindex(A.meta, i...)
 
 function start(A::PrefetchedMeta; kw...)
     if isrunning(A.prefetcher)
-        printstyled("Not relaunching prefetcher.\n"; color = :green, bold = true)
+        printlnstyled("Not relaunching prefetcher."; color = :green, bold = true)
     else
         start(A.prefetcher, MetaGraph(A.graph, A.data); kw...)
     end
@@ -194,10 +194,10 @@ end
 isrunning(p::Prefetcher) = (p.tasks !== nothing)
 getqueue(p::Prefetcher) = getqueue(p.staging)
 function stop!(p::Prefetcher)
-    printstyled("Sending Stop Signals\n"; color = :yellow, bold = true)
+    printlnstyled("Sending Stop Signals"; color = :yellow, bold = true)
     foreach(i -> i[] = true, values(p.stop_signals))
     wait(values(p.tasks))
-    printstyled("Tasks Halted\n"; color = :green, bold = true)
+    printlnstyled("Tasks Halted"; color = :green, bold = true)
     reset!(p)
     p.tasks = nothing
 end
