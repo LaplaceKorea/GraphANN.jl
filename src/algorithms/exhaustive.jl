@@ -29,8 +29,9 @@ function exhaustive_search(
     queries::AbstractVector{A},
     dataset::AbstractVector{B},
     num_neighbors::Integer = 100;
+    metric = Euclidean(),
     idtype::Type{I} = UInt32,
-    costtype::Type{D} = costtype(A, B),
+    costtype::Type{D} = costtype(metric, A, B),
     executor = dynamic_thread,
     groupsize = 32,
     kw...
@@ -43,7 +44,7 @@ function exhaustive_search(
         costtype = D,
         max_groupsize = groupsize,
     )
-    search!(runner, queries, dataset; groupsize, kw...)
+    search!(runner, queries, dataset; groupsize, metric, kw...)
     return runner.groundtruth
 end
 

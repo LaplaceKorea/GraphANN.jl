@@ -4,3 +4,4 @@ tags
 *.index
 data/
 *.csv
+docs/build

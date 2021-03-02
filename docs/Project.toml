@@ -1,0 +1,3 @@
+[deps]
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+GraphANN = "5872dce2-8fd9-43bc-a233-bfc73aada20d"

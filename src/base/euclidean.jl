@@ -151,16 +151,6 @@ accum_type(::Type{T}) where {T <: SIMD.Vec} = T
 accum_type(::Type{SIMD.Vec{32, Int16}}) = SIMD.Vec{16,Int32}
 
 """
-    costtype(x)
-
-Return the type yielded by distance computations involving `x`.
-"""
-costtype(::Type{T}) where {T <: SIMDType} = eltype(accum_type(simd_type(T)))
-function costtype(::Type{A}, ::Type{B}) where {A <: SIMDType, B <: SIMDType}
-    return eltype(accum_type(simd_type(A, B)))
-end
-
-"""
     simd_type(vector_type1, vector_type2)
 
 Return the SIMD vector type (`SIMD.Vec`) to perform distance computations for the given types.

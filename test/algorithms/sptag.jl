@@ -41,7 +41,7 @@ approx_or_greater(x, y) = (x ≈ y) || (x > y)
     graph = GraphANN._IO.load_graph(GraphANN._IO.SPTAG(), sptag_index)
 
     meta = GraphANN.MetaGraph(graph, data)
-    algo = GraphANN.Algorithms.TagSearch(1; costtype = GraphANN.costtype(data))
+    algo = GraphANN.Algorithms.TagSearch(1; costtype = GraphANN.costtype(GraphANN.Euclidean(), data))
 
     for (i, comparison) in enumerate(comparisons)
         # Dividing the maximum check number by 64 is how the SPTAG code derives their

@@ -31,7 +31,7 @@ export evaluate, search, searchall
 """
     evaluate(metric, x, y)
 
-Return the distance between points `x` and `y`.
+Return the distance with respect to `metric` between points `x` and `y`.
 """
 function evaluate end
 

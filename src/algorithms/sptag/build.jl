@@ -24,7 +24,7 @@ function build_by_trees!(
     metric = Euclidean(),
 ) where {I, T}
     @unpack num_trees, tree_leaf_size, target_degree, single_thread_threshold = params
-    D = costtype(T)
+    D = costtype(metric, T)
 
     # Preallocate utility for accelerating the partitioning phase
     permutation = collect(I(1):I(lastindex(data)))
@@ -155,7 +155,7 @@ function refine!(
     metric = Euclidean(),
 ) where {T}
     @unpack target_degree, refine_history, refine_iterations, refine_batchsize = params
-    D = costtype(T)
+    D = costtype(metric, T)
 
     # Datastructure pre-allocation.
     tls = ThreadLocal(;

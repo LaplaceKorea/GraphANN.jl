@@ -115,8 +115,9 @@ end
     @inferred simd_type(SVector{4, Float32}, SVector{4, Float32})
 
     # Neighbor Types
-    @test GraphANN.costtype(F32, U8) == Float32
-    @test GraphANN.costtype(U8, U8) == Int32
+    E = GraphANN.Euclidean()
+    @test GraphANN.costtype(E, F32, U8) == Float32
+    @test GraphANN.costtype(E, U8, U8) == Int32
 end
 
 @testset "Testing Euclidean Calculations" begin

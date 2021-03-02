@@ -366,6 +366,7 @@ function generate_index(
     graph_type = DefaultAdjacencyList{UInt32},
     no_progress = false,
     graph::Union{Nothing, LightGraphs.AbstractGraph} = nothing,
+    metric = Euclidean(),
 )
     @unpack window_size, target_degree, prune_threshold_degree = parameters
 
@@ -389,8 +390,8 @@ function generate_index(
 
     meta = MetaGraph(graph, data)
     tls = ThreadLocal(;
-        greedy = GreedySearch(window_size; idtype = eltype(graph), costtype = costtype(data)),
-        pruner = Pruner{Neighbor{eltype(graph),costtype(data)}}(),
+        greedy = GreedySearch(window_size; idtype = eltype(graph), costtype = costtype(metric, data)),
+        pruner = Pruner{Neighbor{eltype(graph), costtype(metric, data)}}(),
         nextlists = NextListBuffer{eltype(graph)}(
             target_degree,
             2 * ceil(Int, batchsize / Threads.nthreads()),

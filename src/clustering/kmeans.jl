@@ -28,7 +28,7 @@ function KMeansRunner(
     data::AbstractVector{SVector{N,T}},
     executor::F = dynamic_thread
 ) where {N, T, F}
-    D = costtype(SVector{N,T}, SVector{N,Float32})
+    D = costtype(Euclidean(), SVector{N,T}, SVector{N,Float32})
     centroids = SVector{N,Float32}[]
     lloyds_local = _lloyds_local(executor, D, Val(N))
     return KMeansRunner(lloyds_local, centroids, executor)

@@ -48,11 +48,14 @@ idtype(::Type{T}) where {T} = T
 idtype(::T) where {T} = idtype(T)
 
 # For convenience, define two-arg and one-arg versions to allow for promotion.
-costtype(::Type{A}) where {A} = A
-costtype(::Type{A}, ::Type{B}) where {A, B} = promote_type(A, B)
-costtype(::A) where {A} = costtype(A)
-costtype(::A, ::B) where {A, B} = costtype(A, B)
-costtype(::AbstractVector{T}) where {T} = costtype(T)
+function costtype(::Metric, ::Type{A}, ::Type{B}) where {Metric, A, B}
+    return Base.promote_op(evaluate, Metric, A, B)
+end
+
+costtype(metric, ::Type{A}) where {A} = costtype(metric, A, A)
+costtype(metric, ::A) where {A} = costtype(metric, A, A)
+costtype(metric, ::A, ::B) where {A, B} = costtype(metric, A, B)
+costtype(metric, ::AbstractVector{T}) where {T} = costtype(metric, T, T)
 
 # Define `getid` for integers as well so we can use `getid` in all places where we need
 # an id without fear.

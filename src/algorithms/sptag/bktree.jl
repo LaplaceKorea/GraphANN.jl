@@ -9,12 +9,13 @@ shrink!(a::AbstractUnitRange{T}, amount::Integer) where {T} = first(a):(last(a) 
 
 function build_bktree(
     data::AbstractVector{SVector{N,T}};
+    metric = Euclidean(),
     fanout = 8,
     leafsize = 32,
     stacksplit = 10000,
     idtype::Type{I} = UInt32,
 ) where {N,T,I}
-    D = costtype(SVector{N,T})
+    D = costtype(metric, SVector{N,T})
 
     # This serves as a permutation of the indices into the data vector, allowing us to
     # shuffle data around without touching the original vector.
