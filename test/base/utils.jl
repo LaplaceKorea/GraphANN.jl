@@ -80,17 +80,6 @@ end
     @test GraphANN.idtype(UInt32) == UInt32
     @test GraphANN.idtype(UInt32(100)) == UInt32
 
-    # E = GraphANN.Euclidean()
-    # @test GraphANN.costtype(E, Float32) == Float32
-    # @test GraphANN.costtype(E, Float64(1.0)) == Float64
-    # @test GraphANN.costtype(E, UInt8, Int16) == Int16
-    # @test GraphANN.costtype(E, Int64(10), Float32(100)) == Float32
-
-    # # convenience wrapper for arrays
-    # x = [1,2,3]
-    # @test isa(x, Vector{Int64})
-    # @test GraphANN.costtype(E, x) == Int64
-
     a = Neighbor{Int64}(1, 1.0)
     b = Neighbor{Int64}(1, 2.0)
     @test GraphANN.getid(a) == 1
@@ -234,24 +223,24 @@ end
     ordering = Base.Order.By(last)
 
     @testset "Constructing Heap" begin
-        x = GraphANN.BoundedHeap{Int64}(Base.ForwardOrdering(), 10)
+        x = GraphANN.Keeper{Int64}(Base.ForwardOrdering(), 10)
         @test length(x) == 0
         @test !GraphANN._Base.isfull(x)
         @test GraphANN._Base.getbound(x) == 10
 
-        x = GraphANN.BoundedHeap{Int64}(Base.ReverseOrdering(), 10)
+        x = GraphANN.Keeper{Int64}(Base.ReverseOrdering(), 10)
         @test length(x) == 0
         @test !GraphANN._Base.isfull(x)
         @test GraphANN._Base.getbound(x) == 10
     end
 
     @testset "Type Aliases" begin
-        @test isa(GraphANN.BoundedMaxHeap{Int64}(10), GraphANN.BoundedMaxHeap{Int64})
-        @test isa(GraphANN.BoundedMinHeap{Int64}(10), GraphANN.BoundedMinHeap{Int64})
+        @test isa(GraphANN.KeepSmallest{Int64}(10), GraphANN.KeepSmallest{Int64})
+        @test isa(GraphANN.KeepLargest{Int64}(10), GraphANN.KeepLargest{Int64})
     end
 
-    @testset "Test BoundedMinHeap" begin
-        x = GraphANN.BoundedMinHeap{Int64}(5)
+    @testset "Test KeepLargest" begin
+        x = GraphANN.KeepLargest{Int64}(5)
         @test length(x) == 0
         @test GraphANN._Base.getbound(x) == 5
         for v in vs
@@ -271,8 +260,8 @@ end
         @test length(x) == 0
     end
 
-    @testset "Test BoundedMaxHeap" begin
-        x = GraphANN.BoundedMaxHeap{Int64}(5)
+    @testset "Test KeepSmallest" begin
+        x = GraphANN.KeepSmallest{Int64}(5)
         @test length(x) == 0
         @test GraphANN._Base.getbound(x) == 5
         for v in vs
@@ -293,7 +282,7 @@ end
     end
 
     @testset "Test Custom Ordering" begin
-        x = GraphANN.BoundedHeap{Tuple{Int,Int}}(ordering, 5)
+        x = GraphANN.Keeper{Tuple{Int,Int}}(ordering, 5)
         for v in vs2
             push!(x, v)
         end

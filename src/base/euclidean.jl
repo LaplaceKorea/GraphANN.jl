@@ -1,4 +1,9 @@
 # Singleton to dispatch to optimized square euclidean distance computations.
+"""
+    Euclidean()
+
+When passed to [`evaluate`](@ref), return the square Euclidean distance between two points.
+"""
 struct Euclidean end
 
 #####
@@ -172,7 +177,7 @@ simd_type(::Type{T}) where {T} = simd_type(T, T)
     evaluate(::Euclidean, a::SVector, b::SVector)
 
 Return the euclidean distance between `a` and `b`.
-Return type can be queried by `costtype(a, b)`.
+Return type can be queried by `costtype(Euclidean(), a, b)`.
 """
 function evaluate(metric::Euclidean, a::A, b::B) where {A <: SVector, B <: SVector}
     Base.@_inline_meta

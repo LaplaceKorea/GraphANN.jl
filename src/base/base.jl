@@ -65,6 +65,23 @@ function searchall end
 #####
 
 export stdallocator, pmallocator
+
+"""
+    stdallocator
+
+Singleton type that is the default implementation for allocators.
+When invoked, simply constructs an uninitialized standard Julia array.
+
+# Example
+```julia
+julia> allocator = GraphANN.stdallocator;
+
+julia> A = allocator(Int64, 2, 2)
+2×2 Matrix{Int64}:
+ 140142604452944  140142596721280
+ 140142601319472  140142596702544
+```
+"""
 stdallocator(::Type{T}, dims...) where {T} = Array{T}(undef, dims...)
 include("pm.jl")
 
@@ -94,7 +111,7 @@ export zeroas, medioid, nearest_neighbor
 export recall
 export prefetch, prefetch_llc, unsafe_prefetch
 export BatchedRange, batched
-export BoundedHeap, BoundedMinHeap, BoundedMaxHeap
+export Keeper, KeepLargest, KeepSmallest
 include("utils.jl")
 
 #####

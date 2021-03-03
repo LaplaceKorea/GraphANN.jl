@@ -48,6 +48,22 @@ idtype(::Type{T}) where {T} = T
 idtype(::T) where {T} = idtype(T)
 
 # For convenience, define two-arg and one-arg versions to allow for promotion.
+#
+# N.B. This relies on Julia's type inference mechanism to determine the return type of
+# calling `evaluate`.
+#
+# Relying on inference is generally discouraged, so tread lightly.
+"""
+    costtype(metric, type1, type2)
+
+Return the result type of applying evaluating `metric` on the two types.
+
+# Example
+```julia
+julia> GraphANN.costtype(GraphANN.Euclidean(), GraphANN.SVector{32,UInt8}, GraphANN.SVector{32,UInt8})
+Int32
+```
+"""
 function costtype(::Metric, ::Type{A}, ::Type{B}) where {Metric, A, B}
     return Base.promote_op(evaluate, Metric, A, B)
 end
@@ -105,6 +121,16 @@ Base.iterate(set::RobinSet, s) = iterate(keys(set.dict), s)
 ##### Nearest Neighbor
 #####
 
+"""
+    nearest_neighbor(query, dataset; [metric])
+
+Return the brute-force nearest neighbor to `query` in `dataset`.
+Takes an arbitrary `metric`.
+
+!!! warning
+
+    Function is multithreaded. Do not call with multiple threads.
+"""
 function nearest_neighbor(query::T, data::AbstractVector; metric = Euclidean()) where {T}
     # Thread local storage is a NamedTuple with the following fields:
     # `min_ind` - The index of the nearest neighbor seen by this thread so far.
@@ -132,8 +158,18 @@ end
 ##### Medoid
 #####
 
+"""
+    medioid(dataset) -> Int64
+
+Return the index of the element in `dataset` that is nearest to the true `medioid` of the
+dataset.
+
+The `medioid` is defined as the element-wise mean of all items in the dataset.
+"""
 function medioid(data::Vector{SVector{N,T}}) where {N,T}
     # Thread to make fast for larger datasets.
+    # Also, use floating-point for accumulation to avoid overflow errors.
+    # It's not perfect, but probably okay.
     tls = ThreadLocal(zero(SVector{N,Float32}))
     dynamic_thread(data, 1024) do i
         tls[] += i
@@ -158,6 +194,17 @@ end
 
 # Convenience function if we have more ground-truth vectors than results.
 # Truncates `groundtruth` to have as many neighbors as `results`.
+"""
+    recall(groundtruth::AbstractMatrix, ids::AbstractMatrix) -> Float64
+
+Return the average `N` recall@`N` where `N = size(ids, 1)`.
+
+Expects `groundtruth` and `ids` to be integer matrices with nearest neighbor indices
+grouped along columns. For example, `groundtruth[1:5, 10]` returns the sorted 5 nearest
+neighbors for query 10 (whatever that may be).
+
+Note - it's okay for `size(groundtruth, 1) >= size(groundtruth, 2)`.
+"""
 function recall(groundtruth::AbstractMatrix, results::AbstractMatrix)
     @assert size(groundtruth, 1) >= size(results, 1)
     @assert size(groundtruth, 2) == size(results, 2)
@@ -267,7 +314,39 @@ struct BatchedRange{T <: AbstractRange}
 end
 
 Base.length(x::BatchedRange) = ceil(Int, length(x.range) / x.batchsize)
+Base.lastindex(x::BatchedRange) = length(x)
 
+Base.eltype(x::BatchedRange{T}) where {T} = _replace_oneto(T)
+_replace_oneto(::Type{T}) where {T <: AbstractRange} = T
+_replace_oneto(::Type{Base.OneTo{I}}) where {I} = UnitRange{I}
+
+"""
+    batched(range::AbstractRange, batchsize) -> itr
+
+Return an indexable iterator that lazily partitions `range` into subranges with length
+`batchsize`.
+
+# Example
+```julia
+julia> x = 1:10
+1:10
+
+julia> b = GraphANN.batched(x, 3);
+
+julia> collect(b)
+4-element Vector{UnitRange{Int64}}:
+ 1:3
+ 4:6
+ 7:9
+ 10:10
+
+julia> b[2]
+4:6
+
+julia b[end]
+10:10
+```
+"""
 function batched(range::AbstractRange, batchsize::Integer)
     return BatchedRange(range, convert(Int64, batchsize))
 end
@@ -287,30 +366,14 @@ subrange(range::OrdinalRange, start, stop) = range[start]:step(range):range[stop
 subrange(range::AbstractUnitRange, start, stop) = range[start]:range[stop]
 
 #####
-##### Debug Utils
+##### Bounded Heap
 #####
 
-export @ttime
-macro ttime(expr)
-    expr = esc(expr)
-    return quote
-        if Threads.threadid() == 1
-            @time $expr
-        else
-            $expr
-        end
-    end
-end
-
-#####
-##### Bounded Max Heap
-#####
-
-struct BoundedHeap{T, O <: Base.Ordering}
+struct Keeper{T, O <: Base.Ordering}
     heap::DataStructures.BinaryHeap{T,O}
     bound::Int
 
-    function BoundedHeap{T}(ordering::Base.Ordering, bound::Integer) where {T}
+    function Keeper{T}(ordering::Base.Ordering, bound::Integer) where {T}
         # pre-allocate space for the underlying vector.
         vector = Vector{T}(undef, bound + 1)
         empty!(vector)
@@ -319,30 +382,30 @@ struct BoundedHeap{T, O <: Base.Ordering}
     end
 end
 
-const BoundedMinHeap{T} = BoundedHeap{T, Base.ForwardOrdering}
-const BoundedMaxHeap{T} = BoundedHeap{T, Base.ReverseOrdering{Base.ForwardOrdering}}
+const KeepLargest{T} = Keeper{T, Base.ForwardOrdering}
+const KeepSmallest{T} = Keeper{T, Base.ReverseOrdering{Base.ForwardOrdering}}
 
-BoundedMinHeap{T}(bound::Integer) where {T} = BoundedHeap{T}(Base.ForwardOrdering(), bound)
-BoundedMaxHeap{T}(bound::Integer) where {T} = BoundedHeap{T}(Base.ReverseOrdering(), bound)
-isfull(H::BoundedHeap) = length(H) >= H.bound
+KeepLargest{T}(bound::Integer) where {T} = Keeper{T}(Base.ForwardOrdering(), bound)
+KeepSmallest{T}(bound::Integer) where {T} = Keeper{T}(Base.ReverseOrdering(), bound)
+isfull(H::Keeper) = length(H) >= H.bound
 
 # slight type hijacking ...
 # we don't technically "own" valtree.
-Base.empty!(H::BoundedHeap) = empty!(H.heap.valtree)
-Base.isempty(H::BoundedHeap) = isempty(H.heap)
-Base.length(H::BoundedHeap) = length(H.heap)
-Base.first(H::BoundedHeap) = first(H.heap)
-getbound(H::BoundedHeap) = H.bound
-getordering(H::BoundedHeap) = H.heap.ordering
+Base.empty!(H::Keeper) = empty!(H.heap.valtree)
+Base.isempty(H::Keeper) = isempty(H.heap)
+Base.length(H::Keeper) = length(H.heap)
+Base.first(H::Keeper) = first(H.heap)
+getbound(H::Keeper) = H.bound
+getordering(H::Keeper) = H.heap.ordering
 
 """
-    push!(H::BoundedHeap, i)
+    push!(H::Keeper, i)
 
 Add `i` to `H` if (1) `H` is not full or (2) `i` is less than maximal element in `H`.
 After calling `push!`, the length of `H` will be less than or equal to its established
 bound.
 """
-function Base.push!(H::BoundedHeap, i)
+function Base.push!(H::Keeper, i)
     o = getordering(H)
     if (length(H.heap) < H.bound || Base.lt(o, first(H.heap), i))
         push!(H.heap, i)
@@ -356,7 +419,7 @@ function Base.push!(H::BoundedHeap, i)
     return nothing
 end
 
-function destructive_extract!(H::BoundedHeap)
+function destructive_extract!(H::Keeper)
     sort!(
         H.heap.valtree;
         alg = Base.QuickSort,

@@ -56,7 +56,7 @@ julia> GraphANN.evaluate(Sum(), a, a)
 ```
 
 ### Square Euclidean
-The default metric is [`GraphANN.Euclidean`](@ref).
+The default metric is [`GraphANN.Euclidean`](@ref GraphANN._Base.Euclidean).
 Example usage is shown below.
 ```jldoctest
 julia> using GraphANN
@@ -106,14 +106,70 @@ julia> code_native(GraphANN.evaluate, Tuple{GraphANN.Euclidean, GraphANN.SVector
 ```
 Alternative implementations for testing are in `/etc/Alternatives`.
 
+```@docs
+GraphANN.Euclidean
+```
+
 ### `costtype`
 
 To support pre-allocation of data structures, we need to know what the type of the result from `evaluate` will be.
-This is facilitated by the [`GraphANN.costtype`](@ref) function.
-It is called as follows:
-```jldoctest
-julia> using GraphANN
+This is facilitated by the [`GraphANN.costtype`](@ref GraphANN.costtype) function.
+```@docs
+GraphANN.costtype
+```
 
-julia> GraphANN.costtype(GraphANN.Euclidean(), GraphANN.SVector{32,UInt8}, GraphANN.SVector{32,UInt8})
-Int32
+## Persistent Memory and Allocators
+
+Constructors for many data structures take an `allocator` keyword argument.
+An allocator must have the function signature
+```
+allocator(::Type{T}, dims...) -> AbstractArray{T,N}
+```
+where `N = length(dims)`.
+The default allocator is [`GraphANN.stdallocator`](@ref) which simply call's Julia's normal `Array` constructor.
+The other alternative is [`GraphANN.pmallocator`](@ref) which wraps a standard Julia `Array` around a pointer to persistent memory.
+
+```@docs
+GraphANN.stdallocator
+GraphANN.pmallocator
+```
+
+!!! note
+
+    At the moment, the `AbstractArray` returned by the allocator must actually be a native Julia `Array`.
+    If needed, this can be fixed.
+
+## Executors
+
+Executors are essentially functions masquerading as loop constructs that allow portions of code to run either on a single thread or on multiple threads, depending on the executor.
+Many functions throughout the GraphANN codebase will take an `executor` as an optional keyword argument to provide control over loop execution.
+
+In general, executors have the following signature:
+```julia
+executor(f, [threadpool], domain, [blocksize])
+```
+where `f` is the function body to execute and `domain` is an indexable iterators that we want to apply `f` to elementwise.
+In single-threaded execution, arguments `threadpool` and `blocksize` are ignored.
+In the multi-threaded case, `threadpool` defaults to [`GraphANN.allthreads()`](@ref).
+Implemented executors are listed below.
+```@docs
+GraphANN.single_thread
+GraphANN.dynamic_thread
+```
+
+## Threading Utilities
+
+```@docs
+GraphANN._Base.ThreadPool
+GraphANN._Base.allthreads
+GraphANN._Base.TaskHandle
+GraphANN._Base.on_threads
+GraphANN._Base.ThreadLocal
+```
+
+## Partitioning
+
+```@docs
+GraphANN._Base.partition!
+GraphANN._Base.PartitionUtil
 ```

@@ -2,6 +2,9 @@
 ##### Lloyd's Algorithm
 #####
 
+"""
+Pre-allocated storage for performing [`kmeans`](@ref) clustering.
+"""
 struct KMeansRunner{T <: Union{ThreadLocal, NamedTuple}, N, F}
     lloyds_local::T
     centroids::Vector{SVector{N,Float32}}
@@ -24,16 +27,44 @@ function _lloyds_local(::typeof(single_thread), ::Type{D}, ::Val{N}) where {D, N
     )
 end
 
+"""
+    KMeansRunner(data::AbstractVector, [executor], [metric])
+
+Pre-allocate storage for performing [`kmeans`](@ref) clustering on `data`.
+Additional information regarding the `executor` and `metric` may be provided.
+"""
 function KMeansRunner(
     data::AbstractVector{SVector{N,T}},
-    executor::F = dynamic_thread
-) where {N, T, F}
-    D = costtype(Euclidean(), SVector{N,T}, SVector{N,Float32})
+    executor::F = dynamic_thread,
+    metric::M = Euclidean(),
+) where {N, T, F, M}
+    D = costtype(metric, SVector{N,T}, SVector{N,Float32})
     centroids = SVector{N,Float32}[]
     lloyds_local = _lloyds_local(executor, D, Val(N))
     return KMeansRunner(lloyds_local, centroids, executor)
 end
 
+"""
+    kmeans(dataset::AbstractVector, runner::KMeansRunner, num_centroids) -> Vector
+
+Perform kmeans clustering on dataset using a pre-allocated [`KMeansRunner`](@ref).
+Return a vector containing the centroids.
+
+# Example
+```jldoctest
+julia> dataset = GraphANN.sample_dataset();
+
+julia> runner = GraphANN.KMeansRunner(dataset, GraphANN.dynamic_thread, GraphANN.Euclidean());
+
+julia> centroids = GraphANN.kmeans(dataset, runner, 8);
+
+julia> typeof(centroids)
+Vector{StaticArrays.SVector{128, Float32}} (alias for Array{StaticArrays.SArray{Tuple{128}, Float32, 1, 128}, 1})
+
+julia> length(centroids)
+8
+```
+"""
 function kmeans(
     data::AbstractVector{SVector{N,T}},
     runner::KMeansRunner{<:Any,N},
@@ -95,11 +126,12 @@ function lloyds!(
         # First branch - multithreaded case. Reduce into the first thread-local storage.
         if isa(local_storage, ThreadLocal)
             all_tls = getall(local_storage)
-            sums = all_tls[1].sums
-            points_per = all_tls[1].points_per
-            for i in 2:length(all_tls)
-                sums += all_tls[i].sums
-                points_per += all_tls[i].points_per
+
+            sums = first(all_tls).sums
+            points_per = first(all_tls).points_per
+            for _i in Iterators.drop(all_tls, 1)
+                sums += _i.sums
+                points_per += _i.points_per
             end
         # Second branch - single threaded case. No need for reduction, just unpack the
         # NamedTuple.
@@ -129,6 +161,12 @@ function lloyds!(
     end
 end
 
+# At one point in time, I had ambitions of creating an API for this clustering to allow
+# for things like efficient product-quantization clustering by hooking into the correct
+# API points.
+#
+# That didn't end up happening (yet), but that is why some of these inner helper methods
+# are constructed the way they are ...
 reset(::Neighbor{I,D}) where {I,D} = Neighbor{I,D}()
 
 # Simple scalar case, just update in place.

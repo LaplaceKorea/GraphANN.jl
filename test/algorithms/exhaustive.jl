@@ -57,7 +57,7 @@
         # We know that the `num_neighbors` smallest Neighbors will remain at the end, so
         # we can easily test the expected results.
         num_neighbors = 10
-        heap = GraphANN.BoundedMaxHeap{GraphANN.Neighbor{UInt32,Int32}}(num_neighbors)
+        heap = GraphANN.KeepSmallest{GraphANN.Neighbor{UInt32,Int32}}(num_neighbors)
         for i in 20:-1:1
             push!(heap, GraphANN.Neighbor{UInt32,Int32}(i, Int32(i)))
         end
@@ -92,8 +92,8 @@
 
         # finally, test all flavors of `_commit!`
         heaps = [
-            GraphANN.BoundedMaxHeap{GraphANN.Neighbor{UInt64,Float64}}(10),
-            GraphANN.BoundedMaxHeap{GraphANN.Neighbor{UInt64,Float64}}(10),
+            GraphANN.KeepSmallest{GraphANN.Neighbor{UInt64,Float64}}(10),
+            GraphANN.KeepSmallest{GraphANN.Neighbor{UInt64,Float64}}(10),
         ]
         # do the same trick for populating the heaps in such a way that we will know what
         # the actual result will be.
@@ -133,8 +133,8 @@
 
         # _commit! vector mode
         heaps = [
-            GraphANN.BoundedMaxHeap{GraphANN.Neighbor{UInt64,Float64}}(1),
-            GraphANN.BoundedMaxHeap{GraphANN.Neighbor{UInt64,Float64}}(1),
+            GraphANN.KeepSmallest{GraphANN.Neighbor{UInt64,Float64}}(1),
+            GraphANN.KeepSmallest{GraphANN.Neighbor{UInt64,Float64}}(1),
         ]
         populate!(heaps)
         gt = Vector{GraphANN.Neighbor{UInt64,Float64}}(undef, 2)

@@ -2,11 +2,34 @@
 # Use it like `f = pmallocator("path/to/dir")` to construct a function `f` that will
 # have the same signature as the `stdallocator` above.
 struct PMAllocator
-    path::String
+    dir::String
 end
 
-(f::PMAllocator)(type, dims...) = pmmap(type, f.path, dims...; rmfile = true)
-pmallocator(path::AbstractString) = PMAllocator(path)
+(f::PMAllocator)(type, dims...) = pmmap(type, f.dir, dims...; rmfile = true)
+
+"""
+    pmallocator(dir::AbstractString)
+
+Construct an allocator that will when invoked will memory map files in directory `dir`
+to fullfill the allocation.
+
+When `dir` points to a direct access (DAX) file system backed by persistent memory, then
+the memory returned by invoking `pmallocator` will reside in persistent memory.
+
+Memory mapped files will begin with the prefix `graphann_mmap` and will be deleted when
+the corresponding memory is garbage collected.
+
+# Example
+```julia
+julia> allocator = GraphANN.pmallocator(pwd());
+
+julia> A = allocator(Int64, 2, 2)
+2×2 Matrix{Int64}:
+ 0  0
+ 0  0
+```
+"""
+pmallocator(dir::AbstractString) = PMAllocator(dir)
 
 const COUNT = Threads.Atomic{Int}(0)
 mmap_prefix() = "graphann_mmap_"

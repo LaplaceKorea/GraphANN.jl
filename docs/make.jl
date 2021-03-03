@@ -14,6 +14,6 @@ makedocs(;
     ),
     pages=[
         "Home" => "index.md",
-        "Data Representation" => "data_representation.md",
+        "Fundamentals" => "fundamentals.md",
     ],
 )

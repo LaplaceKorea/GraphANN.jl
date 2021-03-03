@@ -2,8 +2,12 @@
 ##### More finegrained thread control
 #####
 
-# Collection of threads for work together.
-# Allow for partitioning of work.
+"""
+    ThreadPool
+
+Collection of thread-ids that can be passed to [`_Base.on_threads`](@ref) to launch
+tasks onto specific threads.
+"""
 struct ThreadPool{T <: AbstractVector{<:Integer}}
     threads::T
 end
@@ -18,7 +22,12 @@ end
 Base.IteratorSize(::ThreadPool) = Base.HasLength()
 Base.iterate(t::ThreadPool, s...) = iterate(t.threads, s...)
 
-# `allthreads()` returns a ThreadPool for (believe it or not) all threads!
+"""
+    allthreads()
+
+Return a [`_Base.ThreadPool`](@ref) containing all valid thread-ids for the current
+Julia session.
+"""
 allthreads() = ThreadPool(Base.OneTo(Threads.nthreads()))
 
 # Ref:
@@ -34,17 +43,26 @@ end
 
 # If launching non-blocking tasks, it's helpful to be able to retrieve the tasks in case
 # an error happens.
-#
-# Thus, we make `on_threads` return an `OnThreads` instances that wraps all the launched
-# tasks.
-#
-# This allows us to wait on the tasks and potentially catch errors.
+"""
+    TaskHandle
+
+Reference to a group of tasks launched by [`_Base.on_threads`](@ref).
+Can pass to `Base.wait` to block execution until all tasks have completed.
+"""
 struct TaskHandle
     tasks::Vector{Task}
 end
 Base.wait(t::TaskHandle) = foreach(Base.wait, t.tasks)
 Base.length(t::TaskHandle) = length(t.tasks)
 
+"""
+    on_threads(f, threadpool::ThreadPool, [wait = true]) -> TaskHandle
+
+Launch a task for function `f` for each thread in `threadpool`.
+Return a [`TaskHandle`](@ref) for the launched tasks.
+
+If `wait = true`, then execution is blocked until all launched tasks complete.
+"""
 function on_threads(
     func::F,
     pool::ThreadPool,
@@ -64,16 +82,53 @@ end
 ##### Dynamic
 #####
 
+"""
+    single_thread(f, domain)
+
+Apply `f` to each element in `domain` using a single thread.
+
+# Example
+```julia
+julia> x = [1,2,3]
+
+julia> GraphANN.single_thread(println, x)
+1
+2
+3
+```
+"""
 single_thread(f::F, domain, args...) where {F} = foreach(f, domain)
 single_thread(f::F, ::ThreadPool, domain, args...) where {F} = single_thread(f, domain)
 
-# Default to using all threads
-dynamic_thread(f::F, args...) where {F} = dynamic_thread(f, allthreads(), args...)
+"""
+    dynamic_thread(f, [threadpool], domain, [worksize])
 
-# Julia doesn't implement dynamic threading yet ...
-# So we have to do it on our own.
-#
-# Fortunately, it's quite easy!
+Apply `f` to each element of `domain` using dynamic load balancing among the threads in
+`threadpool`. If `threadpool` is not given, it defaults to [`_Base.allthreads()`](@ref).
+No guarentees are made about the order of execution.
+
+Optional argument `worksize` controls the granularity of the load balancing.
+
+# Example
+```julia
+julia> lock = ReentrantLock();
+
+julia> GraphANN.dynamic_thread(1:10) do i
+    Base.@lock lock println(i)
+end
+1
+5
+6
+7
+8
+9
+10
+4
+3
+2
+```
+"""
+dynamic_thread(f::F, args...) where {F} = dynamic_thread(f, allthreads(), args...)
 function dynamic_thread(f::F, pool::ThreadPool, domain, worksize = 1) where {F}
     count = Threads.Atomic{Int}(1)
     len = length(domain)
@@ -104,9 +159,17 @@ end
 # (i.e., the syntax [])
 
 # Thread local storage.
+"""
+    ThreadLocal{T,U}
+
+Create an instance of type `T` for each thread in a `ThreadPool{U}`.
+"""
 struct ThreadLocal{T,U}
-    # When used on conjunction with a ThreadPool, we need to make this a dictionary
-    # because we aren't guarenteed that thread id's start at 1.
+    # When used on conjunction with a ThreadPool, we need a dictionary to translate from
+    # thread id to index because we aren't guarenteed that thread id's start at 1.
+    #
+    # However, in the case where the `ThreadPool` wraps a `Base.OneTo`, we can elide the
+    # dictionary check.
     values::Vector{T}
     pool::ThreadPool{U}
     translation::Dict{Int64,Int64}
@@ -125,7 +188,6 @@ struct ThreadLocal{T,U}
         return new{T,U}(values, pool, translation)
     end
 end
-param(::ThreadLocal{T}) where {T} = T
 
 # Many algorithms are designed to either take thread local of some struct for storage when
 # using a multi-threaded implementation, or just the simple data structure itself if

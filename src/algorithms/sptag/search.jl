@@ -23,7 +23,7 @@ _Base.getid(x::Neighbor{<:TreeNode}) = getid(getnode(x))
 struct TagSearch{I, D, V <: AbstractSet}
     tree_queue::DataStructures.BinaryMinHeap{Neighbor{TreeNode{I}, D}}
     graph_queue::DataStructures.BinaryMinHeap{Neighbor{I, D}}
-    results::BoundedMaxHeap{Neighbor{I, D}}
+    results::KeepSmallest{Neighbor{I, D}}
     visited::V
 end
 
@@ -34,7 +34,7 @@ function TagSearch(
 ) where {I,D}
     tree_queue = DataStructures.BinaryMinHeap{Neighbor{TreeNode{I}, D}}()
     graph_queue = DataStructures.BinaryMinHeap{Neighbor{I, D}}()
-    results = BoundedMaxHeap{Neighbor{I,D}}(heapsize)
+    results = KeepSmallest{Neighbor{I,D}}(heapsize)
     visited = RobinSet{I}()
     return TagSearch(tree_queue, graph_queue, results, visited)
 end

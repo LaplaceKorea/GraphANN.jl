@@ -75,7 +75,7 @@ function ExhaustiveRunner(
     end
 
     # Create thread local storage.
-    heaps = [BoundedMaxHeap{Neighbor{inttype(ID),D}}(_num_neighbors(num_neighbors)) for _ in 1:max_groupsize]
+    heaps = [KeepSmallest{Neighbor{inttype(ID),D}}(_num_neighbors(num_neighbors)) for _ in 1:max_groupsize]
     exhaustive_local = threadlocal_wrap(executor, heaps)
     return ExhaustiveRunner(groundtruth, exhaustive_local, executor)
 end
@@ -149,7 +149,7 @@ end
 
 # Define there to help out inference in the "exhaustive_search!" closure.
 Base.@propagate_inbounds function _nearest_neighbors!(
-    heaps::AbstractVector{BoundedMaxHeap{T}},
+    heaps::AbstractVector{KeepSmallest{T}},
     dataset::AbstractVector,
     queries::AbstractVector,
     range,
