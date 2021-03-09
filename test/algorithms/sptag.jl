@@ -15,7 +15,6 @@ end
 SPTAGComparison(x::Tuple) = SPTAGComparison(x...)
 approx_or_greater(x, y) = (x ≈ y) || (x > y)
 
-
 @testset "Query Comparision" begin
     comparisons = SPTAGComparison.([
         (10,  0.7),

@@ -3,6 +3,26 @@
     Euclidean()
 
 When passed to [`evaluate`](@ref), return the square Euclidean distance between two points.
+
+# Example
+```jldoctest
+julia> a = ones(GraphANN.SVector{4,Float32})
+4-element StaticArrays.SVector{4, Float32} with indices SOneTo(4):
+ 1.0
+ 1.0
+ 1.0
+ 1.0
+
+julia> b = 2 * a
+4-element StaticArrays.SVector{4, Float32} with indices SOneTo(4):
+ 2.0
+ 2.0
+ 2.0
+ 2.0
+
+julia> GraphANN.evaluate(GraphANN.Euclidean(), a, b)
+4.0f0
+```
 """
 struct Euclidean end
 
@@ -195,7 +215,9 @@ function evaluate(::Euclidean, a::EagerWrap{V,K}, b::EagerWrap{V,K}) where {V, K
     return _sum(s)
 end
 
-# The generic "sum" function in SIMD.jl is actually really slow.
+# The generic "sum" function in SIMD.jl is actually really slow - probably because it has
+# better numeric stability or something?
+#
 # Here, we define our own generic reducing sum function which actually ends up being much
 # faster ...
 function _sum(x::SIMD.Vec{N,T}) where {N,T}

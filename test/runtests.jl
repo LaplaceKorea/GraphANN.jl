@@ -2,6 +2,7 @@ using GraphANN
 using Test
 
 # Extra stdlib imports
+using CRC32c    # for checking file checksums
 using Random
 using Serialization
 using Statistics
@@ -42,6 +43,10 @@ const groundtruth_path = joinpath(vecs_dir, "siftsmall_groundtruth.ivecs")
 const diskann_index = joinpath(diskann_dir, "siftsmall_base_20_20_1.2.index")
 const diskann_query_ids = joinpath(diskann_dir, "diskann_query_ids.jls")
 
+# Sift small dataset that was converted to binary by the DiskANN code
+# Keep this so we can compare our "save_bin" function.
+const diskann_query_bin = joinpath(diskann_dir, "siftsmall_query.bin")
+
 # SPTAG generated files
 const sptag_index = joinpath(sptag_dir, "siftsmall", "graph.bin")
 const sptag_tree = joinpath(sptag_dir, "siftsmall", "tree.bin")
@@ -77,5 +82,6 @@ include("algorithms/sptag.jl")
 
 # IO
 include("io/vecs.jl")
+include("io/diskann.jl")
 include("io/sptag.jl")
 

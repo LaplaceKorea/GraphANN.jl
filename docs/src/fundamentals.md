@@ -167,9 +167,3 @@ GraphANN._Base.on_threads
 GraphANN._Base.ThreadLocal
 ```
 
-## Partitioning
-
-```@docs
-GraphANN._Base.partition!
-GraphANN._Base.PartitionUtil
-```

@@ -135,8 +135,7 @@ function _Base.search(
     initial_pivots = 50,
     dynamic_pivots = 4,
     metric = Euclidean(),
-    early_exit =
-    always_false,
+    early_exit = always_false,
 )
     @unpack graph, data = meta
     init!(algo, tree, data, query; metric = metric)

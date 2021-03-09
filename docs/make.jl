@@ -6,7 +6,7 @@ DocMeta.setdocmeta!(GraphANN, :DocTestSetup, :(using GraphANN); recursive=true)
 makedocs(;
     modules=[GraphANN],
     authors="Hildebrand, Mark <mark.hildebrand@intel.com> and contributors",
-    repo="https://github.com/hildebrandmw/GraphANN.jl/blob/{commit}{path}#{line}",
+    repo="https://gitlab.devtools.intel.com/stg-ai-sw-team/GraphANN.jl/-/blob/{commit}{path}#{line}",
     sitename="GraphANN.jl",
     format=Documenter.HTML(;
         prettyurls=get(ENV, "CI", "false") == "true",
@@ -14,6 +14,15 @@ makedocs(;
     ),
     pages=[
         "Home" => "index.md",
-        "Fundamentals" => "fundamentals.md",
+        "Algorithms" => [
+            "Exhaustive" => "exhaustive.md",
+            "DiskANN" => "diskann.md",
+        ],
+        "Saving and Loading" => "io.md",
+        "Internals" => [
+            "Fundamentals" => "fundamentals.md",
+            "Graphs" => "graphs.md",
+            "Utilities" => "utilities.md",
+        ],
     ],
 )

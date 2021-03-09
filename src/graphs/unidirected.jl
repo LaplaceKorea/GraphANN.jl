@@ -11,7 +11,91 @@
 # 2. We add some convenience methods for destroying and quickly modifying adjacency lists
 # that is helpful for some parts of the indexing algorithm.
 
-# Is this an AbstractSimpleGraph or just an AbstractGraph?
+"""
+A directed graph that only stores the out-neighbors of each vertex.
+Implements the [`AbststractGraph`](https://juliagraphs.org/LightGraphs.jl/latest/types/#AbstractGraph-Type)
+interface.
+
+In addition to the AbstractGraph interface, this type also implements
+[`copyto!`](@ref Base.copyto!(::UniDirectedGraph, ::Integer, ::AbstractVector)) for fast
+adjacency list updates.
+
+## Adjacency List Choices
+
+The `UniDirectedGraph` offers several choises for its adjacency list representation that
+offer trade-offs in space efficiency, flexibility, and ease of allocation.
+These choices are:
+
+* [`DefaultAdjacencyList`](@ref): Maximum flexibility, good speed, no allocation choice.
+* [`FlatAdjacencyList`](@ref): Moderate flexibility, high speed, easy allocation choice.
+* [`DenseAdjacencyList`](@ref): Little fliexbility (no mutation), good speed, easy
+    allocation choice.
+
+## Simple Constructors
+
+    UniDirectedGraph{T}([nv::Integer])
+
+Construct an empty graph with vertex type `T` and `nv` vertices.
+
+```jldoctest
+julia> import LightGraphs
+
+julia> graph = GraphANN.UniDirectedGraph{UInt32}(5)
+{5, 0} directed simple UInt32 graph
+
+julia> LightGraphs.add_edge!(graph, 1, 2)
+1
+
+julia> LightGraphs.add_vertex!(graph)
+6
+
+julia> LightGraphs.add_edge!(graph, 6, 4)
+1
+
+julia> collect(LightGraphs.edges(graph))
+2-element Vector{LightGraphs.SimpleGraphs.SimpleEdge{UInt32}}:
+ Edge 1 => 2
+ Edge 6 => 4
+```
+
+## Flat Constructor
+
+    UniDirectedGraph{T, FlatAdjacencyList}(nv, ne; [allocator])
+
+Construct an empty graph with `nv` vertices backed by a [`FlatAdjacencyList`](@ref) that
+can store a maximum of `ne` out neighbors per vertex.
+
+```jldoctest
+julia> import LightGraphs
+
+julia> graph = GraphANN.UniDirectedGraph{UInt32, GraphANN.FlatAdjacencyList{UInt32}}(5, 2)
+{5, 0} directed simple UInt32 graph
+
+julia> LightGraphs.add_edge!(graph, 1, 2)
+0x00000001
+
+julia> LightGraphs.add_edge!(graph, 1, 3)
+0x00000002
+
+julia> LightGraphs.add_edge!(graph, 1, 4)
+0x00000002
+
+julia> graph # By construction, only a maximum of 2 neighbors per vertex
+{5, 2} directed simple UInt32 graph
+
+julia> collect(LightGraphs.edges(graph))
+2-element Vector{LightGraphs.SimpleGraphs.SimpleEdge{UInt32}}:
+ Edge 1 => 2
+ Edge 1 => 3
+
+julia> LightGraphs.add_vertex!(graph) # Cannot add vertices using this adjacency list
+ERROR: Cannot yet push to a FlatAdjacencyList!
+[...]
+```
+
+**Note**: Since this type only stores the out-neighbors, querying in-neighbors, while
+supported, is quite slow.
+"""
 struct UniDirectedGraph{
     T <: Integer,
     A <: AbstractAdjacencyList{T}
@@ -131,5 +215,11 @@ Base.empty!(g::UniDirectedGraph, v) = empty!(fadj(g), v)
 # NOTE: We don't expect `A` to be sorted.
 # In fact, it should probably NOT be sorted in order to ensure that the nearest-distance
 # neighbors actually occur in the resulting adjacency list.
-Base.copyto!(g::UniDirectedGraph, v, A::AbstractArray) = copyto!(fadj(g), v, A)
+"""
+    copyto!(g::UniDirectedGraph, v::Integer, A::AbstractVector)
+
+Efficiently replace the out neighbors of `v` with the contents of `A`.
+**Warning**: Vector `A` **may** be mutated as a side-effect of calling this function.
+"""
+Base.copyto!(g::UniDirectedGraph, v, A::AbstractVector) = copyto!(fadj(g), v, A)
 

@@ -192,7 +192,7 @@ end
 # Many algorithms are designed to either take thread local of some struct for storage when
 # using a multi-threaded implementation, or just the simple data structure itself if
 # performing single threaded operation.
-const MaybeThreadLocal{T} = Union{T, <:ThreadLocal{T}}
+const MaybeThreadLocal{T} = Union{T, ThreadLocal{<:T}}
 
 # Convenience, wrap around a NamedTuple
 # Need to define a few methods to get around ambiguities.
@@ -224,7 +224,8 @@ end
 
 getall(t::ThreadLocal) = t.values
 # Often, a `NamedTuple` can be passed to routines instead of a `ThreadLocal` if the routine
-# is using a single thread.
+# is using a single thread. Wrap that tuple inside of another tuple so iteration works
+# as expected.
 getall(nt::NamedTuple) = (nt,)
 getpool(t::ThreadLocal) = t.pool
 

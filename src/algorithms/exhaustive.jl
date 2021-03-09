@@ -80,9 +80,6 @@ function ExhaustiveRunner(
     return ExhaustiveRunner(groundtruth, exhaustive_local, executor)
 end
 
-threadlocal_wrap(::typeof(dynamic_thread), heaps) = ThreadLocal(heaps)
-threadlocal_wrap(::typeof(single_thread), heaps) = heaps
-
 _num_neighbors(::AbstractVector) = 1
 _num_neighbors(x::AbstractMatrix) = size(x, 1)
 _num_neighbors(::typeof(one)) = 1

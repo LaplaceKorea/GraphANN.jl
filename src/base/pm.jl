@@ -20,7 +20,7 @@ Memory mapped files will begin with the prefix `graphann_mmap` and will be delet
 the corresponding memory is garbage collected.
 
 # Example
-```julia
+```jldoctest
 julia> allocator = GraphANN.pmallocator(pwd());
 
 julia> A = allocator(Int64, 2, 2)

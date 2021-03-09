@@ -3,7 +3,7 @@
 #####
 
 """
-    GreedyCallbacks
+    DiskANNCallbacks
 
 Keyword defined struct - called at different points during query execution.
 Allows for arbitrary telemetry to be defined.
@@ -18,12 +18,12 @@ Fields and Signatures
     Does not automatically differentiate between multithreaded and singlethreaded cases.
 
 * `postdistance` - Called after distance computations for a vertex have been completed.
-    Signature: `postdistance(algo::GreedySearch, neighbors::AbstractVector)`.
+    Signature: `postdistance(algo::DiskANNRunner, neighbors::AbstractVector)`.
     - `algo` provides the current state of the search.
     - `neighbors` the adjacency list for the vertex that was just processed.
         *NOTE*: Do NOT mutate neighbors, it MUST be constant.
 """
-Base.@kwdef struct GreedyCallbacks{A, B, C}
+Base.@kwdef struct DiskANNCallbacks{A, B, C}
     prequery::A = donothing
     postquery::B = donothing
     postdistance::C = donothing
@@ -34,13 +34,71 @@ struct StartNode{U,T}
     value::T
 end
 
+function StartNode(dataset::AbstractVector)
+    index = medioid(dataset)
+    return StartNode(index, dataset[index])
+end
+
+"""
+    DiskANNIndex{G,D,S,M}
+
+Index for DiskANN style similarity search.
+
+# Fields and Parameters
+* `graph::G` - The relative neighbor graph over the dataset.
+* `data::D` - The data set upon which to perform similarity search.
+* `startnode::S` - The entry point for queries.
+* `metric::M` - Metric to use when performing similarity search.
+"""
+struct DiskANNIndex{G, D <: AbstractVector, S <: StartNode, M}
+    graph::G
+    data::D
+    startnode::S
+    metric::M
+end
+
+# constructor
+function DiskANNIndex(graph, data::AbstractVector, metric = Euclidean())
+    return DiskANNIndex(graph, data, StartNode(data), metric)
+end
+_Base.Neighbor(::DiskANNIndex, id::T, distance::D) where {T,D} = Neighbor{T,D}(id, distance)
+
+function Base.show(io::IO, index::DiskANNIndex)
+    print(io, "DiskANNIndex(", length(index.data), " data points. ")
+    print(io, "Entry point index: ", index.startnode.index, ")")
+end
+
 struct HasPrefetching end
 struct NoPrefetching end
 
-# Use the `GreedySearch` type to hold parameters and intermediate datastructures
-# used to control the greedy search.
-mutable struct GreedySearch{T <: AbstractSet, P, I <: Integer, D}
-    search_list_size::Int
+"""
+    DiskANNRunner
+
+Collection of pre-allocated data structures for performing querying over a DiskANN index.
+
+# Constructors
+
+    DiskANNRunner(index::DiskANNIndex, search_list_size::Integer; [executor])
+
+Construct a `DiskANNRunner` for `index` with a maximum `search_list_size`.
+Increasing `search_list_size` improves the quality of the return results at the cost of
+longer query times.
+
+This method also includes an optional `executor` keyword argument. If left at its default
+[`single_thread`](@ref), then querying will be single threaded. Pass [`dynamic_thread`](@ref)
+to construct a type that will use all available threads for querying.
+
+## Internal Constructors
+
+    DiskANNRunner{I,D}(search_list_size::Integer; [executor])
+
+Construct a `DiskANNRunner` with id-type `I` and distance-type `D` with the given
+`search_lists_size` and `executor`. Keyword `executor` defaults to [`single_thread`](@ref).
+
+See also: [`searchall`](@ref)
+"""
+mutable struct DiskANNRunner{I <: Integer, D, T <: AbstractSet, P}
+    search_list_size::Int64
 
     # Pre-allocated buffer for the search list
     #
@@ -64,9 +122,9 @@ mutable struct GreedySearch{T <: AbstractSet, P, I <: Integer, D}
     prefetch_queue::P
 end
 
-_Base.idtype(::GreedySearch{<:Any,<:Any,I}) where {I} = I
-_Base.costtype(::GreedySearch{<:Any,<:Any,<:Any,D}) where {D} = D
-function _Base.Neighbor(x::GreedySearch, id::Integer, distance)
+_Base.idtype(::DiskANNRunner{I}) where {I} = I
+_Base.costtype(::DiskANNRunner{I,D}) where {I,D} = D
+function _Base.Neighbor(x::DiskANNRunner, id::Integer, distance)
     I, D = idtype(x), costtype(x)
     # Use `unsafe_trunc` to be slightly faster.
     # In the body of the search routine, we shouldn't see any actual values that will
@@ -74,73 +132,85 @@ function _Base.Neighbor(x::GreedySearch, id::Integer, distance)
     return Neighbor{I,D}(unsafe_trunc(I, id), distance)
 end
 
-function GreedySearch(
-        search_list_size;
-        prefetch_queue = nothing,
-        idtype::Type{I} = UInt32,
-        costtype::Type{D} = Float32,
-) where {I,D}
+function DiskANNRunner{I,D}(
+    search_list_size::Integer;
+    executor::F = single_thread,
+    prefetch_queue = nothing,
+) where {I,D,F}
     best = BinaryMinMaxHeap{Neighbor{I,D}}()
     best_unvisited = BinaryMinMaxHeap{Neighbor{I,D}}()
     visited = RobinSet{I}()
-    return GreedySearch(
-        search_list_size,
+    runner = DiskANNRunner{I, D, typeof(visited), typeof(prefetch_queue)}(
+        convert(Int, search_list_size),
         best,
         best_unvisited,
         visited,
         prefetch_queue,
     )
+
+    return threadlocal_wrap(executor, runner)
+end
+
+function DiskANNRunner(
+    index::DiskANNIndex,
+    search_list_size;
+    executor::F = single_thread,
+    prefetch_queue = nothing,
+) where {F}
+    I = eltype(index.graph)
+    D = costtype(index.metric, index.data)
+    return DiskANNRunner{I,D}(search_list_size; executor, prefetch_queue)
 end
 
 # Base prefetching on the existence of a non-nothing element in the prefetch queue
-hasprefetching(::GreedySearch{<:AbstractSet, Nothing}) = NoPrefetching()
-hasprefetching(::GreedySearch) = HasPrefetching()
+hasprefetching(::DiskANNRunner{I,D,T,Nothing}) where {I,D,T} = NoPrefetching()
+hasprefetching(::DiskANNRunner{I,D,T,<:Any}) where {I,D,T} = HasPrefetching()
 
 # Prepare for another run.
-function Base.empty!(greedy::GreedySearch)
-    empty!(greedy.best)
-    empty!(greedy.best_unvisited)
-    empty!(greedy.visited)
+function Base.empty!(runner::DiskANNRunner)
+    empty!(runner.best)
+    empty!(runner.best_unvisited)
+    empty!(runner.visited)
 end
 
-Base.length(greedy::GreedySearch) = length(greedy.best)
+Base.length(runner::DiskANNRunner) = length(runner.best)
 
-visited!(greedy::GreedySearch, vertex) = push!(greedy.visited, getid(vertex))
-isvisited(greedy::GreedySearch, vertex) = in(getid(vertex), greedy.visited)
-getvisited(greedy::GreedySearch) = greedy.visited
+visited!(runner::DiskANNRunner, vertex) = push!(runner.visited, getid(vertex))
+isvisited(runner::DiskANNRunner, vertex) = in(getid(vertex), runner.visited)
+getvisited(runner::DiskANNRunner) = runner.visited
 
 # Get the closest non-visited vertex
 # `unsafe_peek` will not remove top element. Unsafe because it assumes queue is nonempty.
-unsafe_peek(greedy::GreedySearch) = @inbounds greedy.best_unvisited.valtree[1]
-getcandidate!(greedy::GreedySearch) = getcandidate!(greedy, hasprefetching(greedy))
+unsafe_peek(runner::DiskANNRunner) = @inbounds runner.best_unvisited.valtree[1]
+getcandidate!(runner::DiskANNRunner) = getcandidate!(runner, hasprefetching(runner))
 
 # no prefetching case
-getcandidate!(greedy::GreedySearch, ::NoPrefetching) = popmin!(greedy.best_unvisited)
+getcandidate!(runner::DiskANNRunner, ::NoPrefetching) = popmin!(runner.best_unvisited)
 # prefetching case
-function getcandidate!(greedy::GreedySearch, ::HasPrefetching)
-    @unpack best_unvisited, prefetch_queue = greedy
+function getcandidate!(runner::DiskANNRunner, ::HasPrefetching)
+    @unpack best_unvisited, prefetch_queue = runner
     candidate = popmin!(best_unvisited)
 
     # If there's another candidate in the queue, try to prefetch it.
     if !isempty(best_unvisited)
-        push!(prefetch_queue, getid(unsafe_peek(greedy)))
+        push!(prefetch_queue, getid(unsafe_peek(runner)))
         _Prefetcher.commit!(prefetch_queue)
     end
 
     return candidate
 end
 
-isfull(greedy::GreedySearch) = length(greedy) >= greedy.search_list_size
+isfull(runner::DiskANNRunner) = length(runner) >= runner.search_list_size
 
-function maybe_pushcandidate!(greedy::GreedySearch, vertex)
+function maybe_pushcandidate!(runner::DiskANNRunner, vertex)
     # If this has already been seen, don't do anything.
-    isvisited(greedy, vertex) && return nothing
-    pushcandidate!(greedy, vertex)
+    isvisited(runner, vertex) && return nothing
+    pushcandidate!(runner, vertex)
 end
 
-function pushcandidate!(greedy::GreedySearch, vertex)
-    visited!(greedy, vertex)
-    @unpack best, best_unvisited = greedy
+function pushcandidate!(runner::DiskANNRunner, vertex)
+    visited!(runner, vertex)
+    @unpack best, best_unvisited = runner
 
     # Since we have not yet visited this vertex, we have to add it both to `best` and
     # `best_unvisited`,
@@ -149,65 +219,84 @@ function pushcandidate!(greedy::GreedySearch, vertex)
 
     # This vertex is a candidate for prefetching if we pushed it right to the front of
     # the queue.
-    if getid(unsafe_peek(greedy)) == getid(vertex)
-        maybe_prefetch(greedy, vertex)
+    if getid(unsafe_peek(runner)) == getid(vertex)
+        maybe_prefetch(runner, vertex)
     end
     return nothing
 end
 
-maybe_prefetch(greedy::GreedySearch, vertex) = maybe_prefetch(greedy, hasprefetching(greedy), vertex)
+maybe_prefetch(runner::DiskANNRunner, vertex) = maybe_prefetch(runner, hasprefetching(runner), vertex)
 # non-prefetching case
-maybe_prefetch(greedy::GreedySearch, ::NoPrefetching, vertex) = nothing
+maybe_prefetch(runner::DiskANNRunner, ::NoPrefetching, vertex) = nothing
 # prefetching case
-function maybe_prefetch(greedy::GreedySearch, ::HasPrefetching, vertex)
-    @unpack prefetch_queue = greedy
+function maybe_prefetch(runner::DiskANNRunner, ::HasPrefetching, vertex)
+    @unpack prefetch_queue = runner
     push!(prefetch_queue, getid(vertex))
     _Prefetcher.commit!(prefetch_queue)
 end
 
-done(greedy::GreedySearch) = isempty(greedy.best_unvisited)
-Base.maximum(greedy::GreedySearch) = _unsafe_maximum(greedy.best)
+done(runner::DiskANNRunner) = isempty(runner.best_unvisited)
+Base.maximum(runner::DiskANNRunner) = _unsafe_maximum(runner.best)
 
 # Bring the size of the best list down to `search_list_size`
 # TODO: check if type inference works properly.
 # The function `_unsafe_maximum` can return `nothing`, but Julia should be able to
 # handle that
-function reduce!(greedy::GreedySearch)
+function reduce!(runner::DiskANNRunner)
     # Keep ahold of the maximum element in the best_unvisited
     # Since `best_unvisited` is a subset of `best`, we know that this top element lives
     # in `best`.
     # If the element we pull of the top of `best` matches the top of `best_unvisited`, then we
     # need to pop `queue` as well and maintain a new best.
-    top = _unsafe_maximum(greedy.best_unvisited)
-    while length(greedy.best) > greedy.search_list_size
-        vertex = popmax!(greedy.best)
+    top = _unsafe_maximum(runner.best_unvisited)
+    while length(runner.best) > runner.search_list_size
+        vertex = popmax!(runner.best)
 
         if top !== nothing && getid(vertex) == getid(top)
-            popmax!(greedy.best_unvisited)
-            top = _unsafe_maximum(greedy.best_unvisited)
+            popmax!(runner.best_unvisited)
+            top = _unsafe_maximum(runner.best_unvisited)
         end
     end
     return nothing
+end
+
+"""
+    getresults!(runner::DiskANNRunner, num_neighbor) -> AbstractVector
+
+Return the top `num_neighbor` results from `runner`.
+"""
+function getresults!(runner::DiskANNRunner, num_neighbors)
+    return destructive_extract!(runner.best, num_neighbors)
 end
 
 #####
 ##### Greedy Search Implementation
 #####
 
-# Standard distance computation
+# NOTE: leave `startnode` as an extra `arg` because we override the default behavior of
+# unpacking the `index` during the building process.
+"""
+    search(runner::DiskANNRunner, index::DiskANNIndex, query; [callbacks])
+
+Perform approximate nearest neighbor search for `query` over `index`.
+Results can be obtained using [`getresults!`]
+
+Callbacks is an optional [`DiskANNCallbacks`] struct to help with gathering metrics.
+"""
 function _Base.search(
-    algo::GreedySearch,
-    meta,
-    start::StartNode,
-    query;
-    callbacks = GreedyCallbacks(),
-    metric = Euclidean(),
+    algo::DiskANNRunner,
+    index::DiskANNIndex,
+    query,
+    start::StartNode = index.startnode;
+    callbacks = DiskANNCallbacks(),
 )
     empty!(algo)
 
     # Destructure argument
-    @unpack graph, data = meta
-    pushcandidate!(algo, Neighbor(algo, start.index, evaluate(metric, query, start.value)))
+    @unpack graph, data, metric = index
+    initial_distance = evaluate(metric, query, start.value)
+    pushcandidate!(algo, Neighbor(algo, start.index, initial_distance))
+
     @inbounds while !done(algo)
         p = getid(unsafe_peek(algo))
         neighbors = LightGraphs.outneighbors(graph, p)
@@ -243,77 +332,25 @@ function _Base.search(
     return nothing
 end
 
-# Specialize for using PQ based distance computations.
-# function _Base.search(
-#     algo::GreedySearch,
-#     meta::MetaGraph{<:Any, <:PQGraph},
-#     start::StartNode,
-#     query;
-#     callbacks = GreedyCallbacks(),
-#     metric = distance,
-# )
-#     empty!(algo)
-#
-#     # Destructure argument
-#     @unpack graph, data = meta
-#     pushcandidate!(algo, Neighbor(algo, start.index, metric(query, start.value)))
-#     while !done(algo)
-#         p = getid(unsafe_peek(algo))
-#         neighbors = LightGraphs.outneighbors(graph, p)
-#
-#         # TODO: Implement prefetching for PQGraphs
-#         # Prefetch all new datapoints.
-#         # IMPORTANT: This is critical for performance!
-#         neighbor_points = data[p]
-#         unsafe_prefetch(neighbor_points, 1, length(neighbor_points))
-#
-#         # Prune
-#         # Do this here to allow the prefetched vectors time to arrive in the cache.
-#         getcandidate!(algo)
-#         reduce!(algo)
-#
-#         # Distance computations
-#         for i in eachindex(neighbors)
-#             # Since PQ based distance computations take longer, check if we even need
-#             # to perform the distance computation first.
-#             @inbounds v = neighbors[i]
-#             isvisited(algo, v) && continue
-#
-#             @inbounds d = metric(query, neighbor_points[i])
-#
-#             ## only bother to add if it's better than the worst currently tracked.
-#             if d < getdistance(maximum(algo)) || !isfull(algo)
-#                 pushcandidate!(algo, Neighbor(algo, v, d))
-#             end
-#         end
-#
-#         callbacks.postdistance(algo, neighbors)
-#     end
-#
-#     return nothing
-# end
-
 # Single Threaded Query
 function _Base.searchall(
-    algo::GreedySearch,
-    meta,
-    start::StartNode,
+    algo::DiskANNRunner,
+    index::DiskANNIndex,
     queries::AbstractVector;
     num_neighbors = 10,
-    callbacks = GreedyCallbacks(),
-    metric::F = Euclidean(),
-) where {F}
+    callbacks = DiskANNCallbacks(),
+)
     num_queries = length(queries)
-    dest = Array{eltype(meta.graph),2}(undef, num_neighbors, num_queries)
+    dest = Array{eltype(index.graph),2}(undef, num_neighbors, num_queries)
     for (col, query) in enumerate(queries)
         # -- optional telemetry
         callbacks.prequery()
 
         #_Base.distance_prehook(metric, query)
-        search(algo, meta, start, query; callbacks, metric)
+        search(algo, index, query; callbacks)
 
         # Copy over the results to the destination
-        results = destructive_extract!(algo.best, num_neighbors)
+        results = getresults!(algo, num_neighbors)
         for i in 1:num_neighbors
             @inbounds dest[i,col] = getid(results[i])
         end
@@ -326,16 +363,14 @@ end
 
 # Multi Threaded Query
 function _Base.searchall(
-    tls::ThreadLocal{<:GreedySearch},
-    meta,
-    start::StartNode,
+    tls::ThreadLocal{<:DiskANNRunner},
+    index::DiskANNIndex,
     queries::AbstractVector;
     num_neighbors = 10,
-    callbacks = GreedyCallbacks(),
-    metric::F = Euclidean(),
-) where {F}
+    callbacks = DiskANNCallbacks(),
+)
     num_queries = length(queries)
-    dest = Array{eltype(meta.graph),2}(undef, num_neighbors, num_queries)
+    dest = Array{eltype(index.graph),2}(undef, num_neighbors, num_queries)
 
     dynamic_thread(getpool(tls), eachindex(queries), 64) do col
         #_metric = _Base.distribute_distance(metric)
@@ -346,10 +381,10 @@ function _Base.searchall(
         callbacks.prequery()
 
         #_Base.distance_prehook(_metric, query)
-        search(algo, meta, start, query; callbacks = callbacks, metric = metric)
+        search(algo, index, query; callbacks = callbacks)
 
         # Copy over the results to the destination
-        results = destructive_extract!(algo.best, num_neighbors)
+        results = getresults!(algo, num_neighbors)
         for i in 1:num_neighbors
             @inbounds dest[i,col] = getid(results[i])
         end
@@ -365,28 +400,36 @@ end
 ##### Callback Implementations
 #####
 
-# Single Threaded
-function latency_callbacks()
-    times = UInt64[]
-    prequery = () -> push!(times, time_ns())
-    postquery = () -> times[end] = time_ns() - times[end]
-    return (latencies = times, callbacks = GreedyCallbacks(; prequery, postquery))
+struct Latencies{T <: MaybeThreadLocal{Vector{UInt64}}}
+    values::T
+end
+
+Base.empty!(x::Latencies{Vector{UInt64}}) = empty!(x.values)
+Base.empty!(x::Latencies{<:ThreadLocal}) = foreach(empty!, getall(x.values))
+
+Base.getindex(x::Latencies{Vector{UInt64}}) = x.values
+Base.getindex(x::Latencies{<:ThreadLocal}) = x.values[]
+
+Base.get(x::Latencies{Vector{UInt64}}) = x.values
+Base.get(x::Latencies{<:ThreadLocal}) = reduce(vcat, getall(x.values))
+
+Latencies(::DiskANNRunner) = Latencies(UInt64[])
+Latencies(::ThreadLocal{<:DiskANNRunner}) = Latencies(ThreadLocal(UInt64[]))
+
+# single threaded version
+function latency_callbacks(runner::MaybeThreadLocal{DiskANNRunner})
+    latencies = Latencies(runner)
+    prequery = () -> push!(latencies[], time_ns())
+    postquery = () -> begin
+        _latencies = latencies[]
+        _latencies[end] = time_ns() - _latencies[end]
+    end
+    return (latencies = latencies, callbacks = DiskANNCallbacks(; prequery, postquery))
 end
 
 function visited_callbacks()
     visited = UInt32[]
     postdistance = (_, neighbors) -> append!(visited, neighbors)
-    return (visited = visited, callbacks = GreedyCallbacks(; postdistance))
-end
-
-# Multi Threaded
-function latency_mt_callbacks()
-    times = ThreadLocal(UInt64[])
-    prequery = () -> push!(times[], time_ns())
-    postquery = () -> begin
-        _times = times[]
-        _times[end] = time_ns() - _times[end]
-    end
-    return (latencies = times, callbacks = GreedyCallbacks(; prequery, postquery))
+    return (visited = visited, callbacks = DiskANNCallbacks(; postdistance))
 end
 

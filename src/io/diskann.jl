@@ -1,10 +1,28 @@
 # DiskANN compatible loaders
+"""
+Singleton type to resolve ambiguities.
+
+## Constructor
+
+```jldoctest; output = false
+GraphANN.DiskANN()
+
+# output
+
+GraphANN._IO.DiskANN()
+```
+"""
 struct DiskANN end
 
 #####
 ##### Graph Loader
 #####
 
+"""
+    load_graph(GraphANN._IO.DiskANN(), path::AbstractString, max_vertices::Integer)
+
+Load a graph saved by the DiskANN C++ code into memory as a `UniDirectedGraph`.
+"""
 function load_graph(loader::DiskANN, path::AbstractString, max_vertices; kw...)
     return open(path; read = true) do io
         load_graph(loader, io, max_vertices; kw...)
@@ -12,7 +30,6 @@ function load_graph(loader::DiskANN, path::AbstractString, max_vertices; kw...)
 end
 
 function load_graph(::DiskANN, io::IO, max_vertices; verbose = true)
-    # Load some of the header information (I'm not sure that `_width` and `_ep` are).
     expected_file_size = read(io, UInt64)
     _width = read(io, Cuint)
     _ep = read(io, Cuint)
@@ -46,20 +63,18 @@ function load_graph(::DiskANN, io::IO, max_vertices; verbose = true)
 end
 
 """
-    save_graph(::DiskANN, path::Union{AbstractString, IO}, meta::MetaGraph)
+    save_graph(path::Union{AbstractString, IO}, index::DiskANNIndex)
 
 Save the graph in a binary format compatible with the DiskANN C++ code.
 Return the number of bytes written.
 """
-function save_graph(loader::DiskANN, path::AbstractString, meta::MetaGraph)
-    return open(path; write = true) do io
-        save_graph(loader, io, meta)
-    end
+function save_graph(path::AbstractString, index::DiskANNIndex)
+    return open(io -> save_graph(io, index), path; write = true)
 end
 
-function save_graph(::DiskANN, io::IO, meta::MetaGraph; medioid = medoid(data))
-    @unpack graph, data = meta
-    @show medioid
+function save_graph(io::IO, index::DiskANNIndex)
+    @unpack graph, data, startnode = index
+    entry_point = startnode.index
 
     # Compute how large the file will be when it's created.
     filesize = sizeof(UInt64) +
@@ -71,7 +86,7 @@ function save_graph(::DiskANN, io::IO, meta::MetaGraph; medioid = medoid(data))
     bytes = 0
     bytes += write(io, UInt64(filesize))
     bytes += write(io, Cuint(maximum(LightGraphs.outdegree(graph))))
-    bytes += write(io, Cuint(medioid - 1))
+    bytes += write(io, Cuint(entry_point - 1))
     ProgressMeter.@showprogress 1 for v in LightGraphs.vertices(graph)
         neighbors = LightGraphs.outneighbors(graph, v)
         bytes += write(io, Cuint(length(neighbors)))
@@ -84,21 +99,26 @@ function save_graph(::DiskANN, io::IO, meta::MetaGraph; medioid = medoid(data))
     return bytes
 end
 
-function save_pq(diskann::DiskANN, path::AbstractString, args...; kw...)
-    return open(path; write = true) do io
-        save_pq(diskann, io, args...; kw...)
-    end
-end
+# function save_pq(diskann::DiskANN, path::AbstractString, args...; kw...)
+#     return open(path; write = true) do io
+#         save_pq(diskann, io, args...; kw...)
+#     end
+# end
+#
+# function save_pq(diskann::DiskANN, io::IO, centroids::AbstractMatrix{T}) where {T}
+#     # DiskANN wants concatenate centroids together.
+#     # This is the opposite of how we store them, so we need to take a transpose
+#     save_bin(diskann, io, transpose(centroids), size(centroids, 1), length(T) * size(centroids, 2))
+# end
 
-function save_pq(diskann::DiskANN, io::IO, centroids::AbstractMatrix{T}) where {T}
-    # DiskANN wants concatenate centroids together.
-    # This is the opposite of how we store them, so we need to take a transpose
-    save_bin(diskann, io, transpose(centroids), size(centroids, 1), length(T) * size(centroids, 2))
-end
+"""
+    save_bin(::DiskANN, path::AbstractString, data::AbstractMatrix)
 
-function save_bin(diskann::DiskANN, path::AbstractString, args...)
+Save `data` to `path` in a form compatible with DiskANN's `load_bin` function.
+"""
+function save_bin(diskann::DiskANN, path::AbstractString, data::AbstractMatrix)
     return open(path; write = true) do io
-        save_bin(diskann, io, args...)
+        save_bin(diskann, io, data)
     end
 end
 

@@ -26,7 +26,7 @@ resettimer!() = TimerOutputs.reset_timer!(gettimer())
 ##### Generic Distance
 #####
 
-export evaluate, search, searchall
+export evaluate, build, search, searchall
 
 """
     evaluate(metric, x, y)
@@ -57,6 +57,7 @@ include("euclidean.jl")
 ##### Search Hooks
 #####
 
+function build end
 function search end
 function searchall end
 
@@ -73,13 +74,16 @@ Singleton type that is the default implementation for allocators.
 When invoked, simply constructs an uninitialized standard Julia array.
 
 # Example
-```julia
+```jldoctest
 julia> allocator = GraphANN.stdallocator;
 
-julia> A = allocator(Int64, 2, 2)
-2×2 Matrix{Int64}:
- 140142604452944  140142596721280
- 140142601319472  140142596702544
+julia> A = allocator(Int64, 2, 2);
+
+julia> typeof(A)
+Matrix{Int64} (alias for Array{Int64, 2})
+
+julia> size(A)
+(2, 2)
 ```
 """
 stdallocator(::Type{T}, dims...) where {T} = Array{T}(undef, dims...)
@@ -121,22 +125,11 @@ include("utils.jl")
 export PartitionUtil, partition!
 include("partition.jl")
 
-#####
-##### Generic MetaGraph
-#####
-
+# TODO: Remove
 export MetaGraph
-
-"""
-    MetaGraph{G,D}
-
-Grouping of a graph of type `G` and corresponding vertex data points of type `D`.
-"""
 struct MetaGraph{G,D}
     graph::G
     data::D
 end
-
-Neighbor(meta::MetaGraph, id, distance) = Neighbor{eltype(meta.graph)}(id, distance)
 
 end

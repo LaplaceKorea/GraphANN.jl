@@ -176,9 +176,9 @@ function vupdate(minimum::Neighbor{I,D}, x, y, i::Integer; metric = Euclidean())
     return min(minimum, new)
 end
 
-# Points for Hijacking:
-# - `reset` (make mutating but return the original collection)
-# - `vupdate` (can also make mutating)
+# Points for customization:
+# - `reset` (can be mutating but must return the original collection)
+# - `vupdate` (can also be mutating)
 function findnearest!(x, Y, minimum; metric = Euclidean())
     minimum = reset(minimum)
     for i in eachindex(Y)

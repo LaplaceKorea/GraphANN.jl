@@ -27,12 +27,33 @@
 # Anyways, this pre-allocates all memory needed and avoids the potential reallocation
 # penalty, at the cost of flexibility.
 
+"""
+Supertype for types implementing the `AbstractAdjacencyList{T}` api listed below.
+
+* `getindex(x::AbstractAdjacencyList, v::Integer)`: Return the adjacency list for vertex `v`.
+    The result should be an `AbstractVector{T}`.
+* `caninsert(x::AbstractAdjacencyList, v::Integer)`: Return `true` if an aditional edge can
+    be inserted for vertex `v`.
+* `length(x::AbstractAdjacencyList)`: Return the number of vertices stored by `x`.
+* `length(x::AbstractAdjacencyList, i::Integer)`: Return the number of outneighbors for
+    vertex `i`.
+* `copyto!(x::AbstractAdjacencyList, v, A::AbstractVector): Replace the adjacency list for
+    `v` with the contents of `A`. **Note**: `A` does not need to be in any particular order,
+    but **may** be mutated as part of this operation.
+
+In addition, implementors of the `AbstractAdjacencyList` api must implement the iteration
+interface to iterate over the adjacencylist of each vertex in order.
+"""
 abstract type AbstractAdjacencyList{T <: Integer} end
 
 #####
 ##### Default implementation
 #####
 
+"""
+Simple reference implementation of an adjacency list.
+Implemented as a vector of vectors.
+"""
 struct DefaultAdjacencyList{T} <: AbstractAdjacencyList{T}
     fadj::Vector{Vector{T}}
 end
@@ -66,7 +87,7 @@ Base.empty!(x::DefaultAdjacencyList, i) = empty!(x[i])
 
 Base.iterate(x::DefaultAdjacencyList, s...) = iterate(x.fadj, s...)
 
-function Base.copyto!(x::DefaultAdjacencyList, v, A::AbstractArray)
+function Base.copyto!(x::DefaultAdjacencyList, v, A::AbstractVector)
     list = x[v]
     resize!(list, length(A))
     copyto!(list, A)
@@ -77,6 +98,17 @@ end
 ##### Flat Implementation
 #####
 
+"""
+Adjacency list implementation that allocates adjacency lists as a single 2D array.
+Individual neighbor lists are found in the columns of the matrix, sorted from smallest to
+largest with the lenght of the list stored in a `lengths` vector.
+
+One advantage of this representation is that the entire list can be efficiently allocated
+to persistent memory.
+
+**Note**: Trying to additional neighbors to a vertex beyond the length of the columns will
+silently become a no-op.
+"""
 struct FlatAdjacencyList{T} <: AbstractAdjacencyList{T}
     adj::Matrix{T}
     # Store how many neighbors each vertex actually has.
@@ -134,7 +166,7 @@ function Base.iterate(x::FlatAdjacencyList, s = 1)
     return @inbounds (x[s], s + 1)
 end
 
-function Base.copyto!(x::FlatAdjacencyList, v, A::AbstractArray)
+function Base.copyto!(x::FlatAdjacencyList, v, A::AbstractVector)
     # Resize - make sure we don't copy too many things
     md = _max_degree(x)
     len = min(length(A), _max_degree(x))
@@ -161,6 +193,14 @@ end
 # in the range `offsets[i]:(offsets[i+1] - 1)`.
 # Adjacency lists are materialized lazily as views.
 # NOTE: Offsets must be 1 longer than storage with `offsets[end] == length(storage) + 1`
+"""
+Space efficient implementation of an adjacency list stored in a CSC style representation.
+All the individual adjacency lists are stored as a single dense vector using a vector of
+offsets to retrieve individual neighbor lists.
+
+This representation does not support mutation (i.e., index building) but is solely used
+for querying.
+"""
 struct DenseAdjacencyList{T} <: AbstractAdjacencyList{T}
     storage::Vector{T}
     offsets::Vector{Int64}

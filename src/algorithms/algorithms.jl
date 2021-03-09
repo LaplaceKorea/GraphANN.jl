@@ -1,7 +1,7 @@
 module Algorithms
 
-export GraphParameters, generate_index
-export GreedySearch, StartNode
+export DiskANNRunner, DiskANNIndex, DiskANNIndexParameters
+export build
 export TreeSearcher
 
 # stdlib
@@ -23,6 +23,10 @@ import ProgressMeter
 import Setfield
 import StaticArrays: SVector, @SVector
 import UnPack: @unpack, @pack!
+
+# utility for dispatching to the `ThreadLocal` constructor if desired.
+threadlocal_wrap(::typeof(dynamic_thread), x) = ThreadLocal(x)
+threadlocal_wrap(::typeof(single_thread), x) = x
 
 # exhaustive search
 export exhaustive_search, exhaustive_search!

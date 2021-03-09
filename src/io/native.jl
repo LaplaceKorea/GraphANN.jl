@@ -2,6 +2,13 @@
 ##### Graph Serialization
 #####
 
+"""
+    save(io::Union{IO, AbstractString}, graph)
+
+Save `graph` to `io` in GraphANN's canonical binary form.
+If `io` is an `AbstractString`, than `io` is interpreted as a file path where the binary
+version of the graph will be saved.
+"""
 function save(file::AbstractString, x; kw...)
     open(file; write = true) do io
         save(io, x; kw...)
@@ -9,7 +16,6 @@ function save(file::AbstractString, x; kw...)
     return nothing
 end
 
-save(io::IO, meta::MetaGraph{<:UniDirectedGraph}; kw...) = save(io, meta.graph; kw...)
 function save(
     io::IO,
     g::UniDirectedGraph{T};
@@ -58,7 +64,30 @@ end
 header_length() = 4
 
 load(file::AbstractString; kw...) = load(DefaultAdjacencyList{UInt32}, file; kw...)
-function load(::Type{T}, file::AbstractString; kw...) where {T}
+
+"""
+    load(::Type{T}, io::Union{String, IO}; kw...) -> UniDirectedGraph
+
+Load a graph in canonical GraphANN binary form into memory using an adjacency list
+representation given by `T`. Acceptable types `T` and their corresponding keywords are
+given below. **Note**: The parameter `U` given below must be either `UInt32` or `UInt64`
+and match what was used to save the graph originally.
+
+* `GraphANN.DefaultAdjacencyList{U}` - Use the default representation for an adjacency list
+    (vector of vectors). No keyword arguments.
+
+* `GraphANN.FlatAdjacencyList{U}` - Use the flat adjacency list representation. Keywords:
+    - `pad_to::Integer`: Try to pad each column of the flat matrix to this many bytes.
+    - `allocator`: Allocator for memory. Default: [`stdallocator`](@ref).
+
+* `GraphANN.DenseAdjacencyList{U}` - Use the dense adjacency list representation. Keywords:
+    - `allocator`: Allocator for memory. Default: [`stdallocator`](@ref).
+"""
+function load(
+    ::Type{T},
+    file::AbstractString;
+    kw...
+) where {T <: _Graphs.AbstractAdjacencyList}
     return open(io -> load(T, io; kw...), file)
 end
 
@@ -149,9 +178,22 @@ end
 ##### Binary Serialization
 #####
 
+"""
+    save_bin(io::Union{AbstractString, IO}, v)
+
+Save `v` to `io` in canonical binary format such that `load_bin(io, typeof(v))` works.
+"""
+save_bin(path::AbstractString, v::AbstractVector) = open(io -> save_bin(io, v))
+save_bin(io::IO, v::AbstractVector) = write(io, v)
+
 # Store data structures a memory-mappable files.
 # If these files live in PM, then it makes statup cost SIGNIFICANTLY lower.
-function load_bin(path::AbstractString, ::Type{Vector{T}}; write = false, kw...) where {T}
+"""
+    load_bin(io::Union{AbstractString, IO}, ::Type{Vector{T}})
+
+Memory map `io` as a vector with eltype `T`.
+"""
+function load_bin(path::AbstractString, ::Type{Vector{T}}; write = true, kw...) where {T}
     return open(path; read = true, write = write) do io
         load_bin(io, Vector{T}; kw...)
     end
@@ -160,6 +202,16 @@ end
 load_bin(io::IO, ::Type{Vector{T}}) where {T} = Mmap.mmap(io, Vector{T})
 
 # Graphs
+"""
+    save_bin(dir::AbstractString, graph::UniDirectedGraph{T, DenseAdjacencyList{T}})
+
+Save graph as multiple files in `dir`.
+
+## Implementation Details
+
+The CSR offsets and dense adjacency list are saved as canonical binary files in
+`joinpath(dir, "offsets.bin")` and `joinpath(dir, "neighbors.bin")` respectively.
+"""
 function save_bin(
     dir::AbstractString,
     graph::UniDirectedGraph{T, _Graphs.DenseAdjacencyList{T}},
@@ -179,6 +231,16 @@ function save_bin(
     return bytes_written
 end
 
+"""
+    load_bin(dir::AbstractString, GraphANN.UniDirectedGraph{T, GraphANN.DenseAdjacencyList{T}})
+
+Perform a fast load of a graph using the [`DenseAdjacencyList`](@ref) that was saved as
+multiple files in `dir` using the [`save_bin`](@ref save_bin(::AbstractString, ::UniDirectedGraph{T, _Graphs.DenseAdjacencyList{T}}) where {T}) function.
+
+## Implementation Detail
+
+The CSR offsets are copied into DRAM while the dense adjacency list is memory mapped.
+"""
 function load_bin(
     dir::AbstractString,
     ::Type{UniDirectedGraph{T, _Graphs.DenseAdjacencyList{T}}},

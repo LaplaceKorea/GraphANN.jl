@@ -57,6 +57,7 @@ function build_by_trees!(
     )
 
     for i in 1:num_trees
+        GC.gc()
         @withtimer "Building TPTree" ranges = partition!(
             data,
             permutation,

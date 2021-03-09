@@ -166,7 +166,7 @@ dataset.
 
 The `medioid` is defined as the element-wise mean of all items in the dataset.
 """
-function medioid(data::Vector{SVector{N,T}}) where {N,T}
+function medioid(data::AbstractVector{SVector{N,T}}) where {N,T}
     # Thread to make fast for larger datasets.
     # Also, use floating-point for accumulation to avoid overflow errors.
     # It's not perfect, but probably okay.

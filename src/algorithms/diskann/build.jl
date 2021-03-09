@@ -5,22 +5,47 @@ const INDEX_BALANCE_FACTOR = 64
 ##### Index Building
 #####
 
-# Simple container for passing around graph parameters.
-Base.@kwdef struct GraphParameters
+"""
+Parameters that control DiskANN style index building.
+
+## Fields
+
+* `alpha::Float64`: Controls how aggressive the pruning process is.
+    Generally, a value of `1.2` is fine.
+* `window_size::Int64`: Controls the size of the search history window used during the search
+    phases of index construction. Higher values will yield higher quality indexes but a
+    longer build time.
+* `target_degree::Int64`: The maximum degree in the final graph.
+* `prune_threshold_degree::Int64`: Degree at which a vertex is pruned. Setting this higher
+    than `target_degree` helps ensure that all vertices don't require pruning at the same time.
+    Generally, a value of `1.3 * target_degree` is good.
+* `prune_to_degree::Int64`: When a vertex is pruned, it's maximal degree after pruning will be
+    set to this amount. This is a somewhat legacy field and setting this equal to
+    `target_degree` is fine.
+
+## Constructor
+
+This type is constructed using keyword arguments for all fields as shown below.
+```jldoctest
+julia> parameters = GraphANN.DiskANNIndexParameters(alpha = 1.2, window_size = 128, target_degree = 64, prune_threshold_degree = 84, prune_to_degree = 64)
+GraphANN.Algorithms.DiskANNIndexParameters(1.2, 128, 64, 84, 64)
+```
+"""
+Base.@kwdef struct DiskANNIndexParameters
     alpha::Float64
-    window_size::Int
+    window_size::Int64
 
     # Three parameters describing graph construction
-    target_degree::Int
-    prune_threshold_degree::Int
-    prune_to_degree::Int
+    target_degree::Int64
+    prune_threshold_degree::Int64
+    prune_to_degree::Int64
 end
 
-function change_threshold(x::GraphParameters, threshold = x.target_degree)
+function change_threshold(x::DiskANNIndexParameters, threshold = x.target_degree)
     return Setfield.@set x.prune_threshold_degree = threshold
 end
 
-onealpha(x::GraphParameters) = Setfield.@set x.alpha = 1.0
+onealpha(x::DiskANNIndexParameters) = Setfield.@set x.alpha = 1.0
 
 #####
 ##### Pruner
@@ -190,36 +215,36 @@ end
 maybeunion!(f::F, candidates::AbstractSet) where {F} = union!(candidates, f())
 maybeunion!(f::F, candidates::AbstractArray) where {F} = nothing
 
-"""
-    neighbor_updates!(args...)
-
-This function roughly implements the `RobustPrune` algorithm presented in the paper.
-One difference is that instead of directly mutating the graph, we populate a `nextlist`
-that will contain the next neighbors for this node.
-
-This allows threads to work in parallel with periodic synchronous updates to the graph.
-
-*Note*: I'm pretty sure this technique is how it's implemented in the C++ code.
-
-* `nextlist` - Vector to be populated for the next neighbors of the current node.
-* `candidates` - Candidate nodes to be the next neighbors
-* `vertex` - The current vertex this is being applied to.
-* `meta` - Combination of Graph and Dataset.
-* `parameters` - Parameters governing graph construction.
-* `pruner` - Preallocated `Pruner` to help remove neighbors that fall outside the
-    distance threshold defined by `parameters.alpha`
-"""
+# """
+#     neighbor_updates!(args...)
+#
+# This function roughly implements the `RobustPrune` algorithm presented in the paper.
+# One difference is that instead of directly mutating the graph, we populate a `nextlist`
+# that will contain the next neighbors for this node.
+#
+# This allows threads to work in parallel with periodic synchronous updates to the graph.
+#
+# *Note*: I'm pretty sure this technique is how it's implemented in the C++ code.
+#
+# * `nextlist` - Vector to be populated for the next neighbors of the current node.
+# * `candidates` - Candidate nodes to be the next neighbors
+# * `vertex` - The current vertex this is being applied to.
+# * `index` - Combination of Graph and Dataset.
+# * `parameters` - Parameters governing graph construction.
+# * `pruner` - Preallocated `Pruner` to help remove neighbors that fall outside the
+#     distance threshold defined by `parameters.alpha`
+# """
 function neighbor_updates!(
     nextlist::AbstractVector,
     candidates,
     vertex,
-    meta::MetaGraph,
+    index::DiskANNIndex,
     pruner::Pruner,
     alpha::AbstractFloat,
     target_degree::Integer
 )
     # Destructure some parameters
-    @unpack graph, data = meta
+    @unpack graph, data = index
 
     # If the passed `candidates` is a Set, then append the current out neighbors
     # of the query vertex to the set.
@@ -231,7 +256,7 @@ function neighbor_updates!(
     # Use lazy functions to efficientaly initialize the Pruner object
     vertex_data = data[vertex]
     initialize!(
-        u -> Neighbor(meta, u, evaluate(Euclidean(), vertex_data, @inbounds data[u])),
+        u -> Neighbor(index, u, evaluate(Euclidean(), vertex_data, @inbounds data[u])),
         !isequal(vertex),
         pruner,
         candidates,
@@ -298,15 +323,16 @@ function add_backedges!(graph, locks, tls, needs_pruning, prune_threshold)
 end
 
 function prune!(
-    meta::MetaGraph,
-    parameters::GraphParameters,
+    index::DiskANNIndex,
+    parameters::DiskANNIndexParameters,
     tls::ThreadLocal,
-    needs_pruning::Vector{Bool},
+    needs_pruning::Vector{Bool};
+    range = eachindex(needs_pruning)
 )
-    @unpack graph = meta
+    @unpack graph = index
     @unpack prune_to_degree, alpha = parameters
 
-    dynamic_thread(eachindex(needs_pruning), INDEX_BALANCE_FACTOR) do v
+    dynamic_thread(range, INDEX_BALANCE_FACTOR) do v
         needs_pruning[v] || return nothing
 
         storage = tls[]
@@ -318,7 +344,7 @@ function prune!(
             # overflow is already in the adjacency list for `v`
             LightGraphs.outneighbors(graph, v),
             v,
-            meta,
+            index,
             storage.pruner,
             alpha,
             prune_to_degree,
@@ -332,13 +358,13 @@ end
 # Commit all the pending updates to the graph.
 # Then, cycle util no nodes violate the degree requirement
 function commit!(
-    meta::MetaGraph,
-    parameters::GraphParameters,
+    index::DiskANNIndex,
+    parameters::DiskANNIndexParameters,
     locks::AbstractVector,
     needs_pruning::Vector{Bool},
     tls::ThreadLocal,
 )
-    @unpack graph = meta
+    @unpack graph = index
     @unpack prune_threshold_degree = parameters
 
     # Step 1 - update all the next lists
@@ -348,7 +374,7 @@ function commit!(
     add_backedges!(graph, locks, tls, needs_pruning, prune_threshold_degree)
 
     # Step 3 - process all over subscribed vertices
-    prune!(meta, parameters, tls, needs_pruning)
+    prune!(index, parameters, tls, needs_pruning)
 
     # Step 4 - update nextlists for all over subscribed vertices
     apply_nextlists!(graph, locks, tls; empty = true)
@@ -356,17 +382,36 @@ function commit!(
 end
 
 """
-Generate the Index for a dataset
+    build(dataset, parameters::DiskANNIndexParameters; kw...) -> DiskANNIndex
+
+Construct a DiskANN style relative neighbor graph for `dataset` according to the provided
+[`DiskANNIndexParameters`](@ref).
+
+# Keywords
+* `graph_type`: The type of adjacency list to use during graph construction. Valid
+    arguments are `DefaultAdjacencyList` or `FlatAdjacencyList` with a given integer type
+    parameter (i.e. either `UInt32` if `dataset` is small enough, or `UInt64` otherwise).
+    Default: `DefaultAdjacencyList{UInt32}`.
+* `allocator`: Control the allocator used to allocate the graph. Only applies if
+    `graph_type <: FlatAdjacencyList`. Default: `stdallocator`.
+* `no_progress::Bool`: Set to `true` to disable displaying a progress bar. Default: `false`.
+* `graph::Union{Nothing, LightGraphs.AbstractGraph}`: This argument allows passing in an
+    existing graph rather than creating one from scratch. If `graph !== nothing`, then
+    arguments `graph_type` and `allocator` are ignored. Default: `nothing`.
+* `metric`: The metric to use during graph construction. Default: [`Euclidean`](@ref).
+* `batchsize`: Graph construction happens over batches of indices to aid in parallelism.
+    This parameter controls the size of those batches. A value of `1000 * Threads.nthreads()`
+    or `2000 * Threads.nthreads()` is generally sufficient.
 """
-function generate_index(
+function _Base.build(
     data,
-    parameters::GraphParameters;
-    batchsize = 1000,
-    allocator = stdallocator,
+    parameters::DiskANNIndexParameters;
     graph_type = DefaultAdjacencyList{UInt32},
+    allocator = stdallocator,
     no_progress = false,
     graph::Union{Nothing, LightGraphs.AbstractGraph} = nothing,
     metric = Euclidean(),
+    batchsize = 1000,
 )
     @unpack window_size, target_degree, prune_threshold_degree = parameters
 
@@ -388,9 +433,9 @@ function generate_index(
     locks = [Base.Threads.SpinLock() for _ in 1:LightGraphs.nv(graph)]
     needs_pruning = [false for _ in 1:LightGraphs.nv(graph)]
 
-    meta = MetaGraph(graph, data)
+    index = DiskANNIndex(graph, data, metric)
     tls = ThreadLocal(;
-        greedy = GreedySearch(window_size; idtype = eltype(graph), costtype = costtype(metric, data)),
+        greedy = DiskANNRunner(index, window_size),
         pruner = Pruner{Neighbor{eltype(graph), costtype(metric, data)}}(),
         nextlists = NextListBuffer{eltype(graph)}(
             target_degree,
@@ -404,7 +449,7 @@ function generate_index(
     for i in 1:2
         _parameters = (i == 1) ? onealpha(parameters) : parameters
         _generate_index(
-            meta,
+            index,
             _parameters,
             tls,
             locks,
@@ -415,71 +460,78 @@ function generate_index(
     end
 
     # Final cleanup - enforce degree constraint.
+    # Batch this step to avoid over allocating "nextlists"
     _parameters = change_threshold(parameters)
     @unpack prune_threshold_degree = _parameters
-    Threads.@threads for v in LightGraphs.vertices(graph)
-        if length(LightGraphs.outneighbors(graph, v)) > prune_threshold_degree
-            @inbounds needs_pruning[v] = true
+    for range in batched(LightGraphs.vertices(graph), batchsize)
+        Threads.@threads for v in range
+            if length(LightGraphs.outneighbors(graph, v)) > prune_threshold_degree
+                @inbounds needs_pruning[v] = true
+            end
         end
+        prune!(index, _parameters, tls, needs_pruning; range = range)
+        apply_nextlists!(graph, locks, tls; empty = true)
     end
-    prune!(meta, _parameters, tls, needs_pruning)
-    apply_nextlists!(graph, locks, tls; empty = true)
 
-    return meta
+    return index
 end
 
 @noinline function _generate_index(
-    meta::MetaGraph,
-    parameters::GraphParameters,
+    index::DiskANNIndex,
+    parameters::DiskANNIndexParameters,
     tls::ThreadLocal,
     locks::AbstractVector,
     needs_pruning::Vector{Bool},
     batchsize::Integer;
     no_progress = false
 )
-    @unpack graph, data = meta
+    @unpack graph, data = index
     @unpack alpha, target_degree = parameters
 
     # TODO: Shuffle visit order.
     num_batches = cdiv(length(data), batchsize)
     progress_meter = ProgressMeter.Progress(num_batches, 1, "Computing Index...")
-    for r in batched(1:length(data), batchsize)
+    for r in batched(eachindex(data), batchsize)
         # Use dynamic load balancing.
-        itertime = @elapsed dynamic_thread(r, INDEX_BALANCE_FACTOR) do vertex
-            # Get thread local storage
-            storage = tls[]
+        @withtimer "Generating Nextlists" begin
+            itertime = @elapsed dynamic_thread(r, INDEX_BALANCE_FACTOR) do vertex
+                # Get thread local storage
+                storage = tls[]
 
-            # Perform a greedy search from this node.
-            # The visited list will live inside the `greedy` object and will be extracted
-            # using the `getvisited` function.
-            point = data[vertex]
-            search(storage.greedy, meta, StartNode(vertex, point), point)
-            candidates = getvisited(storage.greedy)
+                # Perform a greedy search from this node.
+                # The visited list will live inside the `greedy` object and will be extracted
+                # using the `getvisited` function.
+                point = data[vertex]
+                search(storage.greedy, index, point, StartNode(vertex, point))
+                candidates = getvisited(storage.greedy)
 
-            # Run the `RobustPrune` algorithm on the graph starting at this point.
-            # Array `nextlist` will contain the updated neighbors for this vertex.
-            # We delay actually implementing the updates to facilitate parallelization.
-            nextlist = get!(storage.nextlists)
-            neighbor_updates!(
-                nextlist,
-                candidates,
-                vertex,
-                meta,
-                storage.pruner,
-                alpha,
-                target_degree,
-            )
-            storage.nextlists[vertex] = nextlist
+                # Run the `RobustPrune` algorithm on the graph starting at this point.
+                # Array `nextlist` will contain the updated neighbors for this vertex.
+                # We delay actually implementing the updates to facilitate parallelization.
+                nextlist = get!(storage.nextlists)
+                neighbor_updates!(
+                    nextlist,
+                    candidates,
+                    vertex,
+                    index,
+                    storage.pruner,
+                    alpha,
+                    target_degree,
+                )
+                storage.nextlists[vertex] = nextlist
+            end
         end
 
         # Update the graph.
-        synctime = @elapsed commit!(
-            meta,
-            parameters,
-            locks,
-            needs_pruning,
-            tls,
-        )
+        @withtimer "Updating Graph" begin
+            synctime = @elapsed commit!(
+                index,
+                parameters,
+                locks,
+                needs_pruning,
+                tls,
+            )
+        end
 
         no_progress || ProgressMeter.next!(
             progress_meter;

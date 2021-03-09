@@ -4,12 +4,6 @@ ismatch(r::Regex, s) = (match(r, s) !== nothing)
 # Auto detect format based on file extension.
 # The return type of this function is not type-stable ... but that's okay, because it
 # shouldn't be called in an performance critical code.
-#
-# Make sure any code operating on the return type of this function is located behind
-# a function barrier.
-#
-# TODO: Allow creation of `points` types directly to automatically load data into AVX
-# friendly chunks.
 function load_vecs(file; kw...)
     # This will turn "/file/path/somefile.ivecs" into just ".ivecs".
     ext = last(splitext(file))
@@ -50,13 +44,85 @@ function addto!(v::Vector{SVector{N,T}}, index, buf::AbstractVector{T}) where {N
     return 1
 end
 
-# Why is this function so complicated?
-# Well, it started out simple ... you pass in a UInt8, Float32, whatever you want, that
-# that's what you got in return.
-#
-# But eventually, I wanted it to return `Vector{<:SVector}` and, well, it just got worse
-# from there.
-function load_vecs(::Type{T}, file; maxlines = nothing, allocator = stdallocator) where {T}
+"""
+    load_vecs(::Type{T}, file::AbstractString; kw...)
+
+Parse the [`vecs`](http://corpus-texmex.irisa.fr/) into a
+* `Matrix{T}` if `T` is a scalar such as `UInt8`, `Float32`, or `UInt32`. Vectors are
+    loaded as columns of the returned matrix.
+
+* `Vector{T}` if `T` is an `SVector{N,T}`. Throws an error if `N` doesn't match the parsed
+    vector size extracted from the `vecs` file itself.
+
+## Keyword Arguments
+
+* `maxlines::Integer` - If provided, read at most `maxlines` vectors from the dataset.
+    Default: `nothing` (whole data file).
+* `allocator` - Allocator to use for memory. Default: [`stdallocator`](@ref)
+* `groundtruth::Bool` - Set to `true` if loading a groundtruth file. Since Julia is
+    index-1 while vecs files tend to be index-0, `groundtruth = true` will essentially
+    increment every read value by 1.
+
+## Example
+
+```jldoctest; filter = r"\\[.*\\]"
+julia> path = joinpath(GraphANN.VECSDIR, "siftsmall_base.fvecs");
+
+julia> mat = GraphANN.load_vecs(Float32, path)
+128×10000 Matrix{Float32}:
+  0.0   14.0    0.0   12.0   1.0   48.0  …    6.0  38.0  48.0    0.0  14.0
+ 16.0   35.0    1.0   47.0   1.0   69.0      40.0  64.0   1.0    0.0   2.0
+ 35.0   19.0    5.0   14.0   0.0    9.0      68.0  28.0   0.0    0.0   0.0
+  5.0   20.0    3.0   25.0   0.0    6.0       3.0   0.0   0.0    5.0   0.0
+ 32.0    3.0   44.0    2.0  14.0    2.0       2.0   0.0   0.0   43.0   0.0
+ 31.0    1.0   40.0    3.0  16.0    3.0  …    1.0   0.0   1.0  100.0   2.0
+ 14.0   13.0   20.0    4.0  30.0    7.0       0.0   0.0  15.0   54.0  42.0
+ 10.0   11.0   14.0    7.0  50.0   25.0       0.0   5.0  64.0   12.0  55.0
+ 11.0   16.0   10.0   14.0   2.0   64.0     114.0  10.0  69.0    4.0   9.0
+ 78.0  119.0  100.0  122.0  40.0  130.0      45.0  98.0  11.0    0.0   1.0
+  ⋮                                 ⋮    ⋱    ⋮
+ 41.0   52.0   31.0   43.0  48.0   31.0       5.0  49.0  22.0   46.0   7.0
+  0.0   15.0    0.0   15.0   0.0   20.0  …    9.0   0.0   1.0   31.0  50.0
+  0.0    2.0    1.0    1.0   0.0    8.0       6.0   0.0   0.0    0.0  36.0
+  2.0    0.0    6.0    0.0   2.0    2.0       0.0   3.0   0.0    1.0  15.0
+  8.0    0.0   10.0    0.0   0.0    0.0       0.0  11.0   0.0    2.0  11.0
+ 19.0    0.0   12.0    0.0   1.0    0.0       3.0   6.0   0.0   16.0   1.0
+ 25.0   11.0    4.0   27.0   4.0   30.0  …   94.0   2.0  22.0    3.0   0.0
+ 23.0   21.0   23.0   29.0  28.0   26.0      36.0   1.0  62.0    3.0   0.0
+  1.0   33.0   10.0   21.0  34.0    4.0       2.0   3.0  18.0   11.0   7.0
+
+
+julia> vec = GraphANN.load_vecs(GraphANN.SVector{128,Float32}, path)
+10000-element Vector{StaticArrays.SVector{128, Float32}}:
+ [0.0, 16.0, 35.0, ... 25.0, 23.0, 1.0]
+ [14.0, 35.0, 19.0, ... 11.0, 21.0, 33.0]
+ [0.0, 1.0, 5.0, ... 4.0, 23.0, 10.0]
+ [12.0, 47.0, 14.0, ... 27.0, 29.0, 21.0]
+ [1.0, 1.0, 0.0, ... 4.0, 28.0, 34.0]
+ [48.0, 69.0, 9.0, ... 30.0, 26.0, 4.0]
+ [0.0, 42.0, 55.0, ... 45.0, 11.0, 2.0]
+ [16.0, 36.0, 10.0, ... 3.0, 7.0, 41.0]
+ [8.0, 35.0, 11.0, ... 17.0, 4.0, 7.0]
+ [21.0, 13.0, 18.0, ... 51.0, 36.0, 3.0]
+ ⋮
+ [0.0, 0.0, 0.0, ... 0.0, 0.0, 2.0]
+ [2.0, 13.0, 17.0, ... 2.0, 3.0, 5.0]
+ [43.0, 12.0, 0.0, ... 0.0, 3.0, 17.0]
+ [5.0, 5.0, 10.0, ... 1.0, 1.0, 0.0]
+ [6.0, 40.0, 68.0, ... 94.0, 36.0, 2.0]
+ [38.0, 64.0, 28.0, ... 2.0, 1.0, 3.0]
+ [48.0, 1.0, 0.0, ... 22.0, 62.0, 18.0]
+ [0.0, 0.0, 0.0, ... 3.0, 3.0, 11.0]
+ [14.0, 2.0, 0.0, ... 0.0, 0.0, 7.0]
+```
+"""
+function load_vecs(
+    ::Type{T},
+    file;
+    maxlines = nothing,
+    allocator = stdallocator,
+    groundtruth = false
+) where {T}
     linecount = 0
     index = 1
     _v, _dim = open(file) do io
@@ -89,6 +155,9 @@ function load_vecs(::Type{T}, file; maxlines = nothing, allocator = stdallocator
         # Now, start parsing!
         while true
             read!(io, buf)
+            # If we're reading in a groundtruth file, assume it's index zero and add 1 to
+            # all indexes read.
+            groundtruth && (buf .+= one(eltype(buf)))
             index += addto!(v, index, buf)
 
             linecount += 1
@@ -105,6 +174,11 @@ function load_vecs(::Type{T}, file; maxlines = nothing, allocator = stdallocator
     return vecs_reshape(T, _v, _dim)
 end
 
+"""
+    save_vecs(io::Union{AbstractString, IO}, A::AbstractMatrix{T})
+
+Save the matrix `A` to `io` in the `*vecs` format.
+"""
 function save_vecs(
     file::AbstractString,
     A::AbstractMatrix{T},

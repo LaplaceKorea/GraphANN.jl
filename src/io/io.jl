@@ -1,5 +1,9 @@
 module _IO
 
+# Types
+export DiskANN, SPTAG
+
+# Functions
 export load_graph, save_graph
 export load_vecs, save_vecs
 
@@ -8,6 +12,7 @@ import .._Base: MetaGraph, stdallocator, medioid
 import .._Graphs: _Graphs, UniDirectedGraph
 import .._Graphs: DefaultAdjacencyList, FlatAdjacencyList, DenseAdjacencyList
 import .._Trees: TreeNode, Tree
+import ..Algorithms: DiskANNIndex
 
 # stdlib
 import Mmap

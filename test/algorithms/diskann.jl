@@ -22,7 +22,7 @@ function test_index(
     alpha = 1.2
     max_degree = 70
     window_size = 50
-    parameters = GraphANN.GraphParameters(;
+    parameters = GraphANN.DiskANNIndexParameters(;
         alpha = alpha,
         window_size = window_size,
         target_degree = max_degree,
@@ -30,7 +30,7 @@ function test_index(
         prune_to_degree = 65,
     )
 
-    meta = GraphANN.generate_index(dataset, parameters; graph_type = graph_type)
+    meta = GraphANN.build(dataset, parameters; graph_type = graph_type)
     g = meta.graph
 
     # Is the maximum degree of the generated graph within the set limit?
@@ -39,17 +39,12 @@ function test_index(
 
     # Lets try a search
     queries = GraphANN.load_vecs(SVector{N,Float32}, query_path)
-    queries = map(x -> map(T, x), queries)
-
-    # Need to adjust ground-truth from index-0 to index-1
-    ground_truth = GraphANN.load_vecs(groundtruth_path) .+ UInt32(1)
+    queries = GraphANN.toeltype(T, queries)
+    ground_truth = GraphANN.load_vecs(groundtruth_path; groundtruth = true)
 
     @test eltype(ground_truth) == UInt32
-    algo = GraphANN.GreedySearch(100; costtype = GraphANN.costtype(GraphANN.Euclidean(), dataset), idtype = UInt32)
-    start_index = GraphANN.medioid(dataset)
-    start = GraphANN.StartNode(start_index, dataset[start_index])
-
-    ids = GraphANN.searchall(algo, meta, start, queries; num_neighbors = 100)
+    algo = GraphANN.DiskANNRunner(meta, 100)
+    ids = GraphANN.searchall(algo, meta, queries; num_neighbors = 100)
     recalls = GraphANN.recall(ground_truth, ids)
     @test mean(recalls) >= 0.99
     return meta
@@ -60,10 +55,10 @@ end
 
 @testset "DiskANN Search" begin
     # Test some properties of `Neighbor`
-    x = GraphANN.GreedySearch(2; costtype = Float64, idtype = Int64)
+    x = GraphANN.DiskANNRunner{Int64,Float64}(2)
     GraphANN.Algorithms.pushcandidate!(x, Neighbor(x, 1, 0.0))
 
-    # Test `Neighbor` constructor for the `GreedySearch` type.
+    # Test `Neighbor` constructor for the `DiskANNRunner` type.
     @test isa(GraphANN.Neighbor(x, 1, 1.0), GraphANN.Neighbor{Int64,Float64})
     # convert id types
     @test isa(GraphANN.Neighbor(x, UInt32(1.0), 1.0), GraphANN.Neighbor{Int64,Float64})
@@ -220,25 +215,17 @@ end
     # Load in siftsmall dataset, queries, and ground truth.
     data = GraphANN.load_vecs(SVector{128,Float32}, dataset_path)
     graph = GraphANN.load_graph(GraphANN._IO.DiskANN(), diskann_index, length(data))
-    meta = GraphANN.MetaGraph(graph, data)
+    meta = GraphANN.DiskANNIndex(graph, data)
 
     queries = GraphANN.load_vecs(SVector{128,Float32}, query_path)
-
-    # Add "1" to ground truth to convert from index-0 to Julia's index-1
-    ground_truth = GraphANN.load_vecs(groundtruth_path) .+ 1
-
-    # Set up the algorithm.
-    start = GraphANN.medioid(data)
-    start = GraphANN.StartNode(start, data[start])
-
+    ground_truth = GraphANN.load_vecs(groundtruth_path; groundtruth = true)
     for (i, comparison) in enumerate(comparisons)
-        algo = GraphANN.GreedySearch(comparison.window_size)
+        algo = GraphANN.DiskANNRunner(meta, comparison.window_size)
 
         # Obtain the approximate nearest neighbors
         ids = GraphANN.searchall(
             algo,
             meta,
-            start,
             queries;
             num_neighbors = comparison.num_neighbors,
         )
@@ -266,6 +253,77 @@ end
         end
         @test outlier_count <= expected_num_outliers
     end
+end
+
+@testset "Testing Query Features" begin
+    data = GraphANN.sample_dataset()
+    graph = GraphANN.load_graph(GraphANN.DiskANN(), diskann_index, length(data))
+    index = GraphANN.DiskANNIndex(graph, data)
+
+    queries = GraphANN.load_vecs(SVector{128,Float32}, query_path)
+    groundtruth = GraphANN.load_vecs(groundtruth_path; groundtruth = true)
+
+    # concat the queries together 100 times so we can efficiently take advantage of
+    # multithreading
+    queries = repeat(queries, 100)
+    groundtruth = repeat(groundtruth, 100)
+
+    # Test single and multi-threaded versions.
+    # Check return types so tests can be updated if the implementation changes.
+    runner_st = GraphANN.DiskANNRunner(index, 20; executor = GraphANN.single_thread)
+    @test isa(runner_st, GraphANN.DiskANNRunner)
+
+    runner_mt = GraphANN.DiskANNRunner(index, 20; executor = GraphANN.dynamic_thread)
+    @test isa(runner_mt, GraphANN.ThreadLocal)
+
+    # Run twice, once for warmup.
+    rt_st = @elapsed ids_st = GraphANN.searchall(runner_st, index, queries)
+    rt_st = @elapsed ids_st = GraphANN.searchall(runner_st, index, queries)
+
+    rt_mt = @elapsed ids_mt = GraphANN.searchall(runner_mt, index, queries)
+    rt_mt = @elapsed ids_mt = GraphANN.searchall(runner_mt, index, queries)
+
+    @test ids_st == ids_mt
+    @test rt_mt <= 0.6 * rt_st
+
+    #####
+    ##### Test Callbacks
+    #####
+
+    latencies_st, callbacks_st = GraphANN.Algorithms.latency_callbacks(runner_st)
+    @test isa(latencies_st, GraphANN.Algorithms.Latencies{Vector{UInt64}})
+
+    # Run twice to force precompilation.
+    ids = GraphANN.searchall(runner_st, index, queries; callbacks = callbacks_st)
+    values = get(latencies_st)
+    @test isa(values, Vector{UInt64})
+    @test length(values) == length(queries)
+
+    empty!(latencies_st)
+    values = get(latencies_st)
+    @test isempty(values)
+
+    ids = GraphANN.searchall(runner_st, index, queries; callbacks = callbacks_st)
+
+    # Now multithreaded
+    latencies_mt, callbacks_mt = GraphANN.Algorithms.latency_callbacks(runner_mt)
+    @test isa(latencies_mt, GraphANN.Algorithms.Latencies{<:GraphANN.ThreadLocal})
+
+    ids = GraphANN.searchall(runner_mt, index, queries; callbacks = callbacks_mt)
+    values = get(latencies_mt)
+    @test isa(values, Vector{UInt64})
+    @test length(values) == length(queries)
+
+    empty!(latencies_mt)
+    values = get(latencies_mt)
+    @test isempty(values)
+
+    ids = GraphANN.searchall(runner_mt, index, queries; callbacks = callbacks_mt)
+
+    # Compare latencies.
+    # We expect the mean multithreaded latency to be higher than the mean singlethreaded
+    # latency.
+    @test mean(get(latencies_st)) < mean(get(latencies_mt))
 end
 
 end
