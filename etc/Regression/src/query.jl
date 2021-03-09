@@ -21,8 +21,8 @@ struct WithPrefetching <: AbstractPrefetching end
 
 # Dispatch Rules - Callbacks
 get_callbacks(::NoCallbacks, ::Any) = (callbacks = GraphANN.GreedyCallbacks(),)
-get_callbacks(::LatencyCallbacks, ::SingleThread) = GraphANN.latency_callbacks()
-get_callbacks(::LatencyCallbacks, ::MultiThread) = GraphANN.latency_mt_callbacks()
+get_callbacks(::LatencyCallbacks, ::SingleThread) = GraphANN.Algorithms.latency_callbacks()
+get_callbacks(::LatencyCallbacks, ::MultiThread) = GraphANN.Algorithms.latency_mt_callbacks()
 
 # Unpack the names tuple to reset the latencies Vector or ThreadLocal
 reset!(x::NamedTuple, ::NoCallbacks) = nothing
@@ -60,20 +60,21 @@ end
 
 const MetaGraph = GraphANN.MetaGraph
 function make_algo(windowsize::Integer, ::SingleThread, ::NoPrefetching, meta::MetaGraph)
-    return GraphANN.GreedySearch(windowsize), meta
+    return GraphANN.DiskANNRunner(windowsize; costtype = Int32), meta
 end
 
 function make_algo(windowsize::Integer, ::MultiThread, ::NoPrefetching, meta::MetaGraph)
-    return GraphANN.ThreadLocal(GraphANN.GreedySearch(windowsize)), meta
+    return GraphANN.ThreadLocal(GraphANN.DiskANNRunner(windowsize; costtype = Int32)), meta
 end
 
 function make_algo(windowsize::Integer, ::SingleThread, ::WithPrefetching, meta::MetaGraph)
     query_pool = GraphANN.ThreadPool(1:1)
     prefetch_pool = GraphANN.ThreadPool(2:2)
     prefetched_meta = GraphANN._Prefetcher.prefetch_wrap(meta, query_pool, prefetch_pool)
-    algo = GraphANN.GreedySearch(
+    algo = GraphANN.DiskANNRunner(
         windowsize;
         prefetch_queue = GraphANN._Prefetcher.getqueue(prefetched_meta),
+        costtype = Int32,
     )
 
     return algo, prefetched_meta

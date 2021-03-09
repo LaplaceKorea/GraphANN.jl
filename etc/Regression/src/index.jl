@@ -2,13 +2,13 @@
 function index_building(
     record::Record,
     dataset::Dataset,
-    parameters::GraphANN.GraphParameters;
+    parameters::GraphANN.DiskANNIndexParameters;
     savepath = nothing,
     batchsize = 50000,
     allocator = GraphANN.stdallocator,
 )
     data = load(dataset)
-    stats = @timed meta = GraphANN.generate_index(data, parameters; batchsize = batchsize)
+    stats = @timed meta = GraphANN.build(data, parameters; batchsize = batchsize)
 
     if savepath != nothing
         GraphANN.save(savepath, meta.graph)

@@ -133,7 +133,7 @@ function quantized_query(
     # Like the normal query path - we use a memoized closure to find the appropriate window
     # size for the requested accuracies.
     closure = function(windowsize::Integer)
-        algo = GraphANN.ThreadLocal(GraphANN.GreedySearch(windowsize))
+        algo = GraphANN.ThreadLocal(GraphANN.DiskANNRunner(windowsize; costtype = Float32))
 
         # Since refinement is not yet implemented, we need to use a slightly difference
         # version to calculate recall.
@@ -158,7 +158,7 @@ function quantized_query(
     callbacks = LatencyCallbacks()
     callback_tuple = get_callbacks(callbacks, SingleThread())
     for (target, windowsize) in zip(target_accuracies, windowsizes)
-        algo = GraphANN.GreedySearch(windowsize)
+        algo = GraphANN.DiskANNRunner(windowsize; costtype = Float32)
         f = () -> GraphANN.searchall(
             algo,
             meta,

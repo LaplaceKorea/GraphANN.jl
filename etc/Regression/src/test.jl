@@ -19,10 +19,10 @@ maxlines(::Sift1B) = 1_000_000_000
 # groundtruth(::Sift1B) = "idx_1000M.ivecs"
 
 # for air3
-groundtruth(::Sift1M) = "sift1m_groundtruth.ivecs"
-groundtruth(::Sift10M) = "sift10m_groundtruth.ivecs"
-groundtruth(::Sift100M) = "sift100m_groundtruth.ivecs"
-groundtruth(::Sift1B) = "sift1b_groundtruth.ivecs"
+groundtruth(::Sift1M) = "sift1m.ivecs"
+groundtruth(::Sift10M) = "sift10m.ivecs"
+groundtruth(::Sift100M) = "sift100m.ivecs"
+groundtruth(::Sift1B) = "sift1b.ivecs"
 
 name(::Sift1M) = "sift1m"
 name(::Sift10M) = "sift10m"
@@ -36,9 +36,9 @@ function get_dataset(sift::AbstractSift, allocator = default_allocator(sift))
         # path = "/backup/data/sift1B/bigann_base.bvecs",
         # groundtruth = joinpath("/backup/data/sift1B/gnd", groundtruth(sift)),
         # queries = "/backup/data/sift1B/bigann_query.bvecs",
-        path = "/home/stg/bigann_base.bvecs",
-        groundtruth = joinpath("/home/stg/projects/sift_versions", groundtruth(sift)),
-        queries = "/home/stg/projects/sift_versions/queries.bvecs",
+        path = "/data/sift/bigann_base.bvecs",
+        groundtruth = joinpath("/data/sift/groundtruth/queries_10k", groundtruth(sift)),
+        queries = "/data/sift/queries/queries_10k.bvecs",
         eltype = GraphANN.Euclidean{128,UInt8},
         maxlines = maxlines(sift),
         data_allocator = allocator,
@@ -55,7 +55,7 @@ function __test_index(record::Record)
 
     # Just do Sift1M for testing
     dataset = get_datset(Sift1M())
-    parameters = GraphANN.GraphParameters(;
+    parameters = GraphANN.DiskANNIndexParameters(;
         alpha = 1.2,
         window_size = 100,
         target_degree = 128,
@@ -89,7 +89,7 @@ function full_index(record)
         "sift100m.index",
     ]
 
-    parameters = GraphANN.GraphParameters(;
+    parameters = GraphANN.DiskANNIndexParameters(;
         alpha = 1.2,
         window_size = 100,
         target_degree = 128,
@@ -133,7 +133,7 @@ function __test_query(record::Record)
     graph = get_graph(sift)
 
     threadings = [SingleThread(), MultiThread()]
-    prefetchings = [NoPrefetching(), WithPrefetching()]
+    prefetchings = [NoPrefetching()]
     num_neighbors = [5]
 
     iter = Iterators.product(num_neighbors, prefetchings, threadings)
@@ -161,14 +161,14 @@ function __test_query(record::Record)
 end
 
 function test_query(record::Record)
-    sets = [Sift1M(), Sift10M(), Sift100M()]
+    sets = [Sift100M()]
     threadings = [MultiThread(), SingleThread()]
-    prefetchings = [NoPrefetching(), WithPrefetching()]
+    prefetchings = [NoPrefetching()]
+    neighbor_sets = [1,5,10]
 
     #sets = [Sift1M(), Sift10M()]
     #threadings = [SingleThread()]
     #prefetchings = [WithPrefetching()]
-    neighbor_sets = [1,5,10]
 
     iter = Iterators.product(neighbor_sets, prefetchings, threadings)
     for set in sets
@@ -281,7 +281,7 @@ function test_quantized_query(record)
         #(num_centroids = 256, num_partitions = 16),
         #(num_centroids = 512, num_partitions = 16),
         (num_centroids = 256, num_partitions = 32),
-        (num_centroids = 512, num_partitions = 32),
+        #(num_centroids = 512, num_partitions = 32),
     ]
 
     for set in sets, clustering_set in clustering_sets
