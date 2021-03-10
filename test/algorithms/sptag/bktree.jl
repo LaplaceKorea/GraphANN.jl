@@ -94,9 +94,9 @@ end
         builder = GraphANN._Trees.TreeBuilder{UInt32}(length(data))
         kmeans_runner = GraphANN.KMeansRunner(data, executor)
         exhaustive_runner = GraphANN.Algorithms.ExhaustiveRunner(
-            UInt32,
             length(data),
-            one;
+            one,
+            UInt32;
             executor = executor,
             costtype = Float32,
         )

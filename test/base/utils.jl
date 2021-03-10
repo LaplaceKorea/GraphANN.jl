@@ -50,6 +50,16 @@
         @test i == j
         @test i !== j
     end
+
+    #-- clog2
+    @test GraphANN.clog2(2) == 1
+    @test GraphANN.clog2(3) == 2
+    @test GraphANN.clog2(4) == 2
+    @test GraphANN.clog2(5) == 3
+
+    @test GraphANN.clog2(7) == 3
+    @test GraphANN.clog2(8) == 3
+    @test GraphANN.clog2(9) == 4
 end
 
 @testset "Neighbor" begin

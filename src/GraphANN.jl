@@ -1,6 +1,6 @@
 module GraphANN
 
-import Statistics
+#import Statistics
 
 const SRCDIR = @__DIR__
 const PKGDIR = dirname(SRCDIR)
@@ -36,9 +36,9 @@ function __run(index, queries, groundtruth, windows; num_neighbors = 5)
     for window in windows
         runner = ThreadLocal(DiskANNRunner(index, window))
         # Warmup
-        @time ids = searchall(runner, index, queries; num_neighbors, callbacks)
+        @time ids = search(runner, index, queries; num_neighbors, callbacks)
         empty!.(getall(times))
-        rt = @elapsed ids = searchall(runner, index, queries; num_neighbors, callbacks)
+        rt = @elapsed ids = search(runner, index, queries; num_neighbors, callbacks)
         recall = Statistics.mean(_Base.recall(groundtruth, ids))
         alltimes = reduce(vcat, getall(times))
 

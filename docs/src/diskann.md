@@ -68,7 +68,7 @@ julia> queries = GraphANN.sample_queries()
 
 julia> runner = GraphANN.DiskANNRunner(index, 10);
 
-julia> ids = GraphANN.searchall(runner, index, queries; num_neighbors = 5)
+julia> ids = GraphANN.search(runner, index, queries; num_neighbors = 5)
 5×100 Matrix{UInt32}:
  0x00000881  0x00000ade  0x00000a94  …  0x0000227a  0x00001555  0x00001f93
  0x00000ea9  0x00002567  0x000026d3     0x0000237a  0x00001540  0x0000224f
@@ -117,20 +117,67 @@ To use all available threads for querying, construct the `runner` object above w
 ```jldoctest diskann-example; filter = r"[0-9\.]+"
 julia> runner = GraphANN.DiskANNRunner(index, 10; executor = GraphANN.dynamic_thread);
 
-julia> ids = GraphANN.searchall(runner, index, queries; num_neighbors = 5);
+julia> ids = GraphANN.search(runner, index, queries; num_neighbors = 5);
 
 julia> mean(GraphANN.recall(groundtruth, ids))
 0.984
 ```
 
-## Native Saving and Loading
+## Gathering Telemetry
 
-## DiskANN Compatible Saving and Loading
+The [`search`](@ref GraphANN.search(::GrpahANN.DiskANNRunner, ::GrpahANN.DIskANNIndex, ::Any)
+methods accept a [`DiskANNCallbacks`](@ref GraphANN.Algorithms.DiskANNCallbacks) struct to help with
+gethering metrics during querying. The struct contains several arbitrary functions that are
+called at key points during the querying process, allowing for arbitrary telementry to
+be defined.
+
+### Latency Measurements
+
+An example of using the callback mechanism to perform latency measurements is shown below.
+```jldoctest diskann-example; filter = r"0x[0-9a-f]+"
+julia> runner = GraphANN.DiskANNRunner(index, 10; executor = GraphANN.dynamic_thread);
+
+julia> latencies, callbacks = GraphANN.Algorithms.latency_callbacks(runner);
+
+julia> get(latencies) # Initially, latency values are not populated.
+UInt64[]
+
+julia> ids = GraphANN.search(runner, index, queries; num_neighbors = 5, callbacks = callbacks);
+
+julia> get(latencies) # Latency in `ns` reported for each query.
+100-element Vector{UInt64}:
+ 0x000000000001cfe1
+ 0x00000000000130a4
+ 0x000000000001178a
+ 0x000000000001353d
+ 0x000000000001275d
+ 0x00000000000115bf
+ 0x0000000000011cbc
+ 0x0000000000018443
+ 0x000000000000f11b
+ 0x0000000000011a49
+                  ⋮
+ 0x0000000000008d8a
+ 0x0000000000009dca
+ 0x000000000000aaf9
+ 0x000000000000a5a6
+ 0x0000000000011e38
+ 0x000000000000e311
+ 0x000000000000aa18
+ 0x000000000000feaa
+ 0x0000000000008137
+```
+
+
 
 ## Docstrings
 ```@docs
 GraphANN.DiskANNRunner
 GraphANN.DiskANNIndex
 GraphANN.build(::Any, ::GraphANN.DiskANNIndexParameters)
+GraphANN.search(::GraphANN.DiskANNRunner, ::GraphANN.DiskANNIndex, ::Any)
+GraphANN.search(::GraphANN.DiskANNRunner, ::GraphANN.DiskANNIndex, ::AbstractVector{<:AbstractVector})
 GraphANN.DiskANNIndexParameters
+GraphANN.Algorithms.DiskANNCallbacks
+GraphANN.Algorithms.getresults!
 ```

@@ -14,11 +14,11 @@ makedocs(;
     ),
     pages=[
         "Home" => "index.md",
+        "Saving and Loading" => "io.md",
         "Algorithms" => [
             "Exhaustive" => "exhaustive.md",
             "DiskANN" => "diskann.md",
         ],
-        "Saving and Loading" => "io.md",
         "Internals" => [
             "Fundamentals" => "fundamentals.md",
             "Graphs" => "graphs.md",

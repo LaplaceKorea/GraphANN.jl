@@ -2,20 +2,43 @@
 ##### Exhaustive Search
 #####
 
-raw"""
-    exhaustive_search(queries, dataset, [num_neighbors]; [groupsize]) -> Matrix{UInt64}
+"""
+    exhaustive_search(queries, dataset, [num_neighbors]; [metric, idtype, groupsize]) -> Matrix{idtype}
 
 Perform a exhaustive nearest search operation of `queries` on `dataset`, finding the closest
-`num_neighbors` neighbors.
+`num_neighbors` neighbors with respect to `metric`.
 
-Returns a `Matrix{UInt64}` where column `i` lists the ids of the `num_neighbors` nearest
+Returns a `Matrix{idtype}` where column `i` lists the ids of the `num_neighbors` nearest
 neighbors of `query[i]` in descending order (i.e., index (i,1) is the nearest neighbor,
 (i,2) is the second nearest etc.)
+
+**Note**: Nearest neighbors will converted to index-0.
+
+## Example
+
+```jldoctest
+julia> dataset = GraphANN.sample_dataset();
+
+julia> queries = GraphANN.sample_queries();
+
+julia> neighbors = GraphANN.exhaustive_search(queries, dataset, 10)
+10×100 Matrix{Int64}:
+ 2176  2781  2707  9843  4719  1097  …  8419  9205  7512  8825  5460  8082
+ 3752  9574  9938  9825  5164  1239     8099  1185  5332  9081  5439  8782
+  882  2492  2698  9574  1671  4943     7678  9682  7939  6142  5810  4767
+ 4009  1322  9972  9582  1538  3227     7486  7271   266  5072  6882  9163
+ 2837  3136  6995  4097  5897   804     8608  2265  2126  6234  5773  9942
+  190  1038  6801  9576  4764  2607  …  8492  3055  4867  7467  6906  9993
+ 3615  9564  8906  9581  4559  4060     6804  1130  3206  6926  5924  9240
+  816   925  5232   272   358  4443     7411   349  2728  8102  6745  2894
+ 1045  3998  6162  9575  5775  4246     9267  2318  2949  5134  7419  9338
+ 1884  2183  5199  4096  4622  3112     4053   925  8307  8471  6047  9846
+```
 
 ## Performance Quidelines
 
 This process will go much faster if all the available threads on the machine are used.
-I.E., `export JULIA_NUM_THREADS=$(nproc)`
+I.E., `export JULIA_NUM_THREADS=\$(nproc)`
 
 The exhaustive search is implemented by grouping queries into groups of `groupsize` and
 then scaning the entire dataset to find the nearest neighbors for each query in the group.
@@ -30,16 +53,16 @@ function exhaustive_search(
     dataset::AbstractVector{B},
     num_neighbors::Integer = 100;
     metric = Euclidean(),
-    idtype::Type{I} = UInt32,
+    idtype::Type{I} = Int64,
     costtype::Type{D} = costtype(metric, A, B),
     executor = dynamic_thread,
     groupsize = 32,
     kw...
 ) where {A,B,I,D}
     runner = ExhaustiveRunner(
-        I,
         length(queries),
-        num_neighbors;
+        num_neighbors,
+        I;
         executor = executor,
         costtype = D,
         max_groupsize = groupsize,
@@ -53,6 +76,21 @@ const IntOrNeighbor{I} = Union{I, <:Neighbor{I}}
 inttype(::Type{I}) where {I <: Integer} = I
 inttype(::Type{<:Neighbor{I}}) where {I <: Integer} = I
 
+# """
+#     ExhaustiveRunner(max_queries::Integer, num_neighbors::Integer, [ID]; [kw...])
+#
+# Pre-allocate data structures for at most `max_queries` with at most `num_neighbors` per query.
+# Optional trailing argument `ID` selects the encoding of the results.
+# It can either be an integer (defaulting to `Int64`) in which case the nearest neighbors
+# will be returned as integer index, or it can be a [`Neighbor`](@ref), in which case
+# index/distance pairs will be returned.
+#
+# ## Keyword Arguments
+#
+# * `executor` - Choose between [`GraphANN.single_thread`](@ref) or
+#     [`GraphANN.dynamic_thread`](@ref).  Default: `GraphANN.single_thread`.
+# * `costtype` - Type returned by distance computations.
+# """
 mutable struct ExhaustiveRunner{V <: VecOrMat{<:IntOrNeighbor}, T <: MaybeThreadLocal{<:AbstractVector}, F}
     groundtruth::V
     exhaustive_local::T
@@ -60,9 +98,9 @@ mutable struct ExhaustiveRunner{V <: VecOrMat{<:IntOrNeighbor}, T <: MaybeThread
 end
 
 function ExhaustiveRunner(
-    ::Type{ID},
     num_queries::Integer,
-    num_neighbors::U = one;
+    num_neighbors::U = one,
+    ::Type{ID} = Int64;
     executor::F = single_thread,
     costtype::Type{D} = Float32,
     max_groupsize = 32,

@@ -47,9 +47,9 @@ function build_by_trees!(
         # Then, we can pass the `skip_size_check` argument to exhaustive search to only
         # populate sub sections of the result.
         runner = ExhaustiveRunner(
-            Neighbor{I,D},
             tree_leaf_size,
-            compensated_neighbors;
+            compensated_neighbors,
+            Neighbor{I,D};
             executor = single_thread,
             costtype = D
         ),

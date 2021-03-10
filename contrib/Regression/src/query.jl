@@ -106,7 +106,7 @@ function query(
         # Even though we might ask for single threaded latency, here we use multithreading
         # just to make convergencde a little faster.
         algo, meta = make_algo(windowsize, MultiThread(), NoPrefetching(), meta)
-        ids = GraphANN.searchall(algo, meta, start, queries; num_neighbors = num_neighbors)
+        ids = GraphANN.search(algo, meta, start, queries; num_neighbors = num_neighbors)
         return mean(GraphANN.recall(groundtruth, ids))
     end
     memoized = memoize(closure)
@@ -124,7 +124,7 @@ function query(
         algo, modified_meta = make_algo(windowsize, threading, prefetching, meta)
 
         # Warmup Round
-        f = () -> GraphANN.searchall(
+        f = () -> GraphANN.search(
             algo,
             modified_meta,
             start,

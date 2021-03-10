@@ -14,5 +14,5 @@ GraphANN.recall
 ## SIMD Pipeline
 
 ```@docs
-GraphANN._Base.EagerWrap
+GraphANN._Base.ValueWrap
 ```

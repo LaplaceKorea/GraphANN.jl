@@ -48,7 +48,7 @@ approx_or_greater(x, y) = (x ≈ y) || (x > y)
         maxcheck = comparison.maxcheck
         propagation_limit = GraphANN.cdiv(maxcheck, 64)
 
-        ids = GraphANN.searchall(
+        ids = GraphANN.search(
             algo,
             meta,
             tree,

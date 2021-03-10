@@ -256,7 +256,7 @@ function neighbor_updates!(
     # Use lazy functions to efficientaly initialize the Pruner object
     vertex_data = data[vertex]
     initialize!(
-        u -> Neighbor(index, u, evaluate(Euclidean(), vertex_data, @inbounds data[u])),
+        u -> Neighbor(index, u, evaluate(Euclidean(), vertex_data, pointer(data, u))),
         !isequal(vertex),
         pruner,
         candidates,
@@ -278,7 +278,7 @@ function neighbor_updates!(
 
         # Note: We're indexing `data` with `Neighbor` objects, but that's fine because
         # we've defined that behavior in `utils.jl`.
-        f = x -> (alpha * evaluate(Euclidean(), data[i], data[x]) <= getdistance(x))
+        f = x -> (alpha * evaluate(Euclidean(), pointer(data, i), pointer(data, x)) <= getdistance(x))
         prune!(f, pruner; start = state)
         length(nextlist) >= target_degree && break
 

@@ -49,7 +49,7 @@ end
     @test iszero(t[1][31])
     @test iszero(t[1][32])
 
-    # Now - time to test that EagerWrap is doing its job.
+    # Now - time to test that ValueWrap is doing its job.
     # The strategy is this:
     #
     # 1. Construct some tuples of UInt8
@@ -60,8 +60,8 @@ end
     x = SVector(_merge(a, b, c, d))
     @test isa(x, SVector{128,UInt8})
 
-    sx = GraphANN._Base.EagerWrap{SIMD.Vec{32,Float32}}(x)
-    @test isa(sx, GraphANN._Base.EagerWrap)
+    sx = GraphANN._Base.ValueWrap{SIMD.Vec{32,Float32}}(x)
+    @test isa(sx, GraphANN._Base.ValueWrap)
     @test length(sx) == div(128, 32)
     @test length(sx[1]) == 32
     @test eltype(sx[1]) == Float32
@@ -120,38 +120,44 @@ end
     @test GraphANN.costtype(E, U8, U8) == Int32
 end
 
+test_euclidean(V::Vector) = test_euclidean(V[1], V[2], pointer(V, 1), pointer(V, 2))
+test_euclidean(A::Vector, B::Vector) = test_euclidean(A[1], B[1], pointer(A, 1), pointer(B, 1))
+
+function test_euclidean(a, b, pa::Ptr, pb::Ptr)
+    metric = GraphANN.Euclidean()
+    ref = euclidean_reference(a, b)
+    # Try all pointer/value pairs
+    @test isapprox(GraphANN.evaluate(metric, a, b), ref)
+    @test isapprox(GraphANN.evaluate(metric, pa, pb), ref)
+    @test isapprox(GraphANN.evaluate(metric, pa, b), ref)
+    @test isapprox(GraphANN.evaluate(metric, a, pb), ref)
+end
+
 @testset "Testing Euclidean Calculations" begin
     # Lets do some distance calculations
     scale = 100
     metric = GraphANN.Euclidean()
+    x = Vector{SVector{128,Float32}}(undef, 2)
     for i in 1:50000
-        a = scale .* rand(SVector{128,Float32})
-        b = scale .* rand(SVector{128,Float32})
-
-        @test isapprox(
-            GraphANN.evaluate(metric, a, b),
-            euclidean_reference(a, b)
-        )
+        x[1] = scale .* rand(SVector{128,Float32})
+        x[2] = scale .* rand(SVector{128,Float32})
+        test_euclidean(x)
     end
 
+    x = Vector{SVector{128,UInt8}}(undef, 2)
     for i in 1:50000
-        a = rand(SVector{128,UInt8})
-        b = rand(SVector{128,UInt8})
-        @test isapprox(
-            GraphANN.evaluate(metric, a, b),
-            euclidean_reference(a, b)
-        )
+        x[1] = rand(SVector{128,UInt8})
+        x[2] = rand(SVector{128,UInt8})
+        test_euclidean(x)
     end
 
     # Mixed types
+    x = Vector{SVector{128,UInt8}}(undef, 1)
+    y = Vector{SVector{128,Float32}}(undef, 1)
     for i in 1:50000
-        a = rand(SVector{128,UInt8})
-        b = scale .* rand(SVector{128,Float32})
-
-        @test isapprox(
-            GraphANN.evaluate(metric, a, b),
-            euclidean_reference(a, b)
-        )
+        x[1] = rand(SVector{128,UInt8})
+        y[1] = scale .* rand(SVector{128,Float32})
+        test_euclidean(x, y)
     end
 end
 

@@ -18,7 +18,7 @@ Fields and Signatures
     Does not automatically differentiate between multithreaded and singlethreaded cases.
 
 * `postdistance` - Called after distance computations for a vertex have been completed.
-    Signature: `postdistance(algo::DiskANNRunner, neighbors::AbstractVector)`.
+    Signature: `postdistance(algo::DiskANNRunner, vertex::Integer, neighbors::AbstractVector)`.
     - `algo` provides the current state of the search.
     - `neighbors` the adjacency list for the vertex that was just processed.
         *NOTE*: Do NOT mutate neighbors, it MUST be constant.
@@ -95,7 +95,7 @@ to construct a type that will use all available threads for querying.
 Construct a `DiskANNRunner` with id-type `I` and distance-type `D` with the given
 `search_lists_size` and `executor`. Keyword `executor` defaults to [`single_thread`](@ref).
 
-See also: [`searchall`](@ref)
+See also: [`search`](@ref)
 """
 mutable struct DiskANNRunner{I <: Integer, D, T <: AbstractSet, P}
     search_list_size::Int64
@@ -279,9 +279,9 @@ end
     search(runner::DiskANNRunner, index::DiskANNIndex, query; [callbacks])
 
 Perform approximate nearest neighbor search for `query` over `index`.
-Results can be obtained using [`getresults!`]
+Results can be obtained using [`getresults!`](@ref)
 
-Callbacks is an optional [`DiskANNCallbacks`] struct to help with gathering metrics.
+Callbacks is an optional [`DiskANNCallbacks`](@ref) struct to help with gathering metrics.
 """
 function _Base.search(
     algo::DiskANNRunner,
@@ -318,7 +318,7 @@ function _Base.search(
             # Perform distance query, and try to prefetch the next datapoint.
             # NOTE: Checking if a vertex has been visited here is actually SLOWER than
             # deferring until after the distance comparison.
-            @inbounds d = evaluate(metric, query, data[v])
+            @inbounds d = evaluate(metric, query, pointer(data, v))
 
             ## only bother to add if it's better than the worst currently tracked.
             if d < algmax || !isfull(algo)
@@ -326,17 +326,27 @@ function _Base.search(
             end
         end
 
-        callbacks.postdistance(algo, neighbors)
+        callbacks.postdistance(algo, p, neighbors)
     end
 
     return nothing
 end
 
 # Single Threaded Query
-function _Base.searchall(
+"""
+    search(runner::DiskANNRunner, index::DiskANNIndex, queries; [num_neighbors], [callbacks])
+
+Perform approximate nearest neighbor search for all entries in `queries`, returning
+`num_neighbors` results for each query. The results is a `num_neighbors × length(queries)`
+matrix. The nearest neighbors for `queries[i]` will be in column `i` of the returned
+matrix, sorted from nearest to furthest.
+
+Callbacks is an optional [`DiskANNCallbacks`](@ref) struct to help with gathering metrics.
+"""
+function _Base.search(
     algo::DiskANNRunner,
     index::DiskANNIndex,
-    queries::AbstractVector;
+    queries::AbstractVector{<:AbstractVector};
     num_neighbors = 10,
     callbacks = DiskANNCallbacks(),
 )
@@ -362,7 +372,7 @@ function _Base.searchall(
 end
 
 # Multi Threaded Query
-function _Base.searchall(
+function _Base.search(
     tls::ThreadLocal{<:DiskANNRunner},
     index::DiskANNIndex,
     queries::AbstractVector;
@@ -428,8 +438,18 @@ function latency_callbacks(runner::MaybeThreadLocal{DiskANNRunner})
 end
 
 function visited_callbacks()
-    visited = UInt32[]
-    postdistance = (_, neighbors) -> append!(visited, neighbors)
-    return (visited = visited, callbacks = DiskANNCallbacks(; postdistance))
+    histogram = zeros(Int, 1_000_000_000)
+    postdistance = function __postdistance(_, _, neighbors)
+        for v in neighbors
+            histogram[v] += 1
+        end
+    end
+    return (histogram = histogram, callbacks = DiskANNCallbacks(; postdistance))
 end
+
+# function visited_callbacks()
+#     visited = UInt32[]
+#     postdistance = (_, neighbors) -> append!(visited, neighbors)
+#     return (visited = visited, callbacks = DiskANNCallbacks(; postdistance))
+# end
 

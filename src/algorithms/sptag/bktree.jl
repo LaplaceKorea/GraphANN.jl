@@ -44,9 +44,9 @@ function coarse_pass!(
 
     kmeans_runner = KMeansRunner(data, dynamic_thread)
     exhaustive_runner = ExhaustiveRunner(
-        I,
         length(data),
-        one;
+        one,
+        I;
         executor = dynamic_thread,
         costtype = Float32,
     )
@@ -78,9 +78,9 @@ function fine_pass!(
 ) where {I,N,T}
     kmeans_runners = ThreadLocal(KMeansRunner(data, single_thread))
     exhaustive_runners = ExhaustiveRunner(
-        I,
         stacksplit,
-        one;
+        one,
+        I;
         executor = single_thread,
         costtype = Float32,
     ) |> ThreadLocal

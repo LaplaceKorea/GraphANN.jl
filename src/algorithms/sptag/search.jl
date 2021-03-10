@@ -182,11 +182,11 @@ end
 ##### Search All
 #####
 
-function _Base.searchall(
+function _Base.search(
     algo::TagSearch,
-    meta,
-    tree,
-    queries::AbstractVector;
+    meta::MetaGraph,
+    tree::Tree,
+    queries::AbstractVector{<:AbstractVector};
     kw...
 )
     @unpack graph = meta
@@ -207,11 +207,11 @@ function _Base.searchall(
     return dest
 end
 
-function _Base.searchall(
+function _Base.search(
     tls::ThreadLocal{<:TagSearch},
-    meta,
-    tree,
-    queries;
+    meta::MetaGraph,
+    tree::Tree,
+    queries::AbstractVector{<:AbstractVector};
     kw...
 )
     metric = Euclidean()

@@ -26,7 +26,7 @@ resettimer!() = TimerOutputs.reset_timer!(gettimer())
 ##### Generic Distance
 #####
 
-export evaluate, build, search, searchall
+export evaluate, build, search
 
 """
     evaluate(metric, x, y)
@@ -59,7 +59,6 @@ include("euclidean.jl")
 
 function build end
 function search end
-function searchall end
 
 #####
 ##### Allocators
@@ -108,7 +107,7 @@ include("minmax_heap.jl")
 ##### Utilities
 #####
 
-export safe_maximum, donothing, printlnstyled, always_false, zero!, typemax!, cdiv, toeltype
+export safe_maximum, donothing, printlnstyled, always_false, zero!, typemax!, cdiv, toeltype, clog2
 export Neighbor, getid, getdistance, idtype, costtype
 export RobinSet
 export zeroas, medioid, nearest_neighbor

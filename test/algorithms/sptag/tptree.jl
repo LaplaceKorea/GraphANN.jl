@@ -136,9 +136,9 @@ end
     base_distances = Matrix{Float32}(undef, num_neighbors, length(data))
     for range in GraphANN.batched(1:length(data), leafsize)
         erunner = GraphANN.Algorithms.ExhaustiveRunner(
-            GraphANN.Neighbor{UInt32,Float32},
             length(range),
             num_neighbors,
+            GraphANN.Neighbor{UInt32,Float32},
         )
 
         dataview = view(data, range)
@@ -165,9 +165,9 @@ end
             # Pre-allocate the result matrix for `bruteforce_search` with eltype `Neighbor`.
             # This will ensure that we get the distances.
             erunner = GraphANN.Algorithms.ExhaustiveRunner(
-                GraphANN.Neighbor{UInt32,Float32},
                 length(range),
                 num_neighbors,
+                GraphANN.Neighbor{UInt32,Float32},
             )
             dataview = GraphANN.Algorithms.doubleview(data, permutation, range)
             @test length(dataview) == length(range)

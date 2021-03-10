@@ -1,7 +1,6 @@
 module Algorithms
 
 export DiskANNRunner, DiskANNIndex, DiskANNIndexParameters
-export build
 export TreeSearcher
 
 # stdlib
@@ -29,7 +28,7 @@ threadlocal_wrap(::typeof(dynamic_thread), x) = ThreadLocal(x)
 threadlocal_wrap(::typeof(single_thread), x) = x
 
 # exhaustive search
-export exhaustive_search, exhaustive_search!
+export exhaustive_search
 include("exhaustive.jl")
 
 # diskann

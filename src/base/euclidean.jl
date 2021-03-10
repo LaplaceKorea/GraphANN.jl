@@ -32,6 +32,8 @@ struct Euclidean end
 
 const SIMDType{N,T} = Union{SVector{N,T}, SIMD.Vec{N,T}}
 
+abstract type AbstractWrap{V <: SIMDType, K} end
+
 # Ideally, the generated code for this should be a no-op, it's just awkward because
 # Julia doesn't really have a "bitcast" function ...
 # This also has the benefit of allowing us to do lazy zero padding if necessary,
@@ -59,7 +61,7 @@ end
 end
 
 """
-    EagerWrap{V <: SIMDType, K,N,T}
+    ValueWrap{V <: SIMDType, K,N,T}
 
 Wrapper for tuple of `SIMD.Vec{N,T}` with length `K`.
 When indexing, converts elements to type `V`.
@@ -82,7 +84,7 @@ julia> x = rand(GraphANN.SVector{12,Int8})
   -70
    57
 
-julia> y = GraphANN._Base.EagerWrap{SIMD.Vec{4,Float32}}(x);
+julia> y = GraphANN._Base.ValueWrap{SIMD.Vec{4,Float32}}(x);
 
 julia> y[1]
 <4 x Float32>[-15.0, 37.0, -25.0, -77.0]
@@ -91,30 +93,68 @@ julia> y[2]
 <4 x Float32>[8.0, -121.0, 19.0, 103.0]
 ```
 """
-struct EagerWrap{V <: SIMDType,K,N,T}
+struct ValueWrap{V <: SIMDType,K,N,T} <: AbstractWrap{V,K}
     vectors::NTuple{K, SIMD.Vec{N,T}}
 end
-EagerWrap{V}(x::NTuple{K, SIMD.Vec{N,T}}) where {V,K,N,T} = EagerWrap{V,K,N,T}(x)
+ValueWrap{V}(x::NTuple{K, SIMD.Vec{N,T}}) where {V,K,N,T} = ValueWrap{V,K,N,T}(x)
 
 # Implementation note - even though the `cast` function looks like is should spew out
 # a bunch of garbage, we're depending on LLVM to convert this into a series of bitcasts
 # and ultimately a no-op.
-function EagerWrap{SIMD.Vec{N1,T1}}(x::SVector{N2,T2}) where {N1,T1,N2,T2}
+function ValueWrap{SIMD.Vec{N1,T1}}(x::SVector{N2,T2}) where {N1,T1,N2,T2}
     vectors = cast(SIMD.Vec{N1,T2}, x)
-    return EagerWrap{SIMD.Vec{N1,T1}}(vectors)
+    return ValueWrap{SIMD.Vec{N1,T1}}(vectors)
 end
 
-Base.@propagate_inbounds function Base.getindex(x::EagerWrap{V}, i) where {V}
+Base.@propagate_inbounds function Base.getindex(x::ValueWrap{V}, i) where {V}
     return convert(V, x.vectors[i])
 end
 
 # Non-converting indexing.
 # Probably don't need this ...
-Base.@propagate_inbounds function Base.getindex(x::EagerWrap{SIMD.Vec{N,T},<:Any,N,T}) where {N,T}
+Base.@propagate_inbounds function Base.getindex(x::ValueWrap{SIMD.Vec{N,T},<:Any,N,T}) where {N,T}
     return x.vectors[i]
 end
 
-Base.length(::EagerWrap{V,K}) where {V,K} = K
+Base.length(::ValueWrap{V,K}) where {V,K} = K
+
+#####
+##### PtrWrap
+#####
+
+"""
+    PtrWrap{V <: SIMDType, K, N, T} <: AbstractWrap{V, K}
+
+Wrap a pointer to data that we which to interpret as `K` copies of a `SIMD.Vec{N,T}` that
+will be converted to `V` upon calling `getindex`.
+"""
+struct PtrWrap{V <: SIMDType, K, N, T} <: AbstractWrap{V, K}
+    ptr::Ptr{SIMD.Vec{N,T}}
+end
+unwrap(x::PtrWrap) = x.ptr
+
+function PtrWrap{SIMD.Vec{N1,T1}}(ptr::Ptr{SVector{N2,T2}}) where {N1,T1,N2,T2}
+    K = div(N2, N1)
+    return PtrWrap{SIMD.Vec{N1,T1}, K, N1, T2}(convert(Ptr{SIMD.Vec{N1,T2}}, ptr))
+end
+
+Base.@propagate_inbounds function Base.getindex(x::PtrWrap{V,K,N,T}, i) where {V,K,N,T}
+    return convert(V, unsafe_load(unwrap(x) + (i - 1) * sizeof(SIMD.Vec{N,T})))
+end
+
+Base.@propagate_inbounds function Base.getindex(x::PtrWrap{SIMD.Vec{N,T},<:Any,N,T}, i) where {N,T}
+    return unsafe_load(unwrap(x) + (i - 1) * sizeof(SIMD.Vec{N,T}))
+end
+
+Base.length(::PtrWrap{V,K}) where {V,K} = K
+
+#####
+##### Wrapping
+#####
+
+wrap(::Type{V}, x::SVector) where {V} = ValueWrap{V}(x)
+wrap(::Type{V}, x::Ptr{<:SVector}) where {V} = PtrWrap{V}(x)
+const MaybePtr{T} = Union{T, Ptr{<:T}}
 
 #####
 ##### SIMD Promotion and Stuff
@@ -199,13 +239,17 @@ simd_type(::Type{T}) where {T} = simd_type(T, T)
 Return the euclidean distance between `a` and `b`.
 Return type can be queried by `costtype(Euclidean(), a, b)`.
 """
-function evaluate(metric::Euclidean, a::A, b::B) where {A <: SVector, B <: SVector}
+function evaluate(
+    metric::Euclidean,
+    a::MaybePtr{A},
+    b::MaybePtr{B},
+) where {A <: SVector, B <: SVector}
     Base.@_inline_meta
     T = simd_type(A, B)
-    return evaluate(metric, EagerWrap{T}(a), EagerWrap{T}(b))
+    return evaluate(metric, wrap(T, a), wrap(T, b))
 end
 
-function evaluate(::Euclidean, a::EagerWrap{V,K}, b::EagerWrap{V,K}) where {V, K}
+function evaluate(::Euclidean, a::AbstractWrap{V,K}, b::AbstractWrap{V,K}) where {V, K}
     Base.@_inline_meta
     s = zero(accum_type(V))
     for i in 1:K

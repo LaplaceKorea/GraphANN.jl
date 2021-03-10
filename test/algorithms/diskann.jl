@@ -44,7 +44,7 @@ function test_index(
 
     @test eltype(ground_truth) == UInt32
     algo = GraphANN.DiskANNRunner(meta, 100)
-    ids = GraphANN.searchall(algo, meta, queries; num_neighbors = 100)
+    ids = GraphANN.search(algo, meta, queries; num_neighbors = 100)
     recalls = GraphANN.recall(ground_truth, ids)
     @test mean(recalls) >= 0.99
     return meta
@@ -223,7 +223,7 @@ end
         algo = GraphANN.DiskANNRunner(meta, comparison.window_size)
 
         # Obtain the approximate nearest neighbors
-        ids = GraphANN.searchall(
+        ids = GraphANN.search(
             algo,
             meta,
             queries;
@@ -277,11 +277,11 @@ end
     @test isa(runner_mt, GraphANN.ThreadLocal)
 
     # Run twice, once for warmup.
-    rt_st = @elapsed ids_st = GraphANN.searchall(runner_st, index, queries)
-    rt_st = @elapsed ids_st = GraphANN.searchall(runner_st, index, queries)
+    rt_st = @elapsed ids_st = GraphANN.search(runner_st, index, queries)
+    rt_st = @elapsed ids_st = GraphANN.search(runner_st, index, queries)
 
-    rt_mt = @elapsed ids_mt = GraphANN.searchall(runner_mt, index, queries)
-    rt_mt = @elapsed ids_mt = GraphANN.searchall(runner_mt, index, queries)
+    rt_mt = @elapsed ids_mt = GraphANN.search(runner_mt, index, queries)
+    rt_mt = @elapsed ids_mt = GraphANN.search(runner_mt, index, queries)
 
     @test ids_st == ids_mt
     @test rt_mt <= 0.6 * rt_st
@@ -294,7 +294,7 @@ end
     @test isa(latencies_st, GraphANN.Algorithms.Latencies{Vector{UInt64}})
 
     # Run twice to force precompilation.
-    ids = GraphANN.searchall(runner_st, index, queries; callbacks = callbacks_st)
+    ids = GraphANN.search(runner_st, index, queries; callbacks = callbacks_st)
     values = get(latencies_st)
     @test isa(values, Vector{UInt64})
     @test length(values) == length(queries)
@@ -303,13 +303,13 @@ end
     values = get(latencies_st)
     @test isempty(values)
 
-    ids = GraphANN.searchall(runner_st, index, queries; callbacks = callbacks_st)
+    ids = GraphANN.search(runner_st, index, queries; callbacks = callbacks_st)
 
     # Now multithreaded
     latencies_mt, callbacks_mt = GraphANN.Algorithms.latency_callbacks(runner_mt)
     @test isa(latencies_mt, GraphANN.Algorithms.Latencies{<:GraphANN.ThreadLocal})
 
-    ids = GraphANN.searchall(runner_mt, index, queries; callbacks = callbacks_mt)
+    ids = GraphANN.search(runner_mt, index, queries; callbacks = callbacks_mt)
     values = get(latencies_mt)
     @test isa(values, Vector{UInt64})
     @test length(values) == length(queries)
@@ -318,7 +318,7 @@ end
     values = get(latencies_mt)
     @test isempty(values)
 
-    ids = GraphANN.searchall(runner_mt, index, queries; callbacks = callbacks_mt)
+    ids = GraphANN.search(runner_mt, index, queries; callbacks = callbacks_mt)
 
     # Compare latencies.
     # We expect the mean multithreaded latency to be higher than the mean singlethreaded

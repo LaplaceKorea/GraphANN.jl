@@ -15,6 +15,8 @@ cdiv(a::T, b::T) where {T <: Integer} = one(T) + div(a - one(T), b)
 toeltype(::Type{T}, x::AbstractArray) where {T} = map(i -> convert(T, i), x)
 toeltype(::Type{T}, x::AbstractArray{<:AbstractArray}) where {T} = map(i -> toeltype(T, i), x)
 
+clog2(x::T) where {T <: Integer} = ceil(T, log2(x))
+
 #####
 ##### Neighbor
 #####
@@ -88,6 +90,7 @@ end
 
 # Convenience for array indexing
 @inline Base.getindex(A::AbstractArray, i::Neighbor) = A[getid(i)]
+@inline Base.pointer(A::AbstractArray, i::Neighbor) = pointer(A, getid(i))
 
 #####
 ##### Robin Set

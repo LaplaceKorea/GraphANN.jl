@@ -137,7 +137,7 @@ function quantized_query(
 
         # Since refinement is not yet implemented, we need to use a slightly difference
         # version to calculate recall.
-        ids = GraphANN.searchall(
+        ids = GraphANN.search(
             algo,
             meta,
             start,
@@ -159,7 +159,7 @@ function quantized_query(
     callback_tuple = get_callbacks(callbacks, SingleThread())
     for (target, windowsize) in zip(target_accuracies, windowsizes)
         algo = GraphANN.DiskANNRunner(windowsize; costtype = Float32)
-        f = () -> GraphANN.searchall(
+        f = () -> GraphANN.search(
             algo,
             meta,
             start,

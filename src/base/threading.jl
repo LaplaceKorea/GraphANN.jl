@@ -160,9 +160,70 @@ end
 
 # Thread local storage.
 """
-    ThreadLocal{T,U}
+    ThreadLocal{T}
 
-Create an instance of type `T` for each thread in a `ThreadPool{U}`.
+Create an instance of type `T` for each thread in a [`ThreadPool`](@ref).
+The thread pool defaults to [`allthreads()`](@ref) but may be customized.
+
+## Examples
+
+The examples below assume that Julia has been started with 4 threads (JULIA_NUM_THREADS = 4)>
+```julia
+# Basic constructor - creates a copy of the argument for each thread.
+juila> x = GraphANN.ThreadLocal(Int[]);
+
+# Access all values using `getall`.
+julia> GraphANN.getall(x)
+4-element Vector{Vector{Int64}}:
+ []
+ []
+ []
+ []
+
+# A thread can access its local version using `getindex`.
+julia> y = x[]
+Int64[]
+
+# Objects are deepcopied, so each thead by default gets a unique object.
+julia> push!(y, 10); GraphANN.getall(x)
+4-element Vector{Vector{Int64}}:
+ [10]
+ []
+ []
+ []
+```
+As can be seen in the above example, each object replicated by the `ThreadLocal` constructor
+is replicated using `deepcopy`. To customize this behavior, extend `GraphANN.threadcopy`
+for the desired type to implement the desired copying behavior.
+
+If multiple different structs are needed for each thread, than a `ThreadLocal` can also
+be constructed using keywords, which will be converted into a `NamedTuple`.
+```julia
+julia> x = GraphANN.ThreadLocal(; a = 1, b = Int64[]);
+
+julia> GraphANN.getall(x)
+4-element Vector{NamedTuple{(:a, :b), Tuple{Int64, Vector{Int64}}}}:
+ (a = 1, b = [])
+ (a = 1, b = [])
+ (a = 1, b = [])
+ (a = 1, b = [])
+
+julia> x[]
+(a = 1, b = Int64[])
+```
+Different thread pools can also be provided as an optional first argument.
+```julia
+julia> x = GraphANN.ThreadLocal(GraphANN.ThreadPool([2,4,5]); a = 1, b = Int64[]);
+
+julia> x[2]
+(a = 1, b = Int64[])
+
+# Note - since thread 1 is not in the thread pool, it cannot access `x` using the normal
+# `getindex` method.
+julia> x[]
+ERROR: KeyError: key 1 not found
+[...]
+```
 """
 struct ThreadLocal{T,U}
     # When used on conjunction with a ThreadPool, we need a dictionary to translate from
@@ -176,7 +237,7 @@ struct ThreadLocal{T,U}
 
     # Inner constructor to resolve ambiguities
     function ThreadLocal{T}(values::Vector{T}, pool::ThreadPool{U}) where {T, U}
-        translation = Dict(j => i for (j, i) in enumerate(pool))
+        translation = Dict(i => j for (j, i) in enumerate(pool))
         return new{T, U}(values, pool, translation)
     end
 
@@ -222,13 +283,30 @@ function Base.setindex!(t::ThreadLocal{<:Any,<:Base.OneTo}, v, i::Integer = Thre
     t.values[i] = v
 end
 
+"""
+    getall(x::ThreadLocal)
+
+Return all thread local datastructures in `x`.
+"""
 getall(t::ThreadLocal) = t.values
 # Often, a `NamedTuple` can be passed to routines instead of a `ThreadLocal` if the routine
 # is using a single thread. Wrap that tuple inside of another tuple so iteration works
 # as expected.
 getall(nt::NamedTuple) = (nt,)
+
+"""
+    getpool(x::ThreadLocal)
+
+Return the [`ThreadPool`](@ref) for `x`.
+"""
 getpool(t::ThreadLocal) = t.pool
 
+"""
+    getlocal(x)
+
+If `x` is a [`ThreadLocal`](@ref), then return the local data structure for the current
+thread. Otherwise, just return `x`.
+"""
 getlocal(x::ThreadLocal) = x[]
 getlocal(x) = x
 

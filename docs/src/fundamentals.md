@@ -165,5 +165,8 @@ GraphANN._Base.allthreads
 GraphANN._Base.TaskHandle
 GraphANN._Base.on_threads
 GraphANN._Base.ThreadLocal
+GraphANN.getall
+GraphANN.getpool
+GraphANN.getlocal
 ```
 
