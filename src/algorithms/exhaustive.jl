@@ -137,7 +137,7 @@ function sizecheck(groundtruth::AbstractMatrix, num_neighbors, num_queries)
     @assert size(groundtruth) == (num_neighbors, num_queries)
 end
 
-function search!(
+function _Base.search!(
     runner::ExhaustiveRunner,
     queries::AbstractVector,
     dataset::AbstractVector;
@@ -192,8 +192,10 @@ Base.@propagate_inbounds function _nearest_neighbors!(
 ) where {T <: Neighbor}
     @inbounds for base_id in eachindex(dataset)
         base = dataset[base_id]
+
         for (heap_num, query_id) in enumerate(range)
             query = queries[query_id]
+            prehook(metric, query)
             dist = evaluate(metric, query, base)
 
             # Need to convert from 1 based indexing to 0 based indexing...

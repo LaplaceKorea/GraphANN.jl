@@ -159,5 +159,15 @@ end
         y[1] = scale .* rand(SVector{128,Float32})
         test_euclidean(x, y)
     end
+
+    # Scalar broadcasting.
+    x = rand(SVector{128, Float32}, 3)
+    y = rand(SVector{128, Float32}, 3)
+
+    metric = GraphANN.Euclidean()
+    d = GraphANN.evaluate.(metric, x, y)
+    for i in eachindex(x, y)
+        @test d[i] == GraphANN.evaluate(metric, x[i], y[i])
+    end
 end
 

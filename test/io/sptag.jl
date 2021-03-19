@@ -51,4 +51,56 @@
         b = TreeNode(zero(UInt32), zero(UInt32), zero(UInt32))
         @test adjust(a) == b
     end
+
+    @testset "Tree Writes" begin
+        original_path = joinpath(sptag_dir, "siftsmall", "tree.bin")
+        tree = GraphANN._IO.load_bktree(original_path)
+
+        temp_path = tempname(@__DIR__; cleanup = true)
+        GraphANN.save(GraphANN.SPTAG(), temp_path, tree.tree)
+
+        # Check that file contents match
+        crc_original = open(crc32c, original_path)
+        crc_new = open(crc32c, temp_path)
+        @test crc_original == crc_new
+    end
+
+    @testset "Graph Round Trip" begin
+        original_path = joinpath(sptag_dir, "siftsmall", "graph.bin")
+
+        # N.B.: Like DiskANN, SPTAG doesn't keep its adjacency lists sorted by index,
+        # which is expected by LightGraphs.jl
+        #
+        # SO, when we're performing the comparison, don't sort so we preserve the original
+        # ordering.
+        graph = GraphANN._IO.load_graph(GraphANN.SPTAG(), original_path; sort = false)
+
+        temp_path = tempname(@__DIR__; cleanup = true)
+        GraphANN.save(GraphANN.SPTAG(), temp_path, graph)
+
+        # Check that file contents match
+        crc_original = open(crc32c, original_path)
+        crc_new = open(crc32c, temp_path)
+        @test crc_original == crc_new
+    end
+
+    @testset "Testting Misc" begin
+        data = GraphANN.sample_dataset()
+        # Note: `mktempdir` removes the directory when done.
+        mktempdir() do dir
+            GraphANN._IO.generate_misc(GraphANN.SPTAG(), dir, data)
+
+            paths = [
+                "metadata.bin",
+                "metadataIndex.bin",
+                "deletes.bin",
+            ]
+
+            for path in paths
+                crc_original = open(crc32c, joinpath(sptag_dir, "siftsmall", path))
+                crc_new = open(crc32c, joinpath(dir, path))
+                @test crc_original == crc_new
+            end
+        end
+    end
 end

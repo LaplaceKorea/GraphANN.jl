@@ -286,14 +286,15 @@ Callbacks is an optional [`DiskANNCallbacks`](@ref) struct to help with gatherin
 function _Base.search(
     algo::DiskANNRunner,
     index::DiskANNIndex,
-    query,
+    query::AbstractVector{T},
     start::StartNode = index.startnode;
     callbacks = DiskANNCallbacks(),
-)
+    metric = getlocal(index.metric),
+) where {T <: Number}
     empty!(algo)
 
     # Destructure argument
-    @unpack graph, data, metric = index
+    @unpack graph, data = index
     initial_distance = evaluate(metric, query, start.value)
     pushcandidate!(algo, Neighbor(algo, start.index, initial_distance))
 
@@ -332,7 +333,6 @@ function _Base.search(
     return nothing
 end
 
-# Single Threaded Query
 """
     search(runner::DiskANNRunner, index::DiskANNIndex, queries; [num_neighbors], [callbacks])
 
@@ -344,19 +344,31 @@ matrix, sorted from nearest to furthest.
 Callbacks is an optional [`DiskANNCallbacks`](@ref) struct to help with gathering metrics.
 """
 function _Base.search(
+    runner::MaybeThreadLocal{DiskANNRunner},
+    index::DiskANNIndex,
+    queries::AbstractVector{T};
+    num_neighbors = 10,
+    kw...,
+) where {T <: AbstractVector}
+    num_queries = length(queries)
+    dest = Array{eltype(index.graph),2}(undef, num_neighbors, num_queries)
+    return search!(dest, runner, index, queries; num_neighbors, kw...)
+end
+
+# Single Threaded Query
+function _Base.search!(
+    dest::AbstractMatrix,
     algo::DiskANNRunner,
     index::DiskANNIndex,
-    queries::AbstractVector{<:AbstractVector};
+    queries::AbstractVector;
     num_neighbors = 10,
     callbacks = DiskANNCallbacks(),
 )
-    num_queries = length(queries)
-    dest = Array{eltype(index.graph),2}(undef, num_neighbors, num_queries)
     for (col, query) in enumerate(queries)
         # -- optional telemetry
         callbacks.prequery()
 
-        #_Base.distance_prehook(metric, query)
+        _Base.prehook(getlocal(index.metric), query)
         search(algo, index, query; callbacks)
 
         # Copy over the results to the destination
@@ -371,18 +383,17 @@ function _Base.search(
     return dest
 end
 
+
 # Multi Threaded Query
-function _Base.search(
+function _Base.search!(
+    dest::AbstractMatrix,
     tls::ThreadLocal{<:DiskANNRunner},
     index::DiskANNIndex,
     queries::AbstractVector;
     num_neighbors = 10,
     callbacks = DiskANNCallbacks(),
 )
-    num_queries = length(queries)
-    dest = Array{eltype(index.graph),2}(undef, num_neighbors, num_queries)
-
-    dynamic_thread(getpool(tls), eachindex(queries), 64) do col
+    dynamic_thread(getpool(tls), eachindex(queries), 8) do col
         #_metric = _Base.distribute_distance(metric)
         query = queries[col]
         algo = tls[]
@@ -390,7 +401,7 @@ function _Base.search(
         # -- optional telemetry
         callbacks.prequery()
 
-        #_Base.distance_prehook(_metric, query)
+        _Base.prehook(getlocal(index.metric), query)
         search(algo, index, query; callbacks = callbacks)
 
         # Copy over the results to the destination
@@ -402,9 +413,9 @@ function _Base.search(
         # -- optional telemetry
         callbacks.postquery()
     end
-
     return dest
 end
+
 
 #####
 ##### Callback Implementations
@@ -446,10 +457,4 @@ function visited_callbacks()
     end
     return (histogram = histogram, callbacks = DiskANNCallbacks(; postdistance))
 end
-
-# function visited_callbacks()
-#     visited = UInt32[]
-#     postdistance = (_, neighbors) -> append!(visited, neighbors)
-#     return (visited = visited, callbacks = DiskANNCallbacks(; postdistance))
-# end
 

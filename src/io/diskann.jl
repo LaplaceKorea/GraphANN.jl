@@ -12,7 +12,7 @@ GraphANN.DiskANN()
 GraphANN._IO.DiskANN()
 ```
 """
-struct DiskANN end
+struct DiskANN <:AbstractIOFormat end
 
 #####
 ##### Graph Loader
@@ -63,16 +63,14 @@ function load_graph(::DiskANN, io::IO, max_vertices; verbose = true)
 end
 
 """
-    save_graph(path::Union{AbstractString, IO}, index::DiskANNIndex)
+    save(path::Union{AbstractString, IO}, index::DiskANNIndex)
 
 Save the graph in a binary format compatible with the DiskANN C++ code.
 Return the number of bytes written.
 """
-function save_graph(path::AbstractString, index::DiskANNIndex)
-    return open(io -> save_graph(io, index), path; write = true)
-end
+save(path::AbstractString, index::DiskANNIndex) = save(DiskANN(), path, index)
 
-function save_graph(io::IO, index::DiskANNIndex)
+function save(::DiskANN, io::IO, index::DiskANNIndex)
     @unpack graph, data, startnode = index
     entry_point = startnode.index
 

@@ -11,7 +11,7 @@ export load_vecs, save_vecs
 import .._Base: MetaGraph, stdallocator, medioid
 import .._Graphs: _Graphs, UniDirectedGraph
 import .._Graphs: DefaultAdjacencyList, FlatAdjacencyList, DenseAdjacencyList
-import .._Trees: TreeNode, Tree
+import .._Trees: TreeNode, Tree, rootindices
 import ..Algorithms: DiskANNIndex
 
 # stdlib
@@ -22,6 +22,15 @@ import LightGraphs
 import ProgressMeter
 import StaticArrays: SVector
 import UnPack: @unpack
+
+# Generic entry point for opening files.
+abstract type AbstractIOFormat end
+struct Native <: AbstractIOFormat end
+
+save(path::AbstractString, args...) = save(Native(), path, args...)
+function save(x::AbstractIOFormat, path::AbstractString, args...)
+    return open(io -> save(x, io, args...), path; write = true)
+end
 
 export load, save, load_bin, save_bin
 include("native.jl")

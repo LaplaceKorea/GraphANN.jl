@@ -2,21 +2,8 @@
 ##### Graph Serialization
 #####
 
-"""
-    save(io::Union{IO, AbstractString}, graph)
-
-Save `graph` to `io` in GraphANN's canonical binary form.
-If `io` is an `AbstractString`, than `io` is interpreted as a file path where the binary
-version of the graph will be saved.
-"""
-function save(file::AbstractString, x; kw...)
-    open(file; write = true) do io
-        save(io, x; kw...)
-    end
-    return nothing
-end
-
 function save(
+    ::Native,
     io::IO,
     g::UniDirectedGraph{T};
     buffersize = div(2_000_000_000, sizeof(T))

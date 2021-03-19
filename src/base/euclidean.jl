@@ -26,6 +26,9 @@ julia> GraphANN.evaluate(GraphANN.Euclidean(), a, b)
 """
 struct Euclidean end
 
+# scalar broadcasting
+Base.broadcastable(x::Euclidean) = (x,)
+
 #####
 ##### Eager Conversion
 #####

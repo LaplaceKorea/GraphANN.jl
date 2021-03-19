@@ -8,7 +8,7 @@
     index = GraphANN.DiskANNIndex(graph, data)
 
     path = tempname(@__DIR__; cleanup = true)
-    GraphANN.save_graph(path, index)
+    GraphANN.save(path, index)
 
     # Check that file contents match
     # NOTE: This process will not work on an arbitrary DiskANN graph since their adjacency

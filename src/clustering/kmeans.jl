@@ -5,7 +5,7 @@
 """
 Pre-allocated storage for performing [`kmeans`](@ref) clustering.
 """
-struct KMeansRunner{T <: Union{ThreadLocal, NamedTuple}, N, F}
+struct KMeansRunner{T <: MaybeThreadLocal{NamedTuple}, N, F}
     lloyds_local::T
     centroids::Vector{SVector{N,Float32}}
     executor::F

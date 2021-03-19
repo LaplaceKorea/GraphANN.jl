@@ -29,6 +29,18 @@ sample_queries() = load_vecs(SVector{128,Float32}, joinpath(VECSDIR, "siftsmall_
 sample_groundtruth() = load_vecs(joinpath(VECSDIR, "siftsmall_groundtruth.ivecs"); groundtruth = true)
 
 ############################################################################################
+function test(runner, index, queries; num_neighbors = 5, batchsize = 32)
+    times = Vector{Int64}(undef, cdiv(length(queries), batchsize))
+    dest = Array{UInt32}(undef, num_neighbors, length(queries))
+
+    for (i, batch) in enumerate(batched(eachindex(queries), batchsize))
+        start = time_ns()
+        search!(view(dest, :, batch), runner, index, view(queries, batch); num_neighbors)
+        times[i] = time_ns() - start
+    end
+    return (dest, times)
+end
+
 function __run(index, queries, groundtruth, windows; num_neighbors = 5)
     times, callbacks = Algorithms.latency_mt_callbacks()
 

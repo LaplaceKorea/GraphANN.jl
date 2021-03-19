@@ -1,0 +1,18 @@
+name = "PQ"
+uuid = "7e810420-ccc1-4918-9984-932c0a062e79"
+authors = ["Hildebrand, Mark <mark.hildebrand@intel.com>"]
+version = "0.1.0"
+
+[deps]
+GraphANN = "38438e65-754f-449b-9041-06b96401f6e7"
+ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
+SIMD = "fdea26ae-647d-5447-a871-4b548cad5224"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+UnPack = "3a884ed6-31ef-47d7-9d2a-63182c4928ed"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]

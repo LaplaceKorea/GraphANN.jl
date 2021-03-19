@@ -26,7 +26,7 @@ resettimer!() = TimerOutputs.reset_timer!(gettimer())
 ##### Generic Distance
 #####
 
-export evaluate, build, search
+export evaluate, prehook, build, search, search!
 
 """
     evaluate(metric, x, y)
@@ -59,6 +59,7 @@ include("euclidean.jl")
 
 function build end
 function search end
+function search! end
 
 #####
 ##### Allocators
@@ -94,6 +95,7 @@ include("pm.jl")
 
 export ThreadPool, ThreadLocal, MaybeThreadLocal, TaskHandle
 export getall, getlocal, getpool, allthreads, single_thread, dynamic_thread, on_threads
+export threadcopy
 include("threading.jl")
 
 #####

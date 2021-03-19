@@ -1,5 +1,11 @@
 # Custom Dataset
 # Note the safest data structure in the world, so use with care.
+# Type Parameters:
+#
+# - `S`: Power of 2 that bounds each segment.
+#        That is, ALL segments except for the last should have length `2 ^ S`.
+# - `T`: Element type stored by the dataset.
+# - `A`: Inner vector types.
 struct SplitDataset{S,T,A <: AbstractVector{T}} <: AbstractVector{T}
     # N.B. - Don't move ANY of the vecters after their initial allocation.
     # Otherwise, the cached pointers are no longer going to be valid and then you're going

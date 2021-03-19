@@ -142,7 +142,7 @@ end
         )
 
         dataview = view(data, range)
-        gt = GraphANN.Algorithms.search!(erunner, dataview, dataview; meter = nothing)
+        gt = GraphANN.search!(erunner, dataview, dataview; meter = nothing)
         base_view = view(base_distances, :, range)
         base_view .= GraphANN.getdistance.(gt)
     end
@@ -171,7 +171,7 @@ end
             )
             dataview = GraphANN.Algorithms.doubleview(data, permutation, range)
             @test length(dataview) == length(range)
-            gt = GraphANN.Algorithms.search!(erunner, dataview, dataview; meter = nothing)
+            gt = GraphANN.search!(erunner, dataview, dataview; meter = nothing)
 
             # Note: We need to translate from the indices returned by `bruteforce_search!` to
             # original indices in the dataset.

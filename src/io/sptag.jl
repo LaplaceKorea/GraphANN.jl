@@ -1,4 +1,4 @@
-struct SPTAG end
+struct SPTAG <: AbstractIOFormat end
 
 # Generate an SPTAG compatible dataset.
 function generate_data_file(sptag::SPTAG, path::String, x...; kw...)
@@ -100,8 +100,7 @@ sentinel_value(x::T) where {T <: Integer} = sentinel_value(T)
 issentinel(x) = (x == sentinel_value(x))
 issentinel(x::TreeNode) = iszero(x.id)
 
-maybeadjust(x::Signed, add = zero(x)) = issentinel(x) ? zero(x) : (x + add)
-maybeadjust(x::Unsigned, add = zero(x)) = issentinel(x) ? zero(x) : (x + add)
+maybeadjust(x::Integer, add = zero(x)) = issentinel(x) ? zero(x) : (x + add)
 
 # Nodes get loaded with index-0 indices for the point ids.
 # This is a helper function to convert everything to index-1
@@ -164,6 +163,52 @@ function load_bktree(io::IO)
     return (; number_of_trees, tree_start_indices, tree)
 end
 
+_decrement(x::UInt32, add = zero(x)) = iszero(x) ? sentinel_value(x) : (x - add)
+function _decrement(x::TreeNode{UInt32})
+    return TreeNode(
+        # Convert from index-1 to index-0
+        _decrement(x.id, one(UInt32)),
+        # Julia indices are valid C++ indices because of how the data is structured in
+        # SPTAG.
+        #
+        # Just turn "0" into all ones bit pattern.
+        _decrement(x.childstart),
+
+        # If this is not a child node, bump the last index for a valid C++ range.
+        _decrement(x.childend, -one(UInt32)),
+    )
+end
+
+function save(::SPTAG, io::IO, tree::Tree{UInt32})
+    bytes_written = 0
+    # Only saving 1 tree.
+    bytes_written += write(io, Cuint(1))
+
+    # Start indices for the tree encodings - only 1 tree, so only one entry.
+    bytes_written += write(io, Cuint(0))
+
+    # Number of nodes
+    # Add 1 to include the end node and root node.
+    bytes_written += write(io, Cuint(length(tree) + 2))
+
+    # The root node is implicitly defined in our encoding.
+    # Here, we explicitly instantiate it for serializing.
+    bytes_written += write(io, Cuint(length(tree)))
+    bytes_written += write(io, one(Cuint))
+    bytes_written += write(io, Cuint(last(rootindices(tree)) + 1))
+
+    # Write each node - converting from the Julia format to the C++ format>
+    ProgressMeter.@showprogress 1 for node in tree
+        bytes_written += write(io, _decrement(node))
+    end
+
+    # Finally, write a trailing sentinel node.
+    for _ in 1:3
+        bytes_written += write(io, sentinel_value(UInt32))
+    end
+    return bytes_written
+end
+
 #####
 ##### Graph Loading
 #####
@@ -180,23 +225,94 @@ end
 # The last portion of each adjacency list is padded by "-1".
 # This function both determines how many entries are valid and sorts the valid entries
 # in each adjacency list.
-function getlength!(v::AbstractVector{T}, max_degree) where {T <: Unsigned}
+#
+# It ALSO convertes from index-0 to index-1.
+function getlength!(v::AbstractVector{T}, max_degree, sort::Bool) where {T <: Unsigned}
     i = findfirst(issentinel, v)
     num_neighbors = (i === nothing) ? T(max_degree) : T(i - 1)
     vw = view(v, 1:num_neighbors)
     # Sort and convert to index-1
-    sort!(view(v, 1:num_neighbors); alg = QuickSort)
+    sort && sort!(vw; alg = QuickSort)
     vw .+= one(T)
 
     return num_neighbors
 end
 
-function load_graph(::SPTAG, io::IO; allocator = stdallocator)
+# Note: `sort = false` is for testing purposes only.
+function load_graph(::SPTAG, io::IO; allocator = stdallocator, sort = true)
     num_vertices = read(io, UInt32)
     max_degree = read(io, UInt32)
     adj = allocator(UInt32, max_degree, num_vertices)
     read!(io, vec(adj))
-    lengths = map(x -> getlength!(x, max_degree), eachcol(adj))
+    lengths = map(x -> getlength!(x, max_degree, sort), eachcol(adj))
     return UniDirectedGraph{UInt32}(FlatAdjacencyList{UInt32}(adj, lengths))
 end
 
+function save(::SPTAG, io::IO, graph::UniDirectedGraph{UInt32})
+    num_vertices = LightGraphs.nv(graph)
+    max_degree = maximum(LightGraphs.outdegree(graph))
+
+    bytes_written = 0
+    bytes_written += write(io, Cuint(num_vertices))
+    bytes_written += write(io, Cuint(max_degree))
+    buffer = UInt32[]
+    ProgressMeter.@showprogress 1 for v in LightGraphs.vertices(graph)
+        neighbors = LightGraphs.outneighbors(graph, v)
+        resize!(buffer, length(neighbors))
+        buffer .= neighbors .- one(eltype(neighbors))
+        bytes_written += write(io, buffer)
+        # Pad with all ones bits.
+        for _ in 1:(max_degree - length(neighbors))
+            bytes_written += write(io, typemax(Cuint))
+        end
+    end
+    return bytes_written
+end
+
+#####
+##### Extra Misc Files
+#####
+
+function generate_misc(::SPTAG, dir::AbstractString, data::AbstractVector{<:AbstractVector})
+    !isdir(dir) && mkdir(dir)
+
+    num_vertices = length(data)
+
+    # metadata.bin
+    touch(joinpath(dir, "metadata.bin"))
+
+    # metdataIndex.bin
+    open(joinpath(dir, "metadataIndex.bin"); write = true) do io
+        # First entry is the number of vertices
+        write(io, Cuint(num_vertices))
+
+        # Two mysterious UInt32 zeros
+        write(io, zero(Cuint))
+        write(io, zero(Cuint))
+
+        # One 64-bit zero integer per vertex.
+        for _ in 1:num_vertices
+            write(io, zero(UInt64))
+        end
+    end
+
+    # deletes.bin
+    open(joinpath(dir, "deletes.bin"); write = true) do io
+        write(io, zero(UInt32))
+        write(io, Cuint(num_vertices))
+        write(io, one(UInt32))
+
+        # 0xff for each vertex.
+        for _ in 1:num_vertices
+            write(io, typemax(UInt8))
+        end
+    end
+
+    # vectors.bin
+    open(joinpath(dir, "vectors.bin"); write = true) do io
+        write(io, Cuint(num_vertices))
+        write(io, Cuint(length(eltype(data))))
+        write(io, data)
+    end
+    return nothing
+end

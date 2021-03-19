@@ -63,6 +63,8 @@ children(tree::Tree, i::Integer) = children(tree, tree.nodes[i])
 children(tree::Tree, node::TreeNode) = view(tree.nodes, childindices(node))
 roots(tree) = view(tree.nodes, rootindices(tree))
 
+Base.iterate(tree::Tree, state...) = iterate(tree.nodes, state...)
+
 #####
 ##### Utility Functions
 #####
@@ -213,11 +215,11 @@ struct NodeOffset
     val::Int
 end
 
-function Base.:+(node::TreeNode{T}, off::NodeOffset) where {T}
+function Base.:+(node::TreeNode{T}, offset::NodeOffset) where {T}
     if isleaf(node)
         return node
     else
-        @unpack val = off
+        @unpack val = offset
         return TreeNode{T}(getid(node), node.childstart + val, node.childend + val)
     end
 end
