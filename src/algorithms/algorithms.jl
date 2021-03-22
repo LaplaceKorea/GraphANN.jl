@@ -1,7 +1,7 @@
 module Algorithms
 
 export DiskANNRunner, DiskANNIndex, DiskANNIndexParameters
-export TreeSearcher
+export SPTAGRunner, SPTAGIndex
 
 # stdlib
 import LinearAlgebra
@@ -35,10 +35,13 @@ include("exhaustive.jl")
 include("diskann/search.jl")
 include("diskann/build.jl")
 
-# sptag
+# SPTAG
 include("sptag/bktree.jl")
 include("sptag/search.jl")
 include("sptag/tptree.jl")
 include("sptag/build.jl")
+
+# Common Callback Implementations
+include("callbacks.jl")
 
 end # module

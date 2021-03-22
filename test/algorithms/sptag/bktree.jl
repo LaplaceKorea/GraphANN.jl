@@ -192,7 +192,7 @@ end
     numleaves = count(isleaf, tree.nodes)
     maxleaves = div(numleaves, 10)
 
-    runner = GraphANN.Algorithms.TagSearch(num_neighbors; costtype = Float32)
+    runner = GraphANN.Algorithms.SPTAGRunner(num_neighbors; costtype = Float32)
     for query in queries
         GraphANN.Algorithms.init!(runner, tree, data, query; metric = GraphANN.Euclidean())
         leaves_seen = GraphANN.Algorithms.search(runner, tree, data, query, maxleaves)

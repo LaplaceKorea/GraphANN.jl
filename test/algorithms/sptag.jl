@@ -39,8 +39,8 @@ approx_or_greater(x, y) = (x ≈ y) || (x > y)
     tree = GraphANN._IO.load_bktree(sptag_tree).tree
     graph = GraphANN._IO.load_graph(GraphANN._IO.SPTAG(), sptag_index)
 
-    meta = GraphANN.MetaGraph(graph, data)
-    algo = GraphANN.Algorithms.TagSearch(1; costtype = GraphANN.costtype(GraphANN.Euclidean(), data))
+    index = GraphANN.SPTAGIndex(graph, data, tree)
+    algo = GraphANN.SPTAGRunner(1; costtype = GraphANN.costtype(GraphANN.Euclidean(), data))
 
     for (i, comparison) in enumerate(comparisons)
         # Dividing the maximum check number by 64 is how the SPTAG code derives their
@@ -50,8 +50,7 @@ approx_or_greater(x, y) = (x ≈ y) || (x > y)
 
         ids = GraphANN.search(
             algo,
-            meta,
-            tree,
+            index,
             queries;
             maxcheck = maxcheck,
             propagation_limit = propagation_limit,

@@ -160,7 +160,7 @@ function refine!(
 
     # Datastructure pre-allocation.
     tls = ThreadLocal(;
-        runner = TagSearch(refine_history; costtype = D, idtype = eltype(graph)),
+        runner = SPTAGRunner(refine_history; costtype = D, idtype = eltype(graph)),
         nextlists = NextListBuffer{eltype(graph)}(
             target_degree,
             2 * ceil(Int, refine_batchsize / Threads.nthreads()),
@@ -168,22 +168,21 @@ function refine!(
     )
 
     # Refinement iterations.
+    index = SPTAGIndex(graph, data,  tree)
     for i in 1:refine_iterations
-        _refine!(graph, tree, data, tls; params, metric)
+        _refine!(index, tls; params, metric)
     end
 end
 
 @noinline function _refine!(
-    graph,
-    tree,
-    data::AbstractVector{T},
+    index::SPTAGIndex,
     tls::ThreadLocal;
     params::SPTAGBuildParams = SPTAGBuildParams(),
     metric = Euclidean(),
-) where {T}
+)
+    @unpack data = index
     @unpack target_degree, refine_batchsize, refine_maxcheck, refine_propagation = params
 
-    meta = MetaGraph(graph, data)
     num_batches = cdiv(length(data), refine_batchsize)
     progress_meter = ProgressMeter.Progress(num_batches, 1, "Refining Index ... ")
     for r in batched(1:length(data), refine_batchsize)
@@ -193,8 +192,7 @@ end
             point = data[vertex]
             search(
                 runner,
-                meta,
-                tree,
+                index,
                 point;
                 maxcheck = refine_maxcheck,
                 propagation_limit = refine_propagation,
