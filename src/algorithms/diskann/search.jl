@@ -150,6 +150,7 @@ function DiskANNRunner{I,D}(
 
     return threadlocal_wrap(executor, runner)
 end
+Base.resize!(runner::DiskANNRunner, val::Integer) = (runner.search_list_size = val)
 
 function DiskANNRunner(
     index::DiskANNIndex,

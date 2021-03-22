@@ -7,7 +7,7 @@ doubleview(a, b, c) = view(a, view(b, c))
 shrink!(a::AbstractVector, amount::Integer) = resize!(a, length(a) - amount)
 shrink!(a::AbstractUnitRange{T}, amount::Integer) where {T} = first(a):(last(a) - T(amount))
 
-function build_bktree(
+function bktree(
     data::AbstractVector{SVector{N,T}};
     metric = Euclidean(),
     fanout = 8,

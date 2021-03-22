@@ -2,6 +2,11 @@ Base.@kwdef struct SPTAGBuildParams
     ### High level parameters
     target_degree::Int = 32
 
+    ### Parameters related to BKTree
+    bktree_fanout::Int = 8
+    bktree_leafsize::Int = 32
+    bktree_single_thread_threshold::Int = 10000
+
     ### Parameters related to tree building.
     # Number of randomized trees to help with the initial graph.
     num_trees::Int = 8
@@ -14,6 +19,47 @@ Base.@kwdef struct SPTAGBuildParams
     refine_maxcheck::Int = 8192
     refine_propagation::Int = cdiv(8192, 64)
     refine_history::Int = 2000
+end
+
+function _Base.build(
+    data::AbstractVector{T},
+    parameters::SPTAGBuildParams;
+    idtype::Type{I} = UInt32,
+    graph = nothing,
+    tree = nothing,
+    build_bktree::Bool = true,
+    build_tptrees::Bool = true,
+    build_refine::Bool = true,
+    metric = Euclidean(),
+    allocator = stdallocator,
+) where {T,I}
+    # Step 1 - build the BK Tree
+    if build_bktree && (tree === nothing)
+        @unpack bktree_fanout, bktree_leafsize, bktree_single_thread_threshold = parameters
+        tree = bktree(
+            data;
+            metric = metric,
+            fanout = bktree_fanout,
+            leafsize = bktree_leafsize,
+            stacksplit = bktree_single_thread_threshold,
+            idtype = I,
+        )
+    end
+
+    # Step 2 - Initialize the graph and use TPTrees
+    if graph === nothing
+        graph = UniDirectedGraph{I, FlatAdjacencyList{I}}(
+            length(data),
+            parameters.target_degree;
+            allocator = allocator,
+        )
+    end
+
+    build_tptrees && build_by_trees!(graph, data; params = parameters, metric = metric)
+
+    # Step 3 - Refinement
+    build_refine && refine!(graph, tree, data; params = parameters, metric = metric)
+    return SPTAGIndex(graph, data, tree)
 end
 
 # First phase - build the initial KNN graph by partitioning.
@@ -180,7 +226,7 @@ end
     params::SPTAGBuildParams = SPTAGBuildParams(),
     metric = Euclidean(),
 )
-    @unpack data = index
+    @unpack graph, data = index
     @unpack target_degree, refine_batchsize, refine_maxcheck, refine_propagation = params
 
     num_batches = cdiv(length(data), refine_batchsize)
