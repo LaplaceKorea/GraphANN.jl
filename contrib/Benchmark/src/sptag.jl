@@ -48,6 +48,7 @@ function _run_sptag(record::Record, runner, index::GraphANN.SPTAGIndex, queries,
     for _tuple in iter
         maxcheck = _tuple[1]
         propagation_limit = _tuple[2]
+        empty!(latencies)
 
         rt = @elapsed ids = GraphANN.search(
             runner,
