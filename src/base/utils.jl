@@ -120,6 +120,12 @@ Base.length(set::RobinSet) = length(set.dict)
 Base.iterate(set::RobinSet) = iterate(keys(set.dict))
 Base.iterate(set::RobinSet, s) = iterate(keys(set.dict), s)
 
+# Slightly hijack internals of "sets" to perform a function call only if a key doesn't
+# exist (and add the key to the set).
+@inline function ifmissing!(f::F, set::AbstractSet, key) where {F}
+    return get!(() -> (f(); nothing), set.dict, key)
+end
+
 #####
 ##### Nearest Neighbor
 #####

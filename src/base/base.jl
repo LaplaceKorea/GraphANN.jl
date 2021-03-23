@@ -111,7 +111,7 @@ include("minmax_heap.jl")
 
 export safe_maximum, donothing, printlnstyled, always_false, zero!, typemax!, cdiv, toeltype, clog2
 export Neighbor, getid, getdistance, idtype, costtype
-export RobinSet
+export RobinSet, ifmissing!
 export zeroas, medioid, nearest_neighbor
 export recall
 export prefetch, prefetch_llc, unsafe_prefetch

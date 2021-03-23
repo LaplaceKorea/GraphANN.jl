@@ -49,7 +49,9 @@ function SPTAGRunner(
     tree_queue = DataStructures.BinaryMinHeap{Neighbor{TreeNode{I}, D}}()
     graph_queue = DataStructures.BinaryMinHeap{Neighbor{I, D}}()
     results = KeepSmallest{Neighbor{I,D}}(heapsize)
-    visited = RobinSet{I}()
+    # NB: If switching to a `RobinSet`, then rework `ifmissing!` since a slow Base fallback
+    # will be used and performance will tank.
+    visited = Set{I}()
     return SPTAGRunner(tree_queue, graph_queue, results, visited)
 end
 
@@ -67,44 +69,52 @@ _Base.getbound(x::MaybeThreadLocal{SPTAGRunner}) = _Base.getbound(getlocal(x).re
 
 # The `SPTAGRunner` has two different `Neighbor` types in its heap.
 # Here, we use the SPTAGRunner dispatch to auto-construct the "correct" `Neighbor`.
-function _Base.Neighbor(runner::SPTAGRunner, id::T, distance::D) where {T,D}
+@inline function _Base.Neighbor(runner::SPTAGRunner, id::T, distance::D) where {T,D}
     return Neighbor{T,D}(id, distance)
 end
 
-isdone(::TreeCtx, runner::SPTAGRunner) = isempty(runner.tree_queue)
-isdone(::GraphCtx, runner::SPTAGRunner) = isempty(runner.graph_queue)
+@inline isdone(::TreeCtx, runner::SPTAGRunner) = isempty(runner.tree_queue)
+@inline isdone(::GraphCtx, runner::SPTAGRunner) = isempty(runner.graph_queue)
 
-isvisited(x::SPTAGRunner, node) = in(getid(node), x.visited)
-visited!(x::SPTAGRunner, node) = push!(x.visited, getid(node))
+@inline isvisited(x::SPTAGRunner, node) = in(getid(node), x.visited)
+@inline visited!(x::SPTAGRunner, node) = push!(x.visited, getid(node))
 
 # Don't mark any nodes during tree search as "visited".
-function pushcandidate!(::TreeCtx, runner::SPTAGRunner, candidate::Neighbor)
+@inline function pushcandidate!(::TreeCtx, runner::SPTAGRunner, candidate::Neighbor)
     return push!(runner.tree_queue, candidate)
 end
 
-function pushcandidate!(::GraphCtx, runner::SPTAGRunner, candidate::Neighbor)
-    visited!(runner, candidate)
+@inline function pushcandidate!(::GraphCtx, runner::SPTAGRunner, candidate::Neighbor)
     return push!(runner.graph_queue, candidate)
 end
 
-function maybe_pushcandidate!(ctx::AbstractTagCtx, runner::SPTAGRunner, candidate::Neighbor)
+@inline function maybe_pushcandidate!(ctx::TreeCtx, runner::SPTAGRunner, candidate::Neighbor)
     isvisited(runner, candidate) && return false
     pushcandidate!(ctx, runner, candidate)
     return true
 end
 
-getcandidate!(::TreeCtx, x::SPTAGRunner) = pop!(x.tree_queue)
-getcandidate!(::GraphCtx, x::SPTAGRunner) = pop!(x.graph_queue)
-pushresult!(x::SPTAGRunner, candidate::Neighbor) = push!(x.results, candidate)
+@inline function maybe_pushcandidate!(ctx::GraphCtx, runner::SPTAGRunner, candidate::Neighbor)
+    initial_length = length(runner.visited)
+    ifmissing!(runner.visited, getid(candidate)) do
+        pushcandidate!(ctx, runner, candidate)
+    end
+    return length(runner.visited) != initial_length
+end
 
-isfull(x::SPTAGRunner) = _Base.isfull(x.results)
+@inline getcandidate!(::TreeCtx, x::SPTAGRunner) = pop!(x.tree_queue)
+@inline getcandidate!(::GraphCtx, x::SPTAGRunner) = pop!(x.graph_queue)
+@inline pushresult!(x::SPTAGRunner, candidate::Neighbor) = push!(x.results, candidate)
+
+@inline isfull(x::SPTAGRunner) = _Base.isfull(x.results)
 
 function init!(runner::SPTAGRunner, tree::Tree, data, query; metric = Euclidean())
     empty!(runner)
     @unpack nodes = tree
     for i in _Trees.rootindices(tree)
-        child = tree[i]
-        candidate = Neighbor(runner, child, evaluate(metric, data[getid(child)], query))
+        @inbounds child = tree[i]
+        distance = evaluate(metric, pointer(data, getid(child)), query)
+        candidate = Neighbor(runner, child, distance)
         pushcandidate!(treectx, runner, candidate)
     end
 
@@ -133,7 +143,7 @@ function _Base.search(
             maybe_pushcandidate!(graphctx, runner, pair)
             for child in _Trees.children(tree, node)
                 @unpack id = child
-                candidate = Neighbor(runner, child, evaluate(metric, data[id], query))
+                candidate = Neighbor(runner, child, evaluate(metric, pointer(data, id), query))
                 maybe_pushcandidate!(treectx, runner, candidate)
             end
         end
@@ -183,7 +193,7 @@ function _Base.search(
 
         # Expand neighborhood
         for v in LightGraphs.outneighbors(graph, getid(u))
-            d = evaluate(metric, data[v], query)
+            d = evaluate(metric, pointer(data, v), query)
             leaves_seen += Int(maybe_pushcandidate!(graphctx, runner, Neighbor(runner, v, d)))
         end
 
