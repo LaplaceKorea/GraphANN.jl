@@ -2,7 +2,7 @@
 ##### Callback Implementations
 #####
 
-struct Latencies{T <: MaybeThreadLocal{Vector{UInt64}}}
+struct Latencies{T<:MaybeThreadLocal{Vector{UInt64}}}
     values::T
 end
 

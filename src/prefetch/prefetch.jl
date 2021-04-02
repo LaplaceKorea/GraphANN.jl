@@ -11,13 +11,14 @@ using .._Base
 using .._Graphs
 
 # deps
-import LightGraphs
+using LightGraphs: LightGraphs
 import UnPack: @unpack, @pack!
 
-include("queue.jl"); import .Queue: SemiAtomicQueue, commit!, consume!
+include("queue.jl")
+import .Queue: SemiAtomicQueue, commit!, consume!
 
 # Behaves like a metagraph, but provides prefetching as well!
-struct PrefetchedMeta{D, G, P}
+struct PrefetchedMeta{D,G,P}
     data::D
     graph::G
     prefetcher::P
@@ -102,10 +103,7 @@ function acquire!(x::Staging{T}, dest::Vector{T}, num::Integer) where {T}
         queues_visited = 0
         while true
             count = consume!(
-                dest,
-                items_collected + 1,
-                queue_iter[index],
-                num - items_collected,
+                dest, items_collected + 1, queue_iter[index], num - items_collected
             )
 
             # Update counters
@@ -126,7 +124,7 @@ end
 ##### Prefetcher
 #####
 
-struct PrefetchRunner{S <: Staging, T}
+struct PrefetchRunner{S<:Staging,T}
     # Staging area where we get work items from.
     staging::S
     # Pre-allocated temporary data-structures.
@@ -161,13 +159,13 @@ end
 ##### Ensemple of Prefetchers
 #####
 
-mutable struct Prefetcher{U <: Integer, T, S <: Staging}
+mutable struct Prefetcher{U<:Integer,T,S<:Staging}
     thread_pool::ThreadPool{T}
     staging::S
 
     # Signals to runners - when `true`, stop prefetching.
-    stop_signals::Dict{Int, Base.RefValue{Bool}}
-    worklists::Dict{Int, Vector{U}}
+    stop_signals::Dict{Int,Base.RefValue{Bool}}
+    worklists::Dict{Int,Vector{U}}
 
     # Handle to the tasks that are currently running.
     # Maintain the following invariants:
@@ -175,20 +173,14 @@ mutable struct Prefetcher{U <: Integer, T, S <: Staging}
     # running.
     # - Otherwise, tasks must be reachable until they are stopped or killed.
     # - Once stopped of killed, this field may be reset to `nothing`.
-    tasks::Union{Nothing, TaskHandle}
+    tasks::Union{Nothing,TaskHandle}
 end
 
 function Prefetcher{U}(thread_pool::ThreadPool, staging::Staging) where {U}
     stop_signals = Dict(i => Ref(false) for i in thread_pool)
     worklists = Dict(i => U[] for i in thread_pool)
 
-    return Prefetcher(
-        thread_pool,
-        staging,
-        stop_signals,
-        worklists,
-        nothing,
-    )
+    return Prefetcher(thread_pool, staging, stop_signals, worklists, nothing)
 end
 
 isrunning(p::Prefetcher) = (p.tasks !== nothing)
@@ -199,7 +191,7 @@ function stop!(p::Prefetcher)
     wait(values(p.tasks))
     printlnstyled("Tasks Halted"; color = :green, bold = true)
     reset!(p)
-    p.tasks = nothing
+    return p.tasks = nothing
 end
 reset!(p::Prefetcher) = foreach(i -> i[] = false, values(p.stop_signals))
 

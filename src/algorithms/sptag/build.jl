@@ -48,10 +48,8 @@ function _Base.build(
 
     # Step 2 - Initialize the graph and use TPTrees
     if graph === nothing
-        graph = UniDirectedGraph{I, FlatAdjacencyList{I}}(
-            length(data),
-            parameters.target_degree;
-            allocator = allocator,
+        graph = UniDirectedGraph{I,FlatAdjacencyList{I}}(
+            length(data), parameters.target_degree; allocator = allocator
         )
     end
 
@@ -68,7 +66,7 @@ function build_by_trees!(
     data::AbstractVector{T};
     params = SPTAGBuildParams(),
     metric = Euclidean(),
-) where {I, T}
+) where {I,T}
     @unpack num_trees, tree_leaf_size, target_degree, single_thread_threshold = params
     D = costtype(metric, T)
 
@@ -97,7 +95,7 @@ function build_by_trees!(
             compensated_neighbors,
             Neighbor{I,D};
             executor = single_thread,
-            costtype = D
+            costtype = D,
         ),
         scratch = Neighbor{I,D}[],
     )
@@ -107,8 +105,8 @@ function build_by_trees!(
         @withtimer "Building TPTree" ranges = partition!(
             data,
             permutation,
-            numtrials = 1000,
             Val(5);
+            numtrials = 1000,
             init = false,
             leafsize = tree_leaf_size,
             single_thread_threshold = single_thread_threshold,
@@ -152,7 +150,7 @@ function update!(
     permutation::AbstractVector{<:Integer};
     candidates = T[],
     metric = Euclidean(),
-) where {T <: Neighbor}
+) where {T<:Neighbor}
     # First step - translate the indices in `gt` from the local versions to the global
     # vertices using the permutation vector.
     for i in eachindex(gt)
@@ -172,7 +170,7 @@ function update!(
         # Drop the first entry because that will always be zero since each vertex is its
         # own absolute nearest neighbor.
         resize!(candidates, numneighbors)
-        candidates .= view(gt, 2:size(gt,1), i)
+        candidates .= view(gt, 2:size(gt, 1), i)
 
         for u in neighbors
             distance = evaluate(metric, vdata, data[u])
@@ -208,13 +206,12 @@ function refine!(
     tls = ThreadLocal(;
         runner = SPTAGRunner(refine_history; costtype = D, idtype = eltype(graph)),
         nextlists = NextListBuffer{eltype(graph)}(
-            target_degree,
-            2 * ceil(Int, refine_batchsize / Threads.nthreads()),
+            target_degree, 2 * ceil(Int, refine_batchsize / Threads.nthreads())
         ),
     )
 
     # Refinement iterations.
-    index = SPTAGIndex(graph, data,  tree)
+    index = SPTAGIndex(graph, data, tree)
     for i in 1:refine_iterations
         _refine!(index, tls; params, metric)
     end
@@ -256,7 +253,8 @@ end
                 getid(candidate) == vertex && continue
                 good = true
                 for k in 1:count
-                    if evaluate(metric, data[nextlist[k]], data[candidate]) <= getdistance(candidate)
+                    if evaluate(metric, data[nextlist[k]], data[candidate]) <=
+                       getdistance(candidate)
                         good = false
                         break
                     end
@@ -284,9 +282,7 @@ end
         end
 
         ProgressMeter.next!(
-            progress_meter;
-            showvalues = ((:iter_time, itertime), (:sync_time, synctime)),
+            progress_meter; showvalues = ((:iter_time, itertime), (:sync_time, synctime))
         )
     end
 end
-

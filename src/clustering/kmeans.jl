@@ -5,7 +5,7 @@
 """
 Pre-allocated storage for performing [`kmeans`](@ref) clustering.
 """
-struct KMeansRunner{T <: MaybeThreadLocal{NamedTuple}, N, F}
+struct KMeansRunner{T<:MaybeThreadLocal{NamedTuple},N,F}
     lloyds_local::T
     centroids::Vector{SVector{N,Float32}}
     executor::F
@@ -15,15 +15,13 @@ end
 is_single_thread(::KMeansRunner{<:ThreadLocal}) = false
 is_single_thread(::KMeansRunner{<:NamedTuple}) = true
 
-function _lloyds_local(::typeof(dynamic_thread), ::Type{D}, valn::Val{N}) where {D, N}
+function _lloyds_local(::typeof(dynamic_thread), ::Type{D}, valn::Val{N}) where {D,N}
     return ThreadLocal(_lloyds_local(single_thread, D, valn))
 end
 
-function _lloyds_local(::typeof(single_thread), ::Type{D}, ::Val{N}) where {D, N}
+function _lloyds_local(::typeof(single_thread), ::Type{D}, ::Val{N}) where {D,N}
     return (
-        minimums = Neighbor{UInt64,D}(),
-        sums = SVector{N,Float32}[],
-        points_per = Int[]
+        minimums = Neighbor{UInt64,D}(), sums = SVector{N,Float32}[], points_per = Int[]
     )
 end
 
@@ -37,7 +35,7 @@ function KMeansRunner(
     data::AbstractVector{SVector{N,T}},
     executor::F = dynamic_thread,
     metric::M = Euclidean(),
-) where {N, T, F, M}
+) where {N,T,F,M}
     D = costtype(metric, SVector{N,T}, SVector{N,Float32})
     centroids = SVector{N,Float32}[]
     lloyds_local = _lloyds_local(executor, D, Val(N))
@@ -83,7 +81,7 @@ function kmeans(
         data,
         lloyds_local;
         num_iterations = max_lloyds_iterations,
-        executor = executor
+        executor = executor,
     )
     return centroids
 end
@@ -91,7 +89,7 @@ end
 function lloyds!(
     centroids::AbstractVector,
     data::AbstractVector,
-    local_storage::Union{ThreadLocal, NamedTuple};
+    local_storage::Union{ThreadLocal,NamedTuple};
     executor::F = dynamic_thread,
     num_iterations = 1,
     tol = 1E-3,
@@ -133,8 +131,8 @@ function lloyds!(
                 sums += _i.sums
                 points_per += _i.points_per
             end
-        # Second branch - single threaded case. No need for reduction, just unpack the
-        # NamedTuple.
+            # Second branch - single threaded case. No need for reduction, just unpack the
+            # NamedTuple.
         elseif isa(local_storage, NamedTuple)
             @unpack sums, points_per = local_storage
         end

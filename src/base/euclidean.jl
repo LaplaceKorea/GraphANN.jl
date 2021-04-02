@@ -33,9 +33,9 @@ Base.broadcastable(x::Euclidean) = (x,)
 ##### Eager Conversion
 #####
 
-const SIMDType{N,T} = Union{SVector{N,T}, SIMD.Vec{N,T}}
+const SIMDType{N,T} = Union{SVector{N,T},SIMD.Vec{N,T}}
 
-abstract type AbstractWrap{V <: SIMDType, K} end
+abstract type AbstractWrap{V<:SIMDType,K} end
 
 # Ideally, the generated code for this should be a no-op, it's just awkward because
 # Julia doesn't really have a "bitcast" function ...
@@ -59,8 +59,8 @@ function _cast_impl(f, N::Integer, S::Integer, ::Type{T}) where {T}
     return :(($(exprs...),))
 end
 
-@generated function cast(::Type{E}, x::SIMDType{N,T}) where {N, T, S, E <: SIMDType{S,T}}
-    _cast_impl(E, N, S, T)
+@generated function cast(::Type{E}, x::SIMDType{N,T}) where {N,T,S,E<:SIMDType{S,T}}
+    return _cast_impl(E, N, S, T)
 end
 
 """
@@ -96,10 +96,10 @@ julia> y[2]
 <4 x Float32>[8.0, -121.0, 19.0, 103.0]
 ```
 """
-struct ValueWrap{V <: SIMDType,K,N,T} <: AbstractWrap{V,K}
-    vectors::NTuple{K, SIMD.Vec{N,T}}
+struct ValueWrap{V<:SIMDType,K,N,T} <: AbstractWrap{V,K}
+    vectors::NTuple{K,SIMD.Vec{N,T}}
 end
-ValueWrap{V}(x::NTuple{K, SIMD.Vec{N,T}}) where {V,K,N,T} = ValueWrap{V,K,N,T}(x)
+ValueWrap{V}(x::NTuple{K,SIMD.Vec{N,T}}) where {V,K,N,T} = ValueWrap{V,K,N,T}(x)
 
 # Implementation note - even though the `cast` function looks like is should spew out
 # a bunch of garbage, we're depending on LLVM to convert this into a series of bitcasts
@@ -115,7 +115,9 @@ end
 
 # Non-converting indexing.
 # Probably don't need this ...
-Base.@propagate_inbounds function Base.getindex(x::ValueWrap{SIMD.Vec{N,T},<:Any,N,T}) where {N,T}
+Base.@propagate_inbounds function Base.getindex(
+    x::ValueWrap{SIMD.Vec{N,T},<:Any,N,T}
+) where {N,T}
     return x.vectors[i]
 end
 
@@ -131,21 +133,23 @@ Base.length(::ValueWrap{V,K}) where {V,K} = K
 Wrap a pointer to data that we which to interpret as `K` copies of a `SIMD.Vec{N,T}` that
 will be converted to `V` upon calling `getindex`.
 """
-struct PtrWrap{V <: SIMDType, K, N, T} <: AbstractWrap{V, K}
+struct PtrWrap{V<:SIMDType,K,N,T} <: AbstractWrap{V,K}
     ptr::Ptr{SIMD.Vec{N,T}}
 end
 unwrap(x::PtrWrap) = x.ptr
 
 function PtrWrap{SIMD.Vec{N1,T1}}(ptr::Ptr{SVector{N2,T2}}) where {N1,T1,N2,T2}
     K = div(N2, N1)
-    return PtrWrap{SIMD.Vec{N1,T1}, K, N1, T2}(convert(Ptr{SIMD.Vec{N1,T2}}, ptr))
+    return PtrWrap{SIMD.Vec{N1,T1},K,N1,T2}(convert(Ptr{SIMD.Vec{N1,T2}}, ptr))
 end
 
 Base.@propagate_inbounds function Base.getindex(x::PtrWrap{V,K,N,T}, i) where {V,K,N,T}
     return convert(V, unsafe_load(unwrap(x) + (i - 1) * sizeof(SIMD.Vec{N,T})))
 end
 
-Base.@propagate_inbounds function Base.getindex(x::PtrWrap{SIMD.Vec{N,T},<:Any,N,T}, i) where {N,T}
+Base.@propagate_inbounds function Base.getindex(
+    x::PtrWrap{SIMD.Vec{N,T},<:Any,N,T}, i
+) where {N,T}
     return unsafe_load(unwrap(x) + (i - 1) * sizeof(SIMD.Vec{N,T}))
 end
 
@@ -157,7 +161,7 @@ Base.length(::PtrWrap{V,K}) where {V,K} = K
 
 wrap(::Type{V}, x::SVector) where {V} = ValueWrap{V}(x)
 wrap(::Type{V}, x::Ptr{<:SVector}) where {V} = PtrWrap{V}(x)
-const MaybePtr{T} = Union{T, Ptr{<:T}}
+const MaybePtr{T} = Union{T,Ptr{<:T}}
 
 #####
 ##### SIMD Promotion and Stuff
@@ -183,7 +187,7 @@ const MaybePtr{T} = Union{T, Ptr{<:T}}
 const VECTOR_BYTES = (16, 32, 64)
 
 # Constant propagation to the rescue!
-function vector_width(::Type{T}, ::Val{N}) where {T, N}
+function vector_width(::Type{T}, ::Val{N}) where {T,N}
     V = sizeof(T) * N
     if V >= VECTOR_BYTES[3]
         retval = VECTOR_BYTES[3]
@@ -199,8 +203,8 @@ end
 distance_select(::Nothing, ::Nothing, ::Type{A}, ::Type{B}) where {A,B} = promote_type(A, B)
 distance_select(::Type{T}, ::Any, ::Any, ::Any) where {T} = T
 distance_select(::Nothing, ::Type{T}, ::Any, ::Any) where {T} = T
-function find_distance_type(::Type{A}, ::Type{B}) where {A, B}
-    return distance_select(distance_type(A,B), distance_type(B,A), A, B)
+function find_distance_type(::Type{A}, ::Type{B}) where {A,B}
+    return distance_select(distance_type(A, B), distance_type(B, A), A, B)
 end
 
 # Generic fallback
@@ -215,8 +219,8 @@ distance_type(::Type{UInt8}, ::Type{Int16}) = Int16
 
 Return the appropriate `SIMD.Vec` type to hold partial results when computing distances.
 """
-accum_type(::Type{T}) where {T <: SIMD.Vec} = T
-accum_type(::Type{SIMD.Vec{32, Int16}}) = SIMD.Vec{16,Int32}
+accum_type(::Type{T}) where {T<:SIMD.Vec} = T
+accum_type(::Type{SIMD.Vec{32,Int16}}) = SIMD.Vec{16,Int32}
 
 """
     simd_type(vector_type1, vector_type2)
@@ -227,9 +231,9 @@ However, this may be customized by extending `distance_type`.
 """
 function simd_type(::Type{<:SIMDType{N1,T1}}, ::Type{<:SIMDType{N2,T2}}) where {N1,N2,T1,T2}
     T = find_distance_type(T1, T2)
-    return SIMD.Vec{vector_width(T, Val(min(N1,N2))), T}
+    return SIMD.Vec{vector_width(T, Val(min(N1, N2))),T}
 end
-simd_type(::A, ::B) where {A <: SIMDType, B <: SIMDType} = simd_type(A, B)
+simd_type(::A, ::B) where {A<:SIMDType,B<:SIMDType} = simd_type(A, B)
 simd_type(::Type{T}) where {T} = simd_type(T, T)
 
 #####
@@ -243,16 +247,14 @@ Return the euclidean distance between `a` and `b`.
 Return type can be queried by `costtype(Euclidean(), a, b)`.
 """
 function evaluate(
-    metric::Euclidean,
-    a::MaybePtr{A},
-    b::MaybePtr{B},
-) where {A <: SVector, B <: SVector}
+    metric::Euclidean, a::MaybePtr{A}, b::MaybePtr{B}
+) where {A<:SVector,B<:SVector}
     Base.@_inline_meta
     T = simd_type(A, B)
     return evaluate(metric, wrap(T, a), wrap(T, b))
 end
 
-function evaluate(::Euclidean, a::AbstractWrap{V,K}, b::AbstractWrap{V,K}) where {V, K}
+function evaluate(::Euclidean, a::AbstractWrap{V,K}, b::AbstractWrap{V,K}) where {V,K}
     Base.@_inline_meta
     s = zero(accum_type(V))
     for i in 1:K
@@ -276,7 +278,7 @@ function _sum(x::SIMD.Vec{N,T}) where {N,T}
 end
 
 # Specialize to use special AVX instructions.
-square(x::T) where {T <: SIMD.Vec} = square_accum(x, zero(accum_type(T)))
+square(x::T) where {T<:SIMD.Vec} = square_accum(x, zero(accum_type(T)))
 square_accum(x::SIMD.Vec, y::SIMD.Vec) = Base.muladd(x, x, y)
 function square_accum(x::SIMD.Vec{32,Int16}, y::SIMD.Vec{16,Int32})
     return vnni_accumulate(y, x, x)
@@ -285,9 +287,7 @@ end
 # VNNI accumulation for 32xInt16.
 @static if VERSION >= v"1.6.0-beta1"
     function vnni_accumulate(
-        x::SIMD.Vec{16,Int32},
-        a::SIMD.Vec{32,Int16},
-        b::SIMD.Vec{32,Int16},
+        x::SIMD.Vec{16,Int32}, a::SIMD.Vec{32,Int16}, b::SIMD.Vec{32,Int16}
     )
         Base.@_inline_meta
 
@@ -317,17 +317,17 @@ end
         x = Base.llvmcall(
             (s, "entry"),
             SIMD.LVec{16,Int32},
-            Tuple{SIMD.LVec{16,Int32}, SIMD.LVec{32,Int16}, SIMD.LVec{32,Int16}},
-            x.data, a.data, b.data,
+            Tuple{SIMD.LVec{16,Int32},SIMD.LVec{32,Int16},SIMD.LVec{32,Int16}},
+            x.data,
+            a.data,
+            b.data,
         )
 
         return SIMD.Vec(x)
     end
 else
     function vnni_accumulate(
-        x::SIMD.Vec{16,Int32},
-        a::SIMD.Vec{32,Int16},
-        b::SIMD.Vec{32,Int16},
+        x::SIMD.Vec{16,Int32}, a::SIMD.Vec{32,Int16}, b::SIMD.Vec{32,Int16}
     )
         Base.@_inline_meta
 
@@ -351,11 +351,12 @@ else
         x = Base.llvmcall(
             (decl, s),
             SIMD.LVec{16,Int32},
-            Tuple{SIMD.LVec{16,Int32}, SIMD.LVec{32,Int16}, SIMD.LVec{32,Int16}},
-            x.data, a.data, b.data,
+            Tuple{SIMD.LVec{16,Int32},SIMD.LVec{32,Int16},SIMD.LVec{32,Int16}},
+            x.data,
+            a.data,
+            b.data,
         )
 
         return SIMD.Vec(x)
     end
 end
-

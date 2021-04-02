@@ -1,26 +1,18 @@
 function run_diskann(
-    record::Record,
-    index::GraphANN.DiskANNIndex,
-    queries,
-    groundtruth;
-    multithread = false
+    record::Record, index::GraphANN.DiskANNIndex, queries, groundtruth; multithread = false
 )
     executor = multithread ? GraphANN.dynamic_thread : GraphANN.single_thread
-    runner = GraphANN.SPTAGRunner(index, 1; executor = executor)
+    runner = GraphANN.DiskANNRunner(index, 200; executor = executor)
     # Function barrier for performance
     return _run_diskann(record, runner, index, queries, groundtruth)
 end
 
 function _run_diskann(
-    record::Record,
-    runner,
-    index::GraphANN.DiskANNIndex,
-    queries,
-    groundtruth,
+    record::Record, runner, index::GraphANN.DiskANNIndex, queries, groundtruth
 )
     # Parameter Space
     # Order to the largest search list is first for more accurate progress meters.
-    search_list_sizes = 20:10:200 |> reverse
+    search_list_sizes = reverse(20:10:300)
     latencies, callbacks = GraphANN.Algorithms.latency_callbacks(runner)
 
     # Run once to force precompilation
@@ -31,11 +23,7 @@ function _run_diskann(
         resize!(runner, search_list_size)
         empty!(latencies)
         rt = @elapsed ids = GraphANN.search(
-            runner,
-            index,
-            queries;
-            num_neighbors = 5,
-            callbacks = callbacks,
+            runner, index, queries; num_neighbors = 5, callbacks = callbacks
         )
 
         # Compute recalls
@@ -43,7 +31,7 @@ function _run_diskann(
         recall_at_1 = mean(GraphANN.recall(groundtruth, view(ids, 1:1, :)))
 
         # Get the latencies and record some statistics
-        times = get(latencies) |> sort
+        times = sort(get(latencies))
 
         results = makeresult(
             Dict(
@@ -63,7 +51,7 @@ function _run_diskann(
                 :latency_01 => getnine(times, 0.01),
                 :latency_001 => getnine(times, 0.001),
                 :latency_0001 => getnine(times, 0.0001),
-            )
+            ),
         )
         push!(record, results)
         save(record)

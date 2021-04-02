@@ -71,10 +71,7 @@ function navailable(queue::SAQ)
 end
 
 Base.@propagate_inbounds function consume!(
-    v::AbstractVector{T},
-    start::Integer,
-    queue::SAQ{T},
-    takemax = nothing,
+    v::AbstractVector{T}, start::Integer, queue::SAQ{T}, takemax = nothing
 ) where {T}
     tail = unsafe_get(queue.tail)
     head = unsafe_get(queue.head)

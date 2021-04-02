@@ -3,10 +3,7 @@
 #####
 
 function save(
-    ::Native,
-    io::IO,
-    g::UniDirectedGraph{T};
-    buffersize = div(2_000_000_000, sizeof(T))
+    ::Native, io::IO, g::UniDirectedGraph{T}; buffersize = div(2_000_000_000, sizeof(T))
 ) where {T}
     write_header(io, g)
 
@@ -35,7 +32,7 @@ function write_header(io::IO, g::UniDirectedGraph{T}) where {T}
     write(io, Int64(sizeof(T)))
     write(io, Int64(LightGraphs.nv(g)))
     write(io, Int64(LightGraphs.ne(g)))
-    write(io, Int64(maximum(LightGraphs.outdegree(g))))
+    return write(io, Int64(maximum(LightGraphs.outdegree(g))))
 end
 
 # Return the header as a NamedTuple.
@@ -71,10 +68,8 @@ and match what was used to save the graph originally.
     - `allocator`: Allocator for memory. Default: [`stdallocator`](@ref).
 """
 function load(
-    ::Type{T},
-    file::AbstractString;
-    kw...
-) where {T <: _Graphs.AbstractAdjacencyList}
+    ::Type{T}, file::AbstractString; kw...
+) where {T<:_Graphs.AbstractAdjacencyList}
     return open(io -> load(T, io; kw...), file)
 end
 
@@ -100,10 +95,7 @@ function load(::Type{DefaultAdjacencyList{T}}, io::IO) where {T}
 end
 
 function load(
-    ::Type{FlatAdjacencyList{T}},
-    io::IO;
-    pad_to = nothing,
-    allocator = stdallocator
+    ::Type{FlatAdjacencyList{T}}, io::IO; pad_to = nothing, allocator = stdallocator
 ) where {T}
     @unpack elsize, nv, ne, max_degree = read_header(io)
     @assert elsize == sizeof(T)
@@ -113,9 +105,7 @@ function load(
     if pad_to !== nothing
         num_elements = div(pad_to, sizeof(T))
         if num_elements * sizeof(T) != pad_to
-            throw(ArgumentError(
-                "Requested padding bytes of $pad_to is not evenly divisible by elements of type $T"
-            ))
+            throw(ArgumentError("Requested padding bytes of $pad_to is not evenly divisible by elements of type $T"))
         end
         max_degree = cdiv(max_degree, num_elements) * num_elements
     end
@@ -137,11 +127,7 @@ function load(
     return g
 end
 
-function load(
-    ::Type{DenseAdjacencyList{T}},
-    io::IO;
-    allocator = stdallocator,
-) where {T}
+function load(::Type{DenseAdjacencyList{T}}, io::IO; allocator = stdallocator) where {T}
     @unpack elsize, nv, ne, max_degree = read_header(io)
     @assert elsize == sizeof(T)
 
@@ -149,7 +135,7 @@ function load(
     offsets = Vector{Int}(undef, nv + 1)
     offsets[1] = 1
     ProgressMeter.@showprogress 1 for i in 1:nv
-        @inbounds offsets[i+1] = offsets[i] + read(io, T)
+        @inbounds offsets[i + 1] = offsets[i] + read(io, T)
     end
 
     # Preallocate the storage and load everything into memory.
@@ -200,8 +186,7 @@ The CSR offsets and dense adjacency list are saved as canonical binary files in
 `joinpath(dir, "offsets.bin")` and `joinpath(dir, "neighbors.bin")` respectively.
 """
 function save_bin(
-    dir::AbstractString,
-    graph::UniDirectedGraph{T, _Graphs.DenseAdjacencyList{T}},
+    dir::AbstractString, graph::UniDirectedGraph{T,_Graphs.DenseAdjacencyList{T}}
 ) where {T}
     !isdir(dir) && mkdir(dir)
 
@@ -229,8 +214,7 @@ multiple files in `dir` using the [`save_bin`](@ref save_bin(::AbstractString, :
 The CSR offsets are copied into DRAM while the dense adjacency list is memory mapped.
 """
 function load_bin(
-    dir::AbstractString,
-    ::Type{UniDirectedGraph{T, _Graphs.DenseAdjacencyList{T}}},
+    dir::AbstractString, ::Type{UniDirectedGraph{T,_Graphs.DenseAdjacencyList{T}}}
 ) where {T}
     # Load offsets
     # Copy the MMap in case the original file lives in PM.
@@ -239,5 +223,4 @@ function load_bin(
 
     return UniDirectedGraph{T}(_Graphs.DenseAdjacencyList{T}(storage, offsets))
 end
-
 

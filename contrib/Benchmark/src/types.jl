@@ -9,13 +9,17 @@ function Record(path::AbstractString, new = false)
     return Record(df, path)
 end
 
-_transpose(df) = DataFrame([[names(df)]; collect.(eachrow(df))], [:column; Symbol.(axes(df, 1))])
+function _transpose(df)
+    return DataFrame([[names(df)]; collect.(eachrow(df))], [:column; Symbol.(axes(df, 1))])
+end
 Base.show(io::IO, record::Record) = show(io, _transpose(record.df))
 
 lower(x) = x
 lower(x::AbstractDict) = lowerdict(x)
 lowerdict(x) = Dict(key => lower(value) for (key, value) in pairs(x))
-Base.push!(record::Record, row; cols = :union) = push!(record.df, lowerdict(row); cols = cols)
+function Base.push!(record::Record, row; cols = :union)
+    return push!(record.df, lowerdict(row); cols = cols)
+end
 
 function save(record::Record)
     mktemp() do path, io

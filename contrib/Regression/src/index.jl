@@ -24,7 +24,7 @@ function index_building(
             :savepath => savepath,
             :num_threads => Threads.nthreads(),
             :graph_allocator => allocator,
-        )
+        ),
     ])
 
     # Save the results!

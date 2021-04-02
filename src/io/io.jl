@@ -15,11 +15,11 @@ import .._Trees: TreeNode, Tree, rootindices
 import ..Algorithms: DiskANNIndex
 
 # stdlib
-import Mmap
+using Mmap: Mmap
 
 # deps
-import LightGraphs
-import ProgressMeter
+using LightGraphs: LightGraphs
+using ProgressMeter: ProgressMeter
 import StaticArrays: SVector
 import UnPack: @unpack
 

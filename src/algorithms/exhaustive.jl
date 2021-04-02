@@ -57,7 +57,7 @@ function exhaustive_search(
     costtype::Type{D} = costtype(metric, A, B),
     executor = dynamic_thread,
     groupsize = 32,
-    kw...
+    kw...,
 ) where {A,B,I,D}
     runner = ExhaustiveRunner(
         length(queries),
@@ -71,10 +71,10 @@ function exhaustive_search(
     return runner.groundtruth
 end
 
-const VecOrMat{T} = Union{AbstractVector{T}, AbstractMatrix{T}}
-const IntOrNeighbor{I} = Union{I, <:Neighbor{I}}
-inttype(::Type{I}) where {I <: Integer} = I
-inttype(::Type{<:Neighbor{I}}) where {I <: Integer} = I
+const VecOrMat{T} = Union{AbstractVector{T},AbstractMatrix{T}}
+const IntOrNeighbor{I} = Union{I,<:Neighbor{I}}
+inttype(::Type{I}) where {I<:Integer} = I
+inttype(::Type{<:Neighbor{I}}) where {I<:Integer} = I
 
 # """
 #     ExhaustiveRunner(max_queries::Integer, num_neighbors::Integer, [ID]; [kw...])
@@ -91,7 +91,9 @@ inttype(::Type{<:Neighbor{I}}) where {I <: Integer} = I
 #     [`GraphANN.dynamic_thread`](@ref).  Default: `GraphANN.single_thread`.
 # * `costtype` - Type returned by distance computations.
 # """
-mutable struct ExhaustiveRunner{V <: VecOrMat{<:IntOrNeighbor}, T <: MaybeThreadLocal{<:AbstractVector}, F}
+mutable struct ExhaustiveRunner{
+    V<:VecOrMat{<:IntOrNeighbor},T<:MaybeThreadLocal{<:AbstractVector},F
+}
     groundtruth::V
     exhaustive_local::T
     executor::F
@@ -104,7 +106,7 @@ function ExhaustiveRunner(
     executor::F = single_thread,
     costtype::Type{D} = Float32,
     max_groupsize = 32,
-) where {ID <: IntOrNeighbor, U <: Union{Integer, typeof(one)}, F, D}
+) where {ID<:IntOrNeighbor,U<:Union{Integer,typeof(one)},F,D}
     # Preallocate destination.
     if isa(num_neighbors, Integer)
         groundtruth = Matrix{ID}(undef, num_neighbors, num_queries)
@@ -113,7 +115,10 @@ function ExhaustiveRunner(
     end
 
     # Create thread local storage.
-    heaps = [KeepSmallest{Neighbor{inttype(ID),D}}(_num_neighbors(num_neighbors)) for _ in 1:max_groupsize]
+    heaps = [
+        KeepSmallest{Neighbor{inttype(ID),D}}(_num_neighbors(num_neighbors))
+        for _ in 1:max_groupsize
+    ]
     exhaustive_local = threadlocal_wrap(executor, heaps)
     return ExhaustiveRunner(groundtruth, exhaustive_local, executor)
 end
@@ -125,7 +130,7 @@ _num_neighbors(x::Integer) = x
 
 # Allow resizing when using a vector to store the single nearest neighbor.
 function Base.resize!(runner::ExhaustiveRunner{<:AbstractVector}, sz::Integer)
-    resize!(runner.groundtruth, sz)
+    return resize!(runner.groundtruth, sz)
 end
 
 function sizecheck(groundtruth::AbstractVector, num_neighbors, num_queries)
@@ -145,7 +150,7 @@ function _Base.search!(
     meter = ProgressMeter.Progress(length(queries), 1),
     metric = Euclidean(),
     skip_size_check = false,
-    num_neighbors = _num_neighbors(runner.groundtruth)
+    num_neighbors = _num_neighbors(runner.groundtruth),
 )
     # Destructure runner
     @unpack groundtruth, exhaustive_local, executor = runner
@@ -189,7 +194,7 @@ Base.@propagate_inbounds function _nearest_neighbors!(
     queries::AbstractVector,
     range,
     metric,
-) where {T <: Neighbor}
+) where {T<:Neighbor}
     @inbounds for base_id in eachindex(dataset)
         base = dataset[base_id]
 
@@ -231,4 +236,3 @@ function _commit!(gt::AbstractVector, heaps::AbstractVector, range)
     end
     return nothing
 end
-

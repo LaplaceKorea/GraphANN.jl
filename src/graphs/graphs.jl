@@ -4,8 +4,8 @@ module _Graphs
 using .._Base
 
 # deps
-import LightGraphs
-import ProgressMeter
+using LightGraphs: LightGraphs
+using ProgressMeter: ProgressMeter
 import UnPack: @unpack
 
 # explicit imports
@@ -22,10 +22,7 @@ export random_regular
 include("generators.jl")
 
 function vertices_in_radius(
-        g::LightGraphs.AbstractGraph,
-        s::Integer,
-        hops = 5;
-        max_vertices = nothing,
+    g::LightGraphs.AbstractGraph, s::Integer, hops = 5; max_vertices = nothing
 )
     T = eltype(g)
     visited = RobinSet(T(s))

@@ -4,7 +4,7 @@ module _Trees
 using .._Base
 
 # deps
-import DataStructures
+using DataStructures: DataStructures
 import UnPack: @unpack, @pack!
 
 abstract type AbstractTree end

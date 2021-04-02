@@ -42,8 +42,8 @@ function partition!(
     by::F,
     x::AbstractVector{T},
     util::PartitionUtil = PartitionUtil{T}();
-    executor::G = dynamic_thread
-) where {F, T, G}
+    executor::G = dynamic_thread,
+) where {F,T,G}
     resize!(util, length(x))
     @unpack gt, lt, temp = util
 
@@ -66,7 +66,7 @@ function partition!(
     # and the correct index at which to store `temp[i]` is `gt[i]`.
     executor(eachindex(x, gt, lt, temp), 1024) do i
         a = lt[i]
-        b = (i == firstindex(lt)) ? 0 : lt[i-1]
+        b = (i == firstindex(lt)) ? 0 : lt[i - 1]
         index = (a > b) ? a : gt[i]
         x[index] = temp[i]
     end

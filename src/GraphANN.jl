@@ -11,22 +11,35 @@ const DATADIR = joinpath(PKGDIR, "data")
 import StaticArrays: SVector
 
 # Bootstrap
-include("base/base.jl"); using ._Base
-include("graphs/graphs.jl"); using ._Graphs
-include("trees/trees.jl"); using ._Trees
-include("prefetch/prefetch.jl"); using ._Prefetcher
-include("clustering/clustering.jl"); using ._Clustering
+include("base/base.jl")
+using ._Base
+include("graphs/graphs.jl")
+using ._Graphs
+include("trees/trees.jl")
+using ._Trees
+include("prefetch/prefetch.jl")
+using ._Prefetcher
+include("clustering/clustering.jl")
+using ._Clustering
 include("dataset.jl")
 
 # Core implementation
-include("algorithms/algorithms.jl"); using .Algorithms
-include("io/io.jl"); using ._IO
+include("algorithms/algorithms.jl")
+using .Algorithms
+include("io/io.jl")
+using ._IO
 
 # For examples
 const VECSDIR = joinpath(DATADIR, "vecs")
-sample_dataset() = load_vecs(SVector{128,Float32}, joinpath(VECSDIR, "siftsmall_base.fvecs"))
-sample_queries() = load_vecs(SVector{128,Float32}, joinpath(VECSDIR, "siftsmall_query.fvecs"))
-sample_groundtruth() = load_vecs(joinpath(VECSDIR, "siftsmall_groundtruth.ivecs"); groundtruth = true)
+function sample_dataset()
+    return load_vecs(SVector{128,Float32}, joinpath(VECSDIR, "siftsmall_base.fvecs"))
+end
+function sample_queries()
+    return load_vecs(SVector{128,Float32}, joinpath(VECSDIR, "siftsmall_query.fvecs"))
+end
+function sample_groundtruth()
+    return load_vecs(joinpath(VECSDIR, "siftsmall_groundtruth.ivecs"); groundtruth = true)
+end
 
 ############################################################################################
 function test(runner, index, queries; num_neighbors = 5, batchsize = 32)

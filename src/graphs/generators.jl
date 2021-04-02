@@ -9,7 +9,7 @@ function random_regular(
     max_edges = ne,
     slack = 1.00,
     allocator = stdallocator,
-) where {T <: Integer}
+) where {T<:Integer}
 
     adj = Vector{Vector{T}}(undef, nv)
     _populate!(adj, ne, ceil(Int, slack * max_edges))
@@ -25,14 +25,14 @@ function random_regular(
     max_edges = ne,
     slack = 1.00,
     allocator = stdallocator,
-) where {T <: Integer}
+) where {T<:Integer}
 
     # Allocate destination space
     adj = allocator(T, ceil(Int, slack * max_edges), nv)
 
     # Multithreaded zeroing
     dynamic_thread(1:nv, 2^16) do col
-        @views adj[:,col] .= zero(T)
+        @views adj[:, col] .= zero(T)
     end
 
     _populate!(adj, ne)

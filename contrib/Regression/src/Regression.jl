@@ -1,7 +1,7 @@
 module Regression
 
 # You know - the thing we're actually testing.
-import GraphANN
+using GraphANN: GraphANN
 
 # stdlib
 using Serialization
@@ -11,7 +11,7 @@ using Statistics
 using DataFrames
 using DataStructures
 
-import PrettyTables
+using PrettyTables: PrettyTables
 import UnPack: @unpack, @pack!
 
 const SRCDIR = @__DIR__

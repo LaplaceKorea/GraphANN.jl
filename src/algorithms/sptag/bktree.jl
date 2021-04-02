@@ -44,11 +44,7 @@ function coarse_pass!(
 
     kmeans_runner = KMeansRunner(data, dynamic_thread)
     exhaustive_runner = ExhaustiveRunner(
-        length(data),
-        one,
-        I;
-        executor = dynamic_thread,
-        costtype = Float32,
+        length(data), one, I; executor = dynamic_thread, costtype = Float32
     )
 
     # Inner function - add a coarsely clustered partition to the small stack.
@@ -77,13 +73,9 @@ function fine_pass!(
     stacksplit::Integer,
 ) where {I,N,T}
     kmeans_runners = ThreadLocal(KMeansRunner(data, single_thread))
-    exhaustive_runners = ExhaustiveRunner(
-        stacksplit,
-        one,
-        I;
-        executor = single_thread,
-        costtype = Float32,
-    ) |> ThreadLocal
+    exhaustive_runners = ThreadLocal(
+        ExhaustiveRunner(stacksplit, one, I; executor = single_thread, costtype = Float32)
+    )
 
     local_stacks = ThreadLocal(Vector{eltype(stack)}())
     # Create local parent - builder pair stacks for each thread to avoid fighting over
@@ -95,7 +87,9 @@ function fine_pass!(
         # Create a whole sub-tree for this range to be merged at the very end.
         topparent, toprange = stack[i]
         subbuilder = _Trees.TreeBuilder{I}(length(toprange))
-        callback = ((parent, range),) -> _Trees.addnodes!(subbuilder, parent, view(permutation, range))
+        callback =
+            ((parent, range),) ->
+                _Trees.addnodes!(subbuilder, parent, view(permutation, range))
 
         # As far as the sub-process is concerned, it's working on an entirely new tree,
         # so set the initial parent to "0".
@@ -121,14 +115,14 @@ end
 
 function process_stack!(
     f::F,
-    stack::AbstractVector{<:NamedTuple{(:parent,:range)}},
+    stack::AbstractVector{<:NamedTuple{(:parent, :range)}},
     builder::_Trees.TreeBuilder,
     data::AbstractVector{SVector{N,T}},
     permutation::AbstractVector{<:Integer},
     kmeans_runner,
     bruteforce_runner,
     fanout::Integer,
-    leafsize::Integer
+    leafsize::Integer,
 ) where {F,N,T}
     while !isempty(stack)
         @unpack parent, range = pop!(stack)
@@ -143,22 +137,13 @@ function process_stack!(
         # dataview = doubleview(data, permutation, range)
         # centroids = kmeans(dataview, kmeans_runner, fanout)
         centroids, centroid_indices = find_centroids(
-            data,
-            permutation,
-            range,
-            kmeans_runner,
-            bruteforce_runner,
-            fanout,
+            data, permutation, range, kmeans_runner, bruteforce_runner, fanout
         )
 
         # Add the data point indices to the tree, move selected centroids to the end
         # of the current range to aid in procesing the next level.
         permview = view(permutation, range)
-        parent_indices = _Trees.addnodes!(
-            builder,
-            parent,
-            view(permview, centroid_indices),
-        )
+        parent_indices = _Trees.addnodes!(builder, parent, view(permview, centroid_indices))
         move_to_end!(permview, centroid_indices)
 
         # Now that we've found our centroids and added them to the tree, we need to
@@ -168,12 +153,7 @@ function process_stack!(
         remaining_range = shrink!(range, length(centroid_indices))
         dataview = doubleview(data, permutation, remaining_range)
         resize!(bruteforce_runner, length(remaining_range))
-        assignments = search!(
-            bruteforce_runner,
-            dataview,
-            centroids;
-            meter = nothing,
-        )
+        assignments = search!(bruteforce_runner, dataview, centroids; meter = nothing)
         assignments .+= one(eltype(assignments))
 
         # Sort data points by the centroid that they map to.
@@ -208,12 +188,7 @@ function find_centroids(
 
     # Map the indices returned by `kmeans` to their closest data points.
     resize!(bruteforce_runner, length(centroids))
-    centroid_indices = search!(
-        bruteforce_runner,
-        centroids,
-        dataview;
-        meter = nothing,
-    )
+    centroid_indices = search!(bruteforce_runner, centroids, dataview; meter = nothing)
 
     # Handle cases where we have repeated indices.
     # To save on allocating a "Set" for the standard `unique!` function, we instead
@@ -254,13 +229,14 @@ function findfirstfrom(predicate::F, A, start) where {F}
 end
 
 # Utility to sort one vector with respect to another.
-struct Dual{TA, TB, A <: AbstractVector{TA}, B <: AbstractVector{TB}} <: AbstractVector{Tuple{TA,TB}}
+struct Dual{TA,TB,A<:AbstractVector{TA},B<:AbstractVector{TB}} <:
+       AbstractVector{Tuple{TA,TB}}
     a::A
     b::B
 
     # Inner constructor to ensure that (at least initially), the lengths of the wrapped
     # arrays are the same.
-    function Dual(a::A, b::B) where {TA, TB, A <: AbstractArray{TA}, B <: AbstractArray{TB}}
+    function Dual(a::A, b::B) where {TA,TB,A<:AbstractArray{TA},B<:AbstractArray{TB}}
         if length(a) != length(b)
             throw(ArgumentError("Arrays must be the same length!"))
         end
@@ -272,4 +248,3 @@ Base.size(A::Dual) = size(A.a)
 Base.getindex(A::Dual, i::Int) = (A.a[i], A.b[i])
 Base.setindex!(A::Dual, (a, b), i::Int) = (A.a[i] = a; A.b[i] = b)
 Base.IndexStyle(::Type{<:Dual}) = Base.IndexLinear()
-

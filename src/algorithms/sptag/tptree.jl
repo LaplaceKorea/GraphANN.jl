@@ -27,9 +27,7 @@ function getsamples(data, runner::TPTreeRunner, range, numsamples)
 end
 
 Base.@propagate_inbounds function evalsplit(
-    y::AbstractVector{T1},
-    dims::NTuple{K,<:Integer},
-    vals::SVector{K,T2},
+    y::AbstractVector{T1}, dims::NTuple{K,<:Integer}, vals::SVector{K,T2}
 ) where {K,T1,T2}
     s = zero(promote_type(T1, T2))
     for i in 1:K
@@ -46,8 +44,8 @@ function _Base.partition!(
     numtrials = 500,
     numsamples = 1000,
     single_thread_threshold = 10000,
-    init = true
-) where {F, I, K}
+    init = true,
+) where {F,I,K}
     # Resize and initialize the permutation vector if requested.
     if init
         resize!(permutation, length(data))
@@ -80,9 +78,8 @@ function _Base.partition!(
     # N.B.: TPTreeRunner has specialized "deepcopy" to make sure it is distributed
     # correctly for thead local storage.
     leaves = ThreadLocal(Vector{UnitRange{Int}}())
-    threadlocal = ThreadLocal(
-        localstack = Vector{eltype(stack)}(),
-        runner = TPTreeRunner{K}(permutation),
+    threadlocal = ThreadLocal(;
+        localstack = Vector{eltype(stack)}(), runner = TPTreeRunner{K}(permutation)
     )
 
     @withtimer "TPTree Fine Pass" dynamic_thread(eachindex(shortstack)) do i
@@ -176,7 +173,7 @@ function getdims!(
     data::AbstractVector{SVector{N,T}},
     runner::TPTreeRunner,
     range::AbstractUnitRange,
-    numsamples::Integer
+    numsamples::Integer,
 ) where {N,T}
     samples = getsamples(data, runner, range, numsamples)
     _, variances = _Base.meanvar(SVector{N,Float32}, samples)
@@ -194,7 +191,7 @@ function max_variance_dims(runner::TPTreeRunner{K}, variances) where {K}
     sort!(
         scratch,
         Base.Sort.PartialQuickSort(1:K),
-        Base.Sort.Perm(Base.Sort.ord(isless, identity, true, Base.Forward), variances)
+        Base.Sort.Perm(Base.Sort.ord(isless, identity, true, Base.Forward), variances),
     )
     return ntuple(i -> scratch[i], Val(K))
 end
@@ -218,10 +215,10 @@ function getweights!(
     # variance.
     # Track which weight generates the largest across our sample space.
     for _ in 1:numtrials
-        weights = LinearAlgebra.normalize(2 .* rand(SVector{K, Float32}) .- 1)
-        mean, variance = _Base.meanvar(
-            Float32,
-            evalsplit(sample, dims, weights) for sample in samples;
+        weights = LinearAlgebra.normalize(2 .* rand(SVector{K,Float32}) .- 1)
+        mean,
+        variance = _Base.meanvar(
+            Float32, evalsplit(sample, dims, weights) for sample in samples;
         )
 
         # Update to track maximum
@@ -236,4 +233,3 @@ function getweights!(
     # Now that we have the best weights, compute the mean.
     return bestweights, bestmean
 end
-

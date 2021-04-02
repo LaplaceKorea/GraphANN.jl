@@ -5,7 +5,7 @@
 # There are ... a lot of options for parameters running during queries.
 # I'm going to try to parameterize these as types and we'll see how well that works out.
 abstract type AbstractQueryParameter end
-lower(::T) where {T <: AbstractQueryParameter} = string(T)
+lower(::T) where {T<:AbstractQueryParameter} = string(T)
 
 abstract type AbstractCallbacks <: AbstractQueryParameter end
 struct NoCallbacks <: AbstractCallbacks end
@@ -22,7 +22,9 @@ struct WithPrefetching <: AbstractPrefetching end
 # Dispatch Rules - Callbacks
 get_callbacks(::NoCallbacks, ::Any) = (callbacks = GraphANN.GreedyCallbacks(),)
 get_callbacks(::LatencyCallbacks, ::SingleThread) = GraphANN.Algorithms.latency_callbacks()
-get_callbacks(::LatencyCallbacks, ::MultiThread) = GraphANN.Algorithms.latency_mt_callbacks()
+function get_callbacks(::LatencyCallbacks, ::MultiThread)
+    return GraphANN.Algorithms.latency_mt_callbacks()
+end
 
 # Unpack the names tuple to reset the latencies Vector or ThreadLocal
 reset!(x::NamedTuple, ::NoCallbacks) = nothing
@@ -49,13 +51,13 @@ end
 start_prefetching(meta, ::NoPrefetching) = nothing
 function start_prefetching(meta, ::WithPrefetching)
     GraphANN._Prefetcher.start(meta)
-    sleep(0.01)
+    return sleep(0.01)
 end
 
 stop_prefetching(meta, ::NoPrefetching) = nothing
 function stop_prefetching(meta, ::WithPrefetching)
     sleep(0.01)
-    GraphANN._Prefetcher.stop(meta)
+    return GraphANN._Prefetcher.stop(meta)
 end
 
 const MetaGraph = GraphANN.MetaGraph
@@ -102,7 +104,7 @@ function query(
 
     # To find the correct window sizes for the provided accuracies, we create a closure
     # to run the query algorithm and memoize it to make things a little faster.
-    closure = function(windowsize::Integer)
+    closure = function (windowsize::Integer)
         # Even though we might ask for single threaded latency, here we use multithreading
         # just to make convergencde a little faster.
         algo, meta = make_algo(windowsize, MultiThread(), NoPrefetching(), meta)
@@ -124,14 +126,15 @@ function query(
         algo, modified_meta = make_algo(windowsize, threading, prefetching, meta)
 
         # Warmup Round
-        f = () -> GraphANN.search(
-            algo,
-            modified_meta,
-            start,
-            queries;
-            num_neighbors = num_neighbors,
-            callbacks = callback_tuple.callbacks,
-        )
+        f =
+            () -> GraphANN.search(
+                algo,
+                modified_meta,
+                start,
+                queries;
+                num_neighbors = num_neighbors,
+                callbacks = callback_tuple.callbacks,
+            )
 
         reset!(callback_tuple, callbacks)
         start_prefetching(modified_meta, prefetching)
@@ -180,4 +183,3 @@ function query(
         save(record)
     end
 end
-

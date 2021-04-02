@@ -4,9 +4,9 @@ export DiskANNRunner, DiskANNIndex, DiskANNIndexParameters
 export SPTAGRunner, SPTAGIndex
 
 # stdlib
-import LinearAlgebra
-import Statistics
-import Random
+using LinearAlgebra: LinearAlgebra
+using Statistics: Statistics
+using Random: Random
 
 # local dependencies
 using .._Base
@@ -16,10 +16,10 @@ using .._Prefetcher
 using .._Clustering
 
 # deps
-import DataStructures
-import LightGraphs
-import ProgressMeter
-import Setfield
+using DataStructures: DataStructures
+using LightGraphs: LightGraphs
+using ProgressMeter: ProgressMeter
+using Setfield: Setfield
 import StaticArrays: SVector, @SVector
 import UnPack: @unpack, @pack!
 

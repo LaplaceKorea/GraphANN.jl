@@ -9,7 +9,9 @@ function Record(path::AbstractString, new = false)
     return Record(df, path)
 end
 
-_transpose(df) = DataFrame([[names(df)]; collect.(eachrow(df))], [:column; Symbol.(axes(df, 1))])
+function _transpose(df)
+    return DataFrame([[names(df)]; collect.(eachrow(df))], [:column; Symbol.(axes(df, 1))])
+end
 Base.show(io::IO, record::Record) = show(io, _transpose(record.df))
 
 function save(record::Record)
@@ -23,7 +25,9 @@ end
 lower(x) = x
 lower(x::AbstractDict) = lowerdict(x)
 lowerdict(x) = Dict(key => lower(value) for (key, value) in pairs(x))
-Base.push!(record::Record, row; cols = :union) = push!(record.df, lowerdict(row); cols = cols)
+function Base.push!(record::Record, row; cols = :union)
+    return push!(record.df, lowerdict(row); cols = cols)
+end
 
 # Overloads for lowering some GraphANN types
 lower(::typeof(GraphANN.stdallocator)) = "DRAM"
@@ -73,11 +77,8 @@ function load(dataset::Dataset)
     _dataset !== nothing && return _dataset
 
     @unpack path, maxlines, data_allocator, eltype = dataset
-    _dataset =  GraphANN.load_vecs(
-        eltype,
-        path;
-        maxlines = maxlines,
-        allocator = data_allocator
+    _dataset = GraphANN.load_vecs(
+        eltype, path; maxlines = maxlines, allocator = data_allocator
     )
     @pack! dataset = _dataset
     return _dataset
@@ -111,9 +112,7 @@ function load(graph::Graph)
 
     @unpack path, graph_allocator = graph
     _graph = GraphANN.load(
-        GraphANN.DenseAdjacencyList{UInt32},
-        path;
-        allocator = graph_allocator
+        GraphANN.DenseAdjacencyList{UInt32}, path; allocator = graph_allocator
     )
     @pack! graph = _graph
     return _graph
@@ -159,7 +158,7 @@ function _pqtable(q::Quantization)
     return q._pqtable
 end
 
-function  _pqtranspose(q::Quantization)
+function _pqtranspose(q::Quantization)
     if q._pqtranspose === nothing
         pqtable = _pqtable(q)
         q._pqtranspose = GraphANN._Quantization.PQTransposed(pqtable)
@@ -180,10 +179,7 @@ function _data_encoded(q::Quantization, dataset::Dataset)
         qtype = q.num_centroids <= 256 ? UInt8 : UInt16
         encoder = _encoder(q)
         q._data_encoded = GraphANN._Quantization.encode(
-            qtype,
-            encoder,
-            load(dataset);
-            allocator = q.encoded_data_allocator,
+            qtype, encoder, load(dataset); allocator = q.encoded_data_allocator
         )
     end
     return q._data_encoded
@@ -198,10 +194,7 @@ function getmeta(q::Quantization, ::EncodedGraph, dataset::Dataset, graph::Graph
         qtype = q.num_centroids <= 256 ? UInt8 : UInt16
         encoder = _encoder(q)
         q._pqgraph = GraphANN.PQGraph{qtype}(
-            encoder,
-            load(graph),
-            load(dataset);
-            allocator = q.pqgraph_allocator,
+            encoder, load(graph), load(dataset); allocator = q.pqgraph_allocator
         )
     end
     return GraphANN.MetaGraph(load(graph), q._pqgraph)
@@ -209,4 +202,3 @@ end
 
 getmetric(q::Quantization, ::EagerDistance) = _pqtranspose(q)
 getmetric(q::Quantization, ::LazyDistance) = _pqtable(q)
-

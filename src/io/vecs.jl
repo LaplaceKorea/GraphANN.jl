@@ -15,13 +15,7 @@ function load_vecs(file; kw...)
 
     # What is the data type?
     datatype_char = ext[2]
-
-    typemap = Dict(
-        'b' => UInt8,
-        'i' => UInt32,
-        'f' => Float32,
-    )
-
+    typemap = Dict('b' => UInt8, 'i' => UInt32, 'f' => Float32)
     return load_vecs(typemap[datatype_char], file; kw...)
 end
 
@@ -117,11 +111,7 @@ julia> vec = GraphANN.load_vecs(GraphANN.SVector{128,Float32}, path)
 ```
 """
 function load_vecs(
-    ::Type{T},
-    file;
-    maxlines = nothing,
-    allocator = stdallocator,
-    groundtruth = false
+    ::Type{T}, file; maxlines = nothing, allocator = stdallocator, groundtruth = false
 ) where {T}
     linecount = 0
     index = 1
@@ -179,10 +169,7 @@ end
 
 Save the matrix `A` to `io` in the `*vecs` format.
 """
-function save_vecs(
-    file::AbstractString,
-    A::AbstractMatrix{T},
-) where {T}
+function save_vecs(file::AbstractString, A::AbstractMatrix{T}) where {T}
     # Make the path if required
     dir = dirname(file)
     !ispath(dir) && mkpath(dir)

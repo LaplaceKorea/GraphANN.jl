@@ -2,7 +2,7 @@
 ##### Graph Search Algorithm
 #####
 
-struct SPTAGIndex{G,D <: AbstractVector, T <: Tree}
+struct SPTAGIndex{G,D<:AbstractVector,T<:Tree}
     graph::G
     data::D
     tree::T
@@ -34,20 +34,18 @@ const graphctx = GraphCtx()
 getnode(x::Neighbor{<:TreeNode}) = x.id
 _Base.getid(x::Neighbor{<:TreeNode}) = getid(getnode(x))
 
-struct SPTAGRunner{I, D, V <: AbstractSet}
-    tree_queue::DataStructures.BinaryMinHeap{Neighbor{TreeNode{I}, D}}
-    graph_queue::DataStructures.BinaryMinHeap{Neighbor{I, D}}
-    results::KeepSmallest{Neighbor{I, D}}
+struct SPTAGRunner{I,D,V<:AbstractSet}
+    tree_queue::DataStructures.BinaryMinHeap{Neighbor{TreeNode{I},D}}
+    graph_queue::DataStructures.BinaryMinHeap{Neighbor{I,D}}
+    results::KeepSmallest{Neighbor{I,D}}
     visited::V
 end
 
 function SPTAGRunner(
-    heapsize::Integer;
-    idtype::Type{I} = UInt32,
-    costtype::Type{D} = Int32,
+    heapsize::Integer; idtype::Type{I} = UInt32, costtype::Type{D} = Int32
 ) where {I,D}
-    tree_queue = DataStructures.BinaryMinHeap{Neighbor{TreeNode{I}, D}}()
-    graph_queue = DataStructures.BinaryMinHeap{Neighbor{I, D}}()
+    tree_queue = DataStructures.BinaryMinHeap{Neighbor{TreeNode{I},D}}()
+    graph_queue = DataStructures.BinaryMinHeap{Neighbor{I,D}}()
     results = KeepSmallest{Neighbor{I,D}}(heapsize)
     # NB: If switching to a `RobinSet`, then rework `ifmissing!` since a slow Base fallback
     # will be used and performance will tank.
@@ -61,7 +59,7 @@ function Base.empty!(runner::SPTAGRunner)
     empty!(runner.tree_queue.valtree)
     empty!(runner.graph_queue.valtree)
     empty!(runner.results)
-    empty!(runner.visited)
+    return empty!(runner.visited)
 end
 
 # Get the number of neighbors to be returned by the Runner.
@@ -88,13 +86,17 @@ end
     return push!(runner.graph_queue, candidate)
 end
 
-@inline function maybe_pushcandidate!(ctx::TreeCtx, runner::SPTAGRunner, candidate::Neighbor)
+@inline function maybe_pushcandidate!(
+    ctx::TreeCtx, runner::SPTAGRunner, candidate::Neighbor
+)
     isvisited(runner, candidate) && return false
     pushcandidate!(ctx, runner, candidate)
     return true
 end
 
-@inline function maybe_pushcandidate!(ctx::GraphCtx, runner::SPTAGRunner, candidate::Neighbor)
+@inline function maybe_pushcandidate!(
+    ctx::GraphCtx, runner::SPTAGRunner, candidate::Neighbor
+)
     initial_length = length(runner.visited)
     ifmissing!(runner.visited, getid(candidate)) do
         pushcandidate!(ctx, runner, candidate)
@@ -143,7 +145,9 @@ function _Base.search(
             maybe_pushcandidate!(graphctx, runner, pair)
             for child in _Trees.children(tree, node)
                 @unpack id = child
-                candidate = Neighbor(runner, child, evaluate(metric, pointer(data, id), query))
+                candidate = Neighbor(
+                    runner, child, evaluate(metric, pointer(data, id), query)
+                )
                 maybe_pushcandidate!(treectx, runner, candidate)
             end
         end
@@ -194,7 +198,9 @@ function _Base.search(
         # Expand neighborhood
         for v in LightGraphs.outneighbors(graph, getid(u))
             d = evaluate(metric, pointer(data, v), query)
-            leaves_seen += Int(maybe_pushcandidate!(graphctx, runner, Neighbor(runner, v, d)))
+            leaves_seen += Int(maybe_pushcandidate!(
+                graphctx, runner, Neighbor(runner, v, d)
+            ))
         end
 
         if getdistance(first(runner.graph_queue)) > getdistance(first(runner.tree_queue))
@@ -214,7 +220,7 @@ function _Base.search(
     index::SPTAGIndex,
     queries::AbstractVector{<:AbstractVector};
     callbacks = SPTAGCallbacks(),
-    kw...
+    kw...,
 )
     num_queries = length(queries)
     num_neighbors = _Base.getbound(runner)
@@ -227,7 +233,7 @@ function _Base.search(
         # Copy over the results to the destination
         results = destructive_extract!(runner.results)
         for i in 1:num_neighbors
-            @inbounds dest[i,col] = getid(results[i])
+            @inbounds dest[i, col] = getid(results[i])
         end
         callbacks.postquery()
     end
@@ -240,12 +246,12 @@ function _Base.search(
     index::SPTAGIndex,
     queries::AbstractVector{<:AbstractVector};
     callbacks = SPTAGCallbacks(),
-    kw...
+    kw...,
 )
     metric = Euclidean()
     num_queries = length(queries)
     num_neighbors = _Base.getbound(tls)
-    dest = Array{idtype(index), 2}(undef, num_neighbors, num_queries)
+    dest = Array{idtype(index),2}(undef, num_neighbors, num_queries)
 
     dynamic_thread(getpool(tls), eachindex(queries), 64) do col
         callbacks.prequery()
@@ -263,4 +269,3 @@ function _Base.search(
     end
     return dest
 end
-

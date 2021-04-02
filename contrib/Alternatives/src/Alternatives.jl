@@ -1,7 +1,7 @@
 module Alternatives
 
 # main dep
-import GraphANN
+using GraphANN: GraphANN
 
 # deps
 import StaticArrays: SVector
@@ -25,9 +25,7 @@ struct UnsafeNaiveEuclideanDynamic
     length::Int
 end
 @inline function GraphANN.evaluate(
-    metric::UnsafeNaiveEuclideanDynamic,
-    a::SVector{N,A},
-    b::SVector{N,B}
+    metric::UnsafeNaiveEuclideanDynamic, a::SVector{N,A}, b::SVector{N,B}
 ) where {N,A,B}
     T = GraphANN.costtype(SVector{N,A}, SVector{N,B})
     s = zero(T)
@@ -57,9 +55,7 @@ struct UnsafeEuclideanNoAVXDynamic
     length::Int
 end
 function GraphANN.evaluate(
-    metric::UnsafeEuclideanNoAVXDynamic,
-    a::SVector{N,A},
-    b::SVector{N,B}
+    metric::UnsafeEuclideanNoAVXDynamic, a::SVector{N,A}, b::SVector{N,B}
 ) where {N,A,B}
     T = GraphANN.costtype(SVector{N,A}, SVector{N,B})
     s = zero(T)

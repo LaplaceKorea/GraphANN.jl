@@ -8,7 +8,7 @@
 Collection of thread-ids that can be passed to [`_Base.on_threads`](@ref) to launch
 tasks onto specific threads.
 """
-struct ThreadPool{T <: AbstractVector{<:Integer}}
+struct ThreadPool{T<:AbstractVector{<:Integer}}
     threads::T
 end
 
@@ -36,7 +36,7 @@ allthreads() = ThreadPool(Base.OneTo(Threads.nthreads()))
 function _schedule(t::Task, tid)
     @assert !istaskstarted(t)
     t.sticky = true
-    ccall(:jl_set_task_tid, Cvoid, (Any, Cint), t, tid-1)
+    ccall(:jl_set_task_tid, Cvoid, (Any, Cint), t, tid - 1)
     schedule(t)
     return t
 end
@@ -63,11 +63,7 @@ Return a [`TaskHandle`](@ref) for the launched tasks.
 
 If `wait = true`, then execution is blocked until all launched tasks complete.
 """
-function on_threads(
-    func::F,
-    pool::ThreadPool,
-    wait::Bool = true,
-) where {F}
+function on_threads(func::F, pool::ThreadPool, wait::Bool = true) where {F}
     tasks = Vector{Task}(undef, length(eachindex(pool)))
     for tid in pool
         i = firstindex(tasks) + (tid - first(pool))
@@ -236,15 +232,13 @@ struct ThreadLocal{T,U}
     translation::Dict{Int64,Int64}
 
     # Inner constructor to resolve ambiguities
-    function ThreadLocal{T}(values::Vector{T}, pool::ThreadPool{U}) where {T, U}
+    function ThreadLocal{T}(values::Vector{T}, pool::ThreadPool{U}) where {T,U}
         translation = Dict(i => j for (j, i) in enumerate(pool))
-        return new{T, U}(values, pool, translation)
+        return new{T,U}(values, pool, translation)
     end
 
     function ThreadLocal{T}(
-        values::Vector{T},
-        pool::ThreadPool{U},
-        translation::Dict{Int,Int},
+        values::Vector{T}, pool::ThreadPool{U}, translation::Dict{Int,Int}
     ) where {T,U}
         return new{T,U}(values, pool, translation)
     end
@@ -253,12 +247,12 @@ end
 # Many algorithms are designed to either take thread local of some struct for storage when
 # using a multi-threaded implementation, or just the simple data structure itself if
 # performing single threaded operation.
-const MaybeThreadLocal{T} = Union{T, ThreadLocal{<:T}}
+const MaybeThreadLocal{T} = Union{T,ThreadLocal{<:T}}
 
 # Convenience, wrap around a NamedTuple
 # Need to define a few methods to get around ambiguities.
-ThreadLocal(; kw...) = ThreadLocal(allthreads(), (;kw...,))
-ThreadLocal(pool::ThreadPool; kw...) = ThreadLocal(pool, (;kw...,))
+ThreadLocal(; kw...) = ThreadLocal(allthreads(), (; kw...))
+ThreadLocal(pool::ThreadPool; kw...) = ThreadLocal(pool, (; kw...))
 ThreadLocal(values) = ThreadLocal(allthreads(), values)
 
 threadcopy(x) = deepcopy(x)
@@ -279,8 +273,10 @@ function Base.getindex(t::ThreadLocal{<:Any,<:Base.OneTo}, i::Integer = Threads.
     return t.values[i]
 end
 
-function Base.setindex!(t::ThreadLocal{<:Any,<:Base.OneTo}, v, i::Integer = Threads.threadid())
-    t.values[i] = v
+function Base.setindex!(
+    t::ThreadLocal{<:Any,<:Base.OneTo}, v, i::Integer = Threads.threadid()
+)
+    return t.values[i] = v
 end
 
 """

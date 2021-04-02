@@ -1,7 +1,7 @@
 repeated(f::F, n) where {F} = [f() for _ in 1:n]
 
 # Can we find the first `x` where `f(x) > target` but `f(x-1) < target`.
-function binarysearch(f::F, target, lo::T, hi::T) where {F, T <: Integer}
+function binarysearch(f::F, target, lo::T, hi::T) where {F,T<:Integer}
     u = T(1)
     lo = lo - u
     hi = hi + u
@@ -38,4 +38,3 @@ end
 
 memoize(f::F) where {F} = Memoize{F}(f, Dict{Any,Any}())
 (f::Memoize)(x...) = get!(() -> f.f(x...), f.saved, x)
-

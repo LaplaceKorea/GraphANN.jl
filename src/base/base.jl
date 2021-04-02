@@ -3,14 +3,14 @@
 module _Base
 
 # stdlib
-import Mmap
+using Mmap: Mmap
 
 # deps
-import DataStructures
-import ProgressMeter
-import SIMD
+using DataStructures: DataStructures
+using ProgressMeter: ProgressMeter
+using SIMD: SIMD
 import StaticArrays: SVector
-import TimerOutputs
+using TimerOutputs: TimerOutputs
 import UnPack: @unpack
 
 export @withtimer, gettimer, resettimer!
@@ -102,14 +102,16 @@ include("threading.jl")
 ##### MinMaxHeap
 #####
 
-export BinaryMinMaxHeap, destructive_extract!, popmax!, popmin!, _unsafe_maximum, _unsafe_minimum
+export BinaryMinMaxHeap,
+    destructive_extract!, popmax!, popmin!, _unsafe_maximum, _unsafe_minimum
 include("minmax_heap.jl")
 
 #####
 ##### Utilities
 #####
 
-export safe_maximum, donothing, printlnstyled, always_false, zero!, typemax!, cdiv, toeltype, clog2
+export safe_maximum,
+    donothing, printlnstyled, always_false, zero!, typemax!, cdiv, toeltype, clog2
 export Neighbor, getid, getdistance, idtype, costtype
 export RobinSet, ifmissing!
 export zeroas, medioid, nearest_neighbor

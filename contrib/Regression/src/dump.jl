@@ -131,12 +131,10 @@ function _format_cluster!(dest::DataFrame, src::DataFrame, prefix::AbstractStrin
         :num_partitions => div.(128, subdf.partition_size),
         @sub(subdf, partition_size),
         @sub(subdf, num_centroids),
-
         @sub(subdf, recall_1at1),
         @sub(subdf, recall_1at5),
         @sub(subdf, recall_1at10),
         @sub(subdf, recall_1at100),
-
         @sub(subdf, recall_5at5),
         @sub(subdf, recall_5at10),
         @sub(subdf, recall_5at20),
@@ -172,10 +170,7 @@ function format_quantized_query(df::DataFrame)
 end
 
 function _format_quantized_query!(
-    dest::DataFrame,
-    src::DataFrame,
-    nn::Integer,
-    target_recall::Number
+    dest::DataFrame, src::DataFrame, nn::Integer, target_recall::Number
 )
     # Filter so we only get the matching items.
     subdf = @from i in src begin

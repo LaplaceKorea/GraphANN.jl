@@ -44,7 +44,7 @@ Supertype for types implementing the `AbstractAdjacencyList{T}` api listed below
 In addition, implementors of the `AbstractAdjacencyList` api must implement the iteration
 interface to iterate over the adjacencylist of each vertex in order.
 """
-abstract type AbstractAdjacencyList{T <: Integer} end
+abstract type AbstractAdjacencyList{T<:Integer} end
 
 #####
 ##### Default implementation
@@ -91,7 +91,7 @@ function Base.copyto!(x::DefaultAdjacencyList, v, A::AbstractVector)
     list = x[v]
     resize!(list, length(A))
     copyto!(list, A)
-    sort!(list; alg = Base.QuickSort)
+    return sort!(list; alg = Base.QuickSort)
 end
 
 #####
@@ -121,9 +121,7 @@ struct FlatAdjacencyList{T} <: AbstractAdjacencyList{T}
 end
 
 function FlatAdjacencyList{T}(
-    nv::Integer,
-    max_degree::Integer;
-    allocator = stdallocator
+    nv::Integer, max_degree::Integer; allocator = stdallocator
 ) where {T}
     adj = allocator(T, max_degree, nv)
     zero!(adj)
@@ -212,13 +210,13 @@ _cannot_mutate() = error("Cannot modify a DenseAdjacencyList")
 Base.push!(x::DenseAdjacencyList, v) = _cannot_mutate()
 # The adjacency list must be constructed correctly so that the below rang is always inbounds.
 function Base.getindex(x::DenseAdjacencyList, i)
-    return Base.unsafe_view(x.storage, x.offsets[i]:(x.offsets[i+1] - 1))
+    return Base.unsafe_view(x.storage, x.offsets[i]:(x.offsets[i + 1] - 1))
 end
 
 caninsert(x::DenseAdjacencyList, i) = false
 
 Base.length(x::DenseAdjacencyList) = length(x.offsets) - 1
-Base.length(x::DenseAdjacencyList, i) = x.offsets[i+1] - x.offsets[i]
+Base.length(x::DenseAdjacencyList, i) = x.offsets[i + 1] - x.offsets[i]
 Base.empty!(x::DenseAdjacencyList) = _cannot_mutate()
 
 function Base.iterate(x::DenseAdjacencyList, s = 1)

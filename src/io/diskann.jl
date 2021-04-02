@@ -12,7 +12,7 @@ GraphANN.DiskANN()
 GraphANN._IO.DiskANN()
 ```
 """
-struct DiskANN <:AbstractIOFormat end
+struct DiskANN <: AbstractIOFormat end
 
 #####
 ##### Graph Loader
@@ -75,7 +75,8 @@ function save(::DiskANN, io::IO, index::DiskANNIndex)
     entry_point = startnode.index
 
     # Compute how large the file will be when it's created.
-    filesize = sizeof(UInt64) +
+    filesize =
+        sizeof(UInt64) +
         2 * sizeof(Cuint) +
         LightGraphs.nv(graph) * sizeof(Cuint) +
         LightGraphs.ne(graph) * sizeof(Cuint)
@@ -120,9 +121,15 @@ function save_bin(diskann::DiskANN, path::AbstractString, data::AbstractMatrix)
     end
 end
 
-function save_bin(::DiskANN, io::IO, data::AbstractMatrix, num_points = size(data, 2), point_dim = size(data, 1))
+function save_bin(
+    ::DiskANN,
+    io::IO,
+    data::AbstractMatrix,
+    num_points = size(data, 2),
+    point_dim = size(data, 1),
+)
     write(io, Cuint(num_points))
     write(io, Cuint(point_dim))
-    write(io, data)
+    return write(io, data)
 end
 

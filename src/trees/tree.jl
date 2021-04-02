@@ -3,14 +3,14 @@
 #
 # In the C++ code, leaf nodes use Int32(-1) / typemax(UInt32) to encode the child nodes.
 # Locally, we use "0" for the child fields of leaves.
-struct TreeNode{T <: Integer}
+struct TreeNode{T<:Integer}
     id::T
     childstart::T
     childend::T
 end
 
-TreeNode{T}() where {T <: Integer} = TreeNode{T}(zero(T), zero(T), zero(T))
-function TreeNode{T}(id::Integer) where {T <: Integer}
+TreeNode{T}() where {T<:Integer} = TreeNode{T}(zero(T), zero(T), zero(T))
+function TreeNode{T}(id::Integer) where {T<:Integer}
     return TreeNode{T}(id, zero(T), zero(T))
 end
 TreeNode{T}(x::TreeNode{T}) where {T} = x
@@ -19,8 +19,8 @@ _Base.getid(x::TreeNode) = x.id
 isleaf(x::TreeNode) = iszero(x.childstart)
 isnull(x::TreeNode) = iszero(x.id)
 
-childindices(x::TreeNode) = (x.childstart:x.childend)
-Base.isless(a::T, b::T) where {T <: TreeNode} = isless(getid(a), getid(b))
+childindices(x::TreeNode) = ((x.childstart):(x.childend))
+Base.isless(a::T, b::T) where {T<:TreeNode} = isless(getid(a), getid(b))
 Base.broadcastable(x::TreeNode) = (x,)
 
 function Base.read(io::IO, ::Type{TreeNode{T}}) where {T}
@@ -33,7 +33,7 @@ end
 function Base.write(io::IO, x::TreeNode)
     write(io, x.id)
     write(io, x.childstart)
-    write(io, x.childend)
+    return write(io, x.childend)
 end
 
 #####
@@ -42,7 +42,7 @@ end
 
 # The layout of this data structure is pretty similar to to the layout of the SPTAG C++ code.
 # I'm not sure yet if that is the best layout, but we have to start somewhere.
-mutable struct Tree{T <: Integer} <: AbstractTree
+mutable struct Tree{T<:Integer} <: AbstractTree
     rootend::Int
     nodes::Vector{TreeNode{T}}
 end
@@ -126,7 +126,7 @@ end
 ##### Tools to help build a tree.
 #####
 
-mutable struct TreeBuilder{T <: Integer}
+mutable struct TreeBuilder{T<:Integer}
     tree::Tree{T}
     last_valid_index::Int
     # Add a lock to facilitate building the tree with multiple threads.
@@ -191,8 +191,10 @@ function addnodes!(builder::TreeBuilder{T}, parent::Integer, itr; force = false)
 
         # Make sure the parent node is not null and has no children currently assigned to it.
         parentnode = nodes[parent]
-        isnull(parentnode) && throw(ArgumentError("Parent index $parent has not been assigned yet!"))
-        isleaf(parentnode) || throw(ArgumentError("Parent index $parent already has children!"))
+        isnull(parentnode) &&
+            throw(ArgumentError("Parent index $parent has not been assigned yet!"))
+        isleaf(parentnode) ||
+            throw(ArgumentError("Parent index $parent already has children!"))
 
         count = 0
         start = last_valid_index + 1

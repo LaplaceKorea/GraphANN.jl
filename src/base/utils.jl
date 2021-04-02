@@ -10,12 +10,14 @@ typemax!(x) = fill!(x, typemax(eltype(x)))
 
 # Ceiling division
 cdiv(a::Integer, b::Integer) = cdiv(promote(a, b)...)
-cdiv(a::T, b::T) where {T <: Integer} = one(T) + div(a - one(T), b)
+cdiv(a::T, b::T) where {T<:Integer} = one(T) + div(a - one(T), b)
 
 toeltype(::Type{T}, x::AbstractArray) where {T} = map(i -> convert(T, i), x)
-toeltype(::Type{T}, x::AbstractArray{<:AbstractArray}) where {T} = map(i -> toeltype(T, i), x)
+function toeltype(::Type{T}, x::AbstractArray{<:AbstractArray}) where {T}
+    return map(i -> toeltype(T, i), x)
+end
 
-clog2(x::T) where {T <: Integer} = ceil(T, log2(x))
+clog2(x::T) where {T<:Integer} = ceil(T, log2(x))
 
 #####
 ##### Neighbor
@@ -66,13 +68,13 @@ julia> GraphANN.costtype(GraphANN.Euclidean(), GraphANN.SVector{32,UInt8}, Graph
 Int32
 ```
 """
-function costtype(::Metric, ::Type{A}, ::Type{B}) where {Metric, A, B}
+function costtype(::Metric, ::Type{A}, ::Type{B}) where {Metric,A,B}
     return Base.promote_op(evaluate, Metric, A, B)
 end
 
 costtype(metric, ::Type{A}) where {A} = costtype(metric, A, A)
 costtype(metric, ::A) where {A} = costtype(metric, A, A)
-costtype(metric, ::A, ::B) where {A, B} = costtype(metric, A, B)
+costtype(metric, ::A, ::B) where {A,B} = costtype(metric, A, B)
 costtype(metric, ::AbstractVector{T}) where {T} = costtype(metric, T, T)
 
 # Define `getid` for integers as well so we can use `getid` in all places where we need
@@ -235,16 +237,20 @@ end
 @static if VERSION >= v"1.6.0-beta1"
     function prefetch(ptr::Ptr)
         Base.@_inline_meta
-        Base.llvmcall((raw"""
-            define void @entry(i64) #0 {
-            top:
-                %val = inttoptr i64 %0 to i8*
-                call void asm sideeffect "prefetch $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
-                ret void
-            }
+        Base.llvmcall(
+            (
+                raw"""
+     define void @entry(i64) #0 {
+     top:
+         %val = inttoptr i64 %0 to i8*
+         call void asm sideeffect "prefetch $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
+         ret void
+     }
 
-            attributes #0 = { alwaysinline }
-            """, "entry"),
+     attributes #0 = { alwaysinline }
+     """,
+                "entry",
+            ),
             Cvoid,
             Tuple{Ptr{Cvoid}},
             Ptr{Cvoid}(ptr),
@@ -254,16 +260,20 @@ end
 
     function prefetch_llc(ptr::Ptr)
         Base.@_inline_meta
-        Base.llvmcall((raw"""
-            define void @entry(i64) #0 {
-            top:
-                %val = inttoptr i64 %0 to i8*
-                call void asm sideeffect "prefetcht1 $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
-                ret void
-            }
+        Base.llvmcall(
+            (
+                raw"""
+     define void @entry(i64) #0 {
+     top:
+         %val = inttoptr i64 %0 to i8*
+         call void asm sideeffect "prefetcht1 $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
+         ret void
+     }
 
-            attributes #0 = { alwaysinline }
-            """, "entry"),
+     attributes #0 = { alwaysinline }
+     """,
+                "entry",
+            ),
             Cvoid,
             Tuple{Ptr{Cvoid}},
             Ptr{Cvoid}(ptr),
@@ -273,11 +283,12 @@ end
 else
     function prefetch(ptr::Ptr)
         Base.@_inline_meta
-        Base.llvmcall(raw"""
-            %val = inttoptr i64 %0 to i8*
-            call void asm sideeffect "prefetch $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
-            ret void
-            """,
+        Base.llvmcall(
+            raw"""
+  %val = inttoptr i64 %0 to i8*
+  call void asm sideeffect "prefetch $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
+  ret void
+  """,
             Cvoid,
             Tuple{Ptr{Cvoid}},
             Ptr{Cvoid}(ptr),
@@ -287,11 +298,12 @@ else
 
     function prefetch_llc(ptr::Ptr)
         Base.@_inline_meta
-        Base.llvmcall(raw"""
-            %val = inttoptr i64 %0 to i8*
-            call void asm sideeffect "prefetcht1 $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
-            ret void
-            """,
+        Base.llvmcall(
+            raw"""
+  %val = inttoptr i64 %0 to i8*
+  call void asm sideeffect "prefetcht1 $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
+  ret void
+  """,
             Cvoid,
             Tuple{Ptr{Cvoid}},
             Ptr{Cvoid}(ptr),
@@ -307,17 +319,16 @@ function prefetch(A::AbstractVector{T}, i, f::F = _Base.prefetch) where {T,F}
     cache_lines = sizeof(T) >> 6
     ptr = pointer(A, i)
     for j in 1:cache_lines
-        f(ptr + 64 * (j-1))
+        f(ptr + 64 * (j - 1))
     end
     return nothing
 end
-
 
 #####
 ##### BatchedRange
 #####
 
-struct BatchedRange{T <: AbstractRange}
+struct BatchedRange{T<:AbstractRange}
     range::T
     batchsize::Int64
 end
@@ -326,7 +337,7 @@ Base.length(x::BatchedRange) = ceil(Int, length(x.range) / x.batchsize)
 Base.lastindex(x::BatchedRange) = length(x)
 
 Base.eltype(x::BatchedRange{T}) where {T} = _replace_oneto(T)
-_replace_oneto(::Type{T}) where {T <: AbstractRange} = T
+_replace_oneto(::Type{T}) where {T<:AbstractRange} = T
 _replace_oneto(::Type{Base.OneTo{I}}) where {I} = UnitRange{I}
 
 """
@@ -362,12 +373,12 @@ end
 
 Base.@propagate_inbounds function Base.getindex(x::BatchedRange, i::Integer)
     @unpack range, batchsize = x
-    start = batchsize * (i-1) + 1
+    start = batchsize * (i - 1) + 1
     stop = min(length(range), batchsize * i)
     return subrange(range, start, stop)
 end
 
-Base.iterate(x::BatchedRange, s = 1)  = s > length(x) ? nothing : (x[s], s+1)
+Base.iterate(x::BatchedRange, s = 1) = s > length(x) ? nothing : (x[s], s + 1)
 
 # handle unit ranges and more general ranges separately so a `BatchedRange` returns
 # a `UnitRange` when it encloses a `UnitRange`.
@@ -378,7 +389,7 @@ subrange(range::AbstractUnitRange, start, stop) = range[start]:range[stop]
 ##### Bounded Heap
 #####
 
-struct Keeper{T, O <: Base.Ordering}
+struct Keeper{T,O<:Base.Ordering}
     heap::DataStructures.BinaryHeap{T,O}
     bound::Int
 
@@ -387,12 +398,12 @@ struct Keeper{T, O <: Base.Ordering}
         vector = Vector{T}(undef, bound + 1)
         empty!(vector)
         heap = DataStructures.BinaryHeap{T}(ordering, vector)
-        return new{T, typeof(ordering)}(heap, convert(Int, bound))
+        return new{T,typeof(ordering)}(heap, convert(Int, bound))
     end
 end
 
-const KeepLargest{T} = Keeper{T, Base.ForwardOrdering}
-const KeepSmallest{T} = Keeper{T, Base.ReverseOrdering{Base.ForwardOrdering}}
+const KeepLargest{T} = Keeper{T,Base.ForwardOrdering}
+const KeepSmallest{T} = Keeper{T,Base.ReverseOrdering{Base.ForwardOrdering}}
 
 KeepLargest{T}(bound::Integer) where {T} = Keeper{T}(Base.ForwardOrdering(), bound)
 KeepSmallest{T}(bound::Integer) where {T} = Keeper{T}(Base.ReverseOrdering(), bound)
@@ -430,9 +441,7 @@ end
 
 function destructive_extract!(H::Keeper)
     sort!(
-        H.heap.valtree;
-        alg = Base.QuickSort,
-        order = Base.ReverseOrdering(getordering(H)),
+        H.heap.valtree; alg = Base.QuickSort, order = Base.ReverseOrdering(getordering(H))
     )
     return H.heap.valtree
 end

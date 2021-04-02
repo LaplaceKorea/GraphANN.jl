@@ -2,10 +2,10 @@ using PQ
 using Test
 
 # main dep
-import GraphANN
+using GraphANN: GraphANN
 
 # other deps
-import SIMD
+using SIMD: SIMD
 import StaticArrays: SVector
 
 @testset "Testing PQ" begin
@@ -16,7 +16,7 @@ import StaticArrays: SVector
     x = SVector(1, 2, 3, 4)
     y = PQ.broadcast(x)
     @test isa(y, SVector{16,Float32})
-    @test y == SVector(1,2,3,4, 1,2,3,4, 1,2,3,4, 1,2,3,4)
+    @test y == SVector(1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4)
 
     ### sum_every
     y = SVector{16,Float32}((1:16)...)
@@ -39,7 +39,7 @@ import StaticArrays: SVector
     # 2
     x = PQ.sum_every(y, Val(2))
     @test isa(x, SVector{8,Float32})
-    @test x == SVector(1+2, 3+4, 5+6, 7+8, 9+10, 11+12, 13+14, 15+16)
+    @test x == SVector(1 + 2, 3 + 4, 5 + 6, 7 + 8, 9 + 10, 11 + 12, 13 + 14, 15 + 16)
 
     # 1
     x = PQ.sum_every(y, Val(1))
@@ -85,11 +85,10 @@ import StaticArrays: SVector
     distances = table.distances
 
     for i in eachindex(queries)
-        reference = GraphANN.evaluate.(
-            Ref(GraphANN.Euclidean()),
-            Ref(queries[i]),
-            view(centroids, :, i)
-        )
+        reference =
+            GraphANN.evaluate.(
+                Ref(GraphANN.Euclidean()), Ref(queries[i]), view(centroids, :, i)
+            )
         @test reference == view(distances, :, i)
     end
 
@@ -118,4 +117,3 @@ import StaticArrays: SVector
         @test isapprox(reference, dist)
     end
 end # @testset
-

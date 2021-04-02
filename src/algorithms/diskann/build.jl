@@ -71,12 +71,12 @@ function Base.show(io::IO, x::Pruner{T}) where {T}
         printstyled(items[i]; color = color)
         i == lastindex(items) || print(io, ", ")
     end
-    print(io, "])")
+    return print(io, "])")
 end
 
 function Base.empty!(x::Pruner)
     empty!(x.items)
-    empty!(x.pruned)
+    return empty!(x.pruned)
 end
 
 # Mark as `inline` to avoid an allocation caused by creating closures.
@@ -86,7 +86,7 @@ end
 # still allocate.
 #
 # This MAY get fixed in Julia 1.6, which will const-propagate keyword arguments.
-@inline function initialize!(by::B, filter::F, x::Pruner, itr) where {B, F}
+@inline function initialize!(by::B, filter::F, x::Pruner, itr) where {B,F}
     empty!(x)
 
     # Add all items from the input iterator to the local item list.
@@ -136,7 +136,7 @@ end
 
 function Base.sizehint!(x::Pruner, sz)
     sizehint!(x.items, sz)
-    sizehint!(x.pruned, sz)
+    return sizehint!(x.pruned, sz)
 end
 
 #####
@@ -165,7 +165,7 @@ end
 struct NextListBuffer{T}
     # Keep around previously allocated buffers
     buffers::Vector{Vector{T}}
-    nextlists::Dict{Int, Vector{T}}
+    nextlists::Dict{Int,Vector{T}}
     sizehint::Int
 end
 
@@ -177,7 +177,7 @@ function NextListBuffer{T}(sizehint::Integer, num_buffers::Integer = 1) where {T
         return v
     end
 
-    nextlists = Dict{Int, Vector{T}}()
+    nextlists = Dict{Int,Vector{T}}()
     sizehint!(nextlists, num_buffers)
     return NextListBuffer{T}(buffers, nextlists, sizehint)
 end
@@ -201,13 +201,13 @@ function Base.empty!(x::NextListBuffer)
         empty!(v)
         push!(x.buffers, v)
     end
-    empty!(x.nextlists)
+    return empty!(x.nextlists)
 end
 
 # Actuall empty everything.
 function purge!(x::NextListBuffer)
     empty!(x.buffers)
-    empty!(x.nextlists)
+    return empty!(x.nextlists)
 end
 
 # Dispatch on behavior based on Sets vs Arrays.
@@ -241,7 +241,7 @@ function neighbor_updates!(
     index::DiskANNIndex,
     pruner::Pruner,
     alpha::AbstractFloat,
-    target_degree::Integer
+    target_degree::Integer,
 )
     # Destructure some parameters
     @unpack graph, data = index
@@ -278,7 +278,11 @@ function neighbor_updates!(
 
         # Note: We're indexing `data` with `Neighbor` objects, but that's fine because
         # we've defined that behavior in `utils.jl`.
-        f = x -> (alpha * evaluate(Euclidean(), pointer(data, i), pointer(data, x)) <= getdistance(x))
+        f =
+            x -> (
+                alpha * evaluate(Euclidean(), pointer(data, i), pointer(data, x)) <=
+                getdistance(x)
+            )
         prune!(f, pruner; start = state)
         length(nextlist) >= target_degree && break
 
@@ -327,7 +331,7 @@ function prune!(
     parameters::DiskANNIndexParameters,
     tls::ThreadLocal,
     needs_pruning::Vector{Bool};
-    range = eachindex(needs_pruning)
+    range = eachindex(needs_pruning),
 )
     @unpack graph = index
     @unpack prune_to_degree, alpha = parameters
@@ -409,7 +413,7 @@ function _Base.build(
     graph_type = DefaultAdjacencyList{UInt32},
     allocator = stdallocator,
     no_progress = false,
-    graph::Union{Nothing, LightGraphs.AbstractGraph} = nothing,
+    graph::Union{Nothing,LightGraphs.AbstractGraph} = nothing,
     metric = Euclidean(),
     batchsize = 1000,
 )
@@ -436,10 +440,9 @@ function _Base.build(
     index = DiskANNIndex(graph, data, metric)
     tls = ThreadLocal(;
         greedy = DiskANNRunner(index, window_size),
-        pruner = Pruner{Neighbor{eltype(graph), costtype(metric, data)}}(),
+        pruner = Pruner{Neighbor{eltype(graph),costtype(metric, data)}}(),
         nextlists = NextListBuffer{eltype(graph)}(
-            target_degree,
-            2 * ceil(Int, batchsize / Threads.nthreads()),
+            target_degree, 2 * ceil(Int, batchsize / Threads.nthreads())
         ),
     )
 
@@ -454,7 +457,7 @@ function _Base.build(
             tls,
             locks,
             needs_pruning,
-            batchsize,
+            batchsize;
             no_progress = no_progress,
         )
     end
@@ -483,7 +486,7 @@ end
     locks::AbstractVector,
     needs_pruning::Vector{Bool},
     batchsize::Integer;
-    no_progress = false
+    no_progress = false,
 )
     @unpack graph, data = index
     @unpack alpha, target_degree = parameters
@@ -524,13 +527,7 @@ end
 
         # Update the graph.
         @withtimer "Updating Graph" begin
-            synctime = @elapsed commit!(
-                index,
-                parameters,
-                locks,
-                needs_pruning,
-                tls,
-            )
+            synctime = @elapsed commit!(index, parameters, locks, needs_pruning, tls)
         end
 
         no_progress || ProgressMeter.next!(
@@ -540,4 +537,3 @@ end
     end
     return graph
 end
-

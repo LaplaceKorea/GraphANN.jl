@@ -96,16 +96,14 @@ ERROR: Cannot yet push to a FlatAdjacencyList!
 **Note**: Since this type only stores the out-neighbors, querying in-neighbors, while
 supported, is quite slow.
 """
-struct UniDirectedGraph{
-    T <: Integer,
-    A <: AbstractAdjacencyList{T}
-} <: LightGraphs.AbstractSimpleGraph{T}
+struct UniDirectedGraph{T<:Integer,A<:AbstractAdjacencyList{T}} <:
+       LightGraphs.AbstractSimpleGraph{T}
 
     # Only track forward adjacency lists
     fadj::A
 
     # -- Inner constructor to help with ambiguities
-    UniDirectedGraph{T}(adj::A) where {T, A <: AbstractAdjacencyList{T}} = new{T,A}(adj)
+    UniDirectedGraph{T}(adj::A) where {T,A<:AbstractAdjacencyList{T}} = new{T,A}(adj)
 end
 
 function UniDirectedGraph{T}(n::Integer = 0) where {T}
@@ -114,7 +112,7 @@ function UniDirectedGraph{T}(n::Integer = 0) where {T}
 end
 UniDirectedGraph(n::Integer = 0) = UniDirectedGraph{Int}(n)
 
-function UniDirectedGraph{T, FlatAdjacencyList{T}}(nv::Integer, ne::Integer; kw...) where {T}
+function UniDirectedGraph{T,FlatAdjacencyList{T}}(nv::Integer, ne::Integer; kw...) where {T}
     adj = FlatAdjacencyList{T}(nv, ne; kw...)
     return UniDirectedGraph{T}(adj)
 end

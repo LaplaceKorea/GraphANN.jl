@@ -23,7 +23,7 @@ Fields and Signatures
     - `neighbors` the adjacency list for the vertex that was just processed.
         *NOTE*: Do NOT mutate neighbors, it MUST be constant.
 """
-Base.@kwdef struct DiskANNCallbacks{A, B, C}
+Base.@kwdef struct DiskANNCallbacks{A,B,C}
     prequery::A = donothing
     postquery::B = donothing
     postdistance::C = donothing
@@ -50,7 +50,7 @@ Index for DiskANN style similarity search.
 * `startnode::S` - The entry point for queries.
 * `metric::M` - Metric to use when performing similarity search.
 """
-struct DiskANNIndex{G, D <: AbstractVector, S <: StartNode, M}
+struct DiskANNIndex{G,D<:AbstractVector,S<:StartNode,M}
     graph::G
     data::D
     startnode::S
@@ -65,7 +65,7 @@ _Base.Neighbor(::DiskANNIndex, id::T, distance::D) where {T,D} = Neighbor{T,D}(i
 
 function Base.show(io::IO, index::DiskANNIndex)
     print(io, "DiskANNIndex(", length(index.data), " data points. ")
-    print(io, "Entry point index: ", index.startnode.index, ")")
+    return print(io, "Entry point index: ", index.startnode.index, ")")
 end
 
 struct HasPrefetching end
@@ -97,7 +97,7 @@ Construct a `DiskANNRunner` with id-type `I` and distance-type `D` with the give
 
 See also: [`search`](@ref)
 """
-mutable struct DiskANNRunner{I <: Integer, D, T <: AbstractSet, P}
+mutable struct DiskANNRunner{I<:Integer,D,T<:AbstractSet,P}
     search_list_size::Int64
 
     # Pre-allocated buffer for the search list
@@ -133,24 +133,21 @@ function _Base.Neighbor(x::DiskANNRunner, id::Integer, distance)
 end
 
 function DiskANNRunner{I,D}(
-    search_list_size::Integer;
-    executor::F = single_thread,
-    prefetch_queue = nothing,
+    search_list_size::Integer; executor::F = single_thread, prefetch_queue = nothing
 ) where {I,D,F}
     best = BinaryMinMaxHeap{Neighbor{I,D}}()
     best_unvisited = BinaryMinMaxHeap{Neighbor{I,D}}()
     visited = RobinSet{I}()
-    runner = DiskANNRunner{I, D, typeof(visited), typeof(prefetch_queue)}(
-        convert(Int, search_list_size),
-        best,
-        best_unvisited,
-        visited,
-        prefetch_queue,
+    runner = DiskANNRunner{I,D,typeof(visited),typeof(prefetch_queue)}(
+        convert(Int, search_list_size), best, best_unvisited, visited, prefetch_queue
     )
 
     return threadlocal_wrap(executor, runner)
 end
 Base.resize!(runner::DiskANNRunner, val::Integer) = (runner.search_list_size = val)
+function Base.resize!(runner::ThreadLocal{<:DiskANNRunner}, val::Integer)
+    return foreach(x -> resize!(x, val), getall(runner))
+end
 
 function DiskANNRunner(
     index::DiskANNIndex,
@@ -171,7 +168,7 @@ hasprefetching(::DiskANNRunner{I,D,T,<:Any}) where {I,D,T} = HasPrefetching()
 function Base.empty!(runner::DiskANNRunner)
     empty!(runner.best)
     empty!(runner.best_unvisited)
-    empty!(runner.visited)
+    return empty!(runner.visited)
 end
 
 Base.length(runner::DiskANNRunner) = length(runner.best)
@@ -206,7 +203,7 @@ isfull(runner::DiskANNRunner) = length(runner) >= runner.search_list_size
 function maybe_pushcandidate!(runner::DiskANNRunner, vertex)
     # If this has already been seen, don't do anything.
     isvisited(runner, vertex) && return nothing
-    pushcandidate!(runner, vertex)
+    return pushcandidate!(runner, vertex)
 end
 
 function pushcandidate!(runner::DiskANNRunner, vertex)
@@ -226,14 +223,16 @@ function pushcandidate!(runner::DiskANNRunner, vertex)
     return nothing
 end
 
-maybe_prefetch(runner::DiskANNRunner, vertex) = maybe_prefetch(runner, hasprefetching(runner), vertex)
+function maybe_prefetch(runner::DiskANNRunner, vertex)
+    return maybe_prefetch(runner, hasprefetching(runner), vertex)
+end
 # non-prefetching case
 maybe_prefetch(runner::DiskANNRunner, ::NoPrefetching, vertex) = nothing
 # prefetching case
 function maybe_prefetch(runner::DiskANNRunner, ::HasPrefetching, vertex)
     @unpack prefetch_queue = runner
     push!(prefetch_queue, getid(vertex))
-    _Prefetcher.commit!(prefetch_queue)
+    return _Prefetcher.commit!(prefetch_queue)
 end
 
 done(runner::DiskANNRunner) = isempty(runner.best_unvisited)
@@ -291,7 +290,7 @@ function _Base.search(
     start::StartNode = index.startnode;
     callbacks = DiskANNCallbacks(),
     metric = getlocal(index.metric),
-) where {T <: Number}
+) where {T<:Number}
     empty!(algo)
 
     # Destructure argument
@@ -350,7 +349,7 @@ function _Base.search(
     queries::AbstractVector{T};
     num_neighbors = 10,
     kw...,
-) where {T <: AbstractVector}
+) where {T<:AbstractVector}
     num_queries = length(queries)
     dest = Array{eltype(index.graph),2}(undef, num_neighbors, num_queries)
     return search!(dest, runner, index, queries; num_neighbors, kw...)
@@ -375,7 +374,7 @@ function _Base.search!(
         # Copy over the results to the destination
         results = getresults!(algo, num_neighbors)
         for i in 1:num_neighbors
-            @inbounds dest[i,col] = getid(results[i])
+            @inbounds dest[i, col] = getid(results[i])
         end
 
         # -- optional telemetry
@@ -383,7 +382,6 @@ function _Base.search!(
     end
     return dest
 end
-
 
 # Multi Threaded Query
 function _Base.search!(
@@ -408,7 +406,7 @@ function _Base.search!(
         # Copy over the results to the destination
         results = getresults!(algo, num_neighbors)
         for i in 1:num_neighbors
-            @inbounds dest[i,col] = getid(results[i])
+            @inbounds dest[i, col] = getid(results[i])
         end
 
         # -- optional telemetry
@@ -430,4 +428,3 @@ function visited_callbacks()
     end
     return (histogram = histogram, callbacks = DiskANNCallbacks(; postdistance))
 end
-

@@ -1,4 +1,4 @@
-abstract type  AbstractSift end
+abstract type AbstractSift end
 struct Sift1M <: AbstractSift end
 struct Sift10M <: AbstractSift end
 struct Sift100M <: AbstractSift end
@@ -64,10 +64,7 @@ function __test_index(record::Record)
     )
 
     index_building(
-        record,
-        dataset,
-        parameters;
-        savepath = joinpath(SCRATCH, "sift1m_test.index"),
+        record, dataset, parameters; savepath = joinpath(SCRATCH, "sift1m_test.index")
     )
 
     cleanup(dataset)
@@ -77,17 +74,9 @@ end
 function full_index(record)
     makescratch()
     # Just do Sift1M for testing
-    datasets = [
-        get_dataset(Sift1M()),
-        get_dataset(Sift10M()),
-        get_dataset(Sift100M()),
-    ]
+    datasets = [get_dataset(Sift1M()), get_dataset(Sift10M()), get_dataset(Sift100M())]
 
-    savepaths = [
-        "sift1m.index",
-        "sift10m.index",
-        "sift100m.index",
-    ]
+    savepaths = ["sift1m.index", "sift10m.index", "sift100m.index"]
 
     parameters = GraphANN.DiskANNIndexParameters(;
         alpha = 1.2,
@@ -99,9 +88,7 @@ function full_index(record)
 
     for index in eachindex(datasets)
         printstyled(
-            "Building Index $index of $(length(datasets))\n";
-            color = :green,
-            bold = true
+            "Building Index $index of $(length(datasets))\n"; color = :green, bold = true
         )
 
         dataset = datasets[index]
@@ -164,7 +151,7 @@ function test_query(record::Record)
     sets = [Sift100M()]
     threadings = [MultiThread(), SingleThread()]
     prefetchings = [NoPrefetching()]
-    neighbor_sets = [1,5,10]
+    neighbor_sets = [1, 5, 10]
 
     #sets = [Sift1M(), Sift10M()]
     #threadings = [SingleThread()]
@@ -206,10 +193,7 @@ end
 
 function __test_clustering(record::Record)
     dataset = get_dataset(Sift1M())
-    clustering = Clustering(;
-        partition_size = 4,
-        num_centroids = 256,
-    )
+    clustering = Clustering(; partition_size = 4, num_centroids = 256)
 
     cluster(record, dataset, clustering)
     return nothing
@@ -219,10 +203,10 @@ function test_clustering(record::Record)
     sets = [Sift1M(), Sift10M(), Sift100M()]
     #sets = [Sift10M(), Sift100M()]
     clusterings = [
-        Clustering(partition_size = 8, num_centroids = 256),
-        Clustering(partition_size = 8, num_centroids = 512),
-        Clustering(partition_size = 4, num_centroids = 256),
-        Clustering(partition_size = 4, num_centroids = 512),
+        Clustering(; partition_size = 8, num_centroids = 256),
+        Clustering(; partition_size = 8, num_centroids = 512),
+        Clustering(; partition_size = 4, num_centroids = 256),
+        Clustering(; partition_size = 4, num_centroids = 512),
     ]
 
     for set in sets
@@ -245,7 +229,6 @@ function __test_quantized_query(record)
         path = joinpath(SCRATCH, "sift1m", "pq_4x256.jls"),
         num_centroids = 256,
         num_partitions = 32,
-
         encoded_data_allocator = GraphANN.stdallocator,
         pqgraph_allocator = GraphANN.stdallocator,
     )
@@ -292,9 +275,7 @@ function test_quantized_query(record)
         points_per_partition = div(128, num_partitions)
         quantization = Quantization(;
             path = joinpath(
-                SCRATCH,
-                name(set),
-                "pq_$(points_per_partition)x$(num_centroids).jls"
+                SCRATCH, name(set), "pq_$(points_per_partition)x$(num_centroids).jls"
             ),
             num_centroids = num_centroids,
             num_partitions = num_partitions,

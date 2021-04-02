@@ -147,7 +147,7 @@ end
     leafsize = 16
     # Make the stack split point small enough so we execute both pass types.
     stacksplit = div(length(data), 10)
-    tree = GraphANN.Algorithms.build_bktree(
+    tree = GraphANN.Algorithms.bktree(
         data;
         fanout = fanout,
         leafsize = leafsize,

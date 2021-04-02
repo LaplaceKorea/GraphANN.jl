@@ -6,9 +6,9 @@ import GraphANN: GraphANN, MaybeThreadLocal
 using Statistics
 
 # deps
-import SIMD
+using SIMD: SIMD
 import StaticArrays: SVector
-import ProgressMeter
+using ProgressMeter: ProgressMeter
 import UnPack: @unpack
 
 ####
@@ -111,7 +111,7 @@ force_load(::Type{T}, ptr::Ptr) where {T} = unsafe_load(Ptr{T}(ptr))
 end
 
 function _getindex(x::SVector, ::Val{N}, i::Integer) where {N}
-    return SVector(ntuple(j -> @inbounds(getindex(x, N * (i-1) + j)), Val(N)))
+    return SVector(ntuple(j -> @inbounds(getindex(x, N * (i - 1) + j)), Val(N)))
 end
 
 function precompute!(table::DistanceTable{N}, query::SVector) where {N}
@@ -121,9 +121,7 @@ function precompute!(table::DistanceTable{N}, query::SVector) where {N}
     @assert N * size(table.centroids, 2) == length(query)
     for i in Base.OneTo(num_partitions)
         @inbounds store_distances!(
-            view(distances, :, i),
-            view(centroids, :, i),
-            _getindex(query, Val(N), i),
+            view(distances, :, i), view(centroids, :, i), _getindex(query, Val(N), i)
         )
     end
 end
@@ -133,11 +131,13 @@ function GraphANN.prehook(table::MaybeThreadLocal{DistanceTable}, query::SVector
     return nothing
 end
 
-const MaybePtr{T} = Union{T, Ptr{<:T}}
+const MaybePtr{T} = Union{T,Ptr{<:T}}
 maybeload(x) = x
 maybeload(ptr::Ptr) = unsafe_load(ptr)
 
-@inline function GraphANN.evaluate(table::MaybeThreadLocal{DistanceTable}, ::SVector, x::MaybePtr{NTuple})
+@inline function GraphANN.evaluate(
+    table::MaybeThreadLocal{DistanceTable}, ::SVector, x::MaybePtr{NTuple}
+)
     return lookup(GraphANN.getlocal(table), maybeload(x))
 end
 
@@ -180,7 +180,7 @@ function encode(
     itype::Type{I};
     allocator = GraphANN.stdallocator,
     executor = GraphANN.dynamic_thread,
-) where {N, K, I}
+) where {N,K,I}
     # Copy one for each thread
     tables = GraphANN.ThreadLocal(_table)
 
@@ -210,7 +210,7 @@ function encode(
 end
 
 function fullrecall(ids, groundtruth, num_neighbors)
-    function intersect_length((x,y),)
+    function intersect_length((x, y),)
         vy = view(y, 1:num_neighbors)
         return length(intersect(x, vy))
     end

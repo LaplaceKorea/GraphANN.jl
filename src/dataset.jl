@@ -6,7 +6,7 @@
 #        That is, ALL segments except for the last should have length `2 ^ S`.
 # - `T`: Element type stored by the dataset.
 # - `A`: Inner vector types.
-struct SplitDataset{S,T,A <: AbstractVector{T}} <: AbstractVector{T}
+struct SplitDataset{S,T,A<:AbstractVector{T}} <: AbstractVector{T}
     # N.B. - Don't move ANY of the vecters after their initial allocation.
     # Otherwise, the cached pointers are no longer going to be valid and then you're going
     # to have a really bad day.
@@ -19,7 +19,7 @@ struct SplitDataset{S,T,A <: AbstractVector{T}} <: AbstractVector{T}
     length::Int
 end
 
-function SplitDataset{S}(chunks::Vector{A}) where {S, T, A <: AbstractVector{T}}
+function SplitDataset{S}(chunks::Vector{A}) where {S,T,A<:AbstractVector{T}}
     return SplitDataset{S,T,A}(chunks, pointer.(chunks), sum(length, chunks))
 end
 
@@ -55,8 +55,8 @@ function split(
     slow_allocator = stdallocator,
 ) where {T}
     # Find appropriate split size.
-    num_fast_partitions = div(max_fast_bytes, 2 ^ splitsize)
-    elements_per_partition = div(2 ^ splitsize, sizeof(T))
+    num_fast_partitions = div(max_fast_bytes, 2^splitsize)
+    elements_per_partition = div(2^splitsize, sizeof(T))
 
     chunks = Vector{typeof(data)}()
     fast_partitions_allocated = 0
@@ -76,5 +76,5 @@ function split(
     end
 
     # TODO: More elegant log2 business ...
-    SplitDataset{splitsize - Int(log2(sizeof(T)))}(chunks)
+    return SplitDataset{splitsize - Int(log2(sizeof(T)))}(chunks)
 end

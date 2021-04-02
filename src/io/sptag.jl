@@ -8,11 +8,7 @@ function generate_data_file(sptag::SPTAG, path::String, x...; kw...)
 end
 
 function generate_data_file(
-    ::SPTAG,
-    io::IO,
-    data::AbstractMatrix;
-    metadata = nothing,
-    delimiter = '|'
+    ::SPTAG, io::IO, data::AbstractMatrix; metadata = nothing, delimiter = '|'
 )
     for (i, col) in enumerate(eachcol(data))
         # Optionaly print metadata.
@@ -93,9 +89,9 @@ end
 ##### Tree Readers
 #####
 
-sentinel_value(::Type{T}) where {T <: Unsigned} = typemax(T)
-sentinel_value(::Type{T}) where {T <: Signed} = -one(T)
-sentinel_value(x::T) where {T <: Integer} = sentinel_value(T)
+sentinel_value(::Type{T}) where {T<:Unsigned} = typemax(T)
+sentinel_value(::Type{T}) where {T<:Signed} = -one(T)
+sentinel_value(x::T) where {T<:Integer} = sentinel_value(T)
 
 issentinel(x) = (x == sentinel_value(x))
 issentinel(x::TreeNode) = iszero(x.id)
@@ -227,7 +223,7 @@ end
 # in each adjacency list.
 #
 # It ALSO convertes from index-0 to index-1.
-function getlength!(v::AbstractVector{T}, max_degree, sort::Bool) where {T <: Unsigned}
+function getlength!(v::AbstractVector{T}, max_degree, sort::Bool) where {T<:Unsigned}
     i = findfirst(issentinel, v)
     num_neighbors = (i === nothing) ? T(max_degree) : T(i - 1)
     vw = view(v, 1:num_neighbors)

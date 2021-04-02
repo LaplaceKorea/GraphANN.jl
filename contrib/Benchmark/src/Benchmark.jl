@@ -1,6 +1,6 @@
 module Benchmark
 
-import GraphANN
+using GraphANN: GraphANN
 
 # stdlib
 using Serialization
@@ -11,7 +11,7 @@ using DataFrames
 using DataStructures
 using ProgressMeter
 
-import PrettyTables
+using PrettyTables: PrettyTables
 import UnPack: @unpack, @pack!
 
 # paths
@@ -22,11 +22,12 @@ const SCRATCH = joinpath(PKGDIR, "data")
 # init
 makescratch() = ispath(SCRATCH) || mkpath(SCRATCH)
 function __init__()
-    makescratch()
+    return makescratch()
 end
 include("types.jl")
 
 # routines
 include("sptag.jl")
+include("diskann.jl")
 
 end # module
