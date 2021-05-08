@@ -4,7 +4,7 @@
 
 Simply download using Git:
 ```sh
-git clone ssh://git@gitlab.devtools.intel.com:29418/stg-ai-sw-team/GraphAnn.jl.git GraphANN
+git clone https://github.com/hildebrandmw/GraphANN.jl GraphANN
 ```
 
 ## Getting Julia
@@ -12,14 +12,14 @@ git clone ssh://git@gitlab.devtools.intel.com:29418/stg-ai-sw-team/GraphAnn.jl.g
 Installing Julia is straightforward.
 Precompiled binaries for many systems are found at: <https://julialang.org/downloads/>.
 
-Example Linux commands for downloading and unpacking Julia 1.5.3 is shown below.
+Example Linux commands for downloading and unpacking Julia 1.6.1 is shown below.
 ```sh
-wget https://julialang-s3.julialang.org/bin/linux/x64/1.5/julia-1.5.3-linux-x86_64.tar.gz
-tar -xvf julia-1.5.3-linux-x86_64.tar.gz
+wget https://julialang-s3.julialang.org/bin/linux/x64/1.6/julia-1.6.1-linux-x86_64.tar.gz
+tar -xvf julia-1.6.1-linux-x86_64.tar.gz
 ```
 Julia can then be run with the command
 ```sh
-./julia-1.5.3/bin/julia
+./julia-1.6.1/bin/julia
 ```
 
 ## Generating Ground Truth
