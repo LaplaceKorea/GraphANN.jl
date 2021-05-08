@@ -134,7 +134,7 @@ julia> allocator = GraphANN.stdallocator
 # An example of loading DiskANN binary data is shown for loading the queries below.
 #
 # Also, the `allocator` keyword argument may be left off if custom allocators
-# (e.g. PM support)are not
+# (e.g. PM support) are not required.
 julia> data = GraphANN.load_vecs(
     GraphANN.SVector{128,Float32},
     joinpath(GraphANN.DATADIR, "vecs", "siftsmall_base.fvecs");
