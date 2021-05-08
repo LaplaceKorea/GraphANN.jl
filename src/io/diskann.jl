@@ -19,7 +19,7 @@ struct DiskANN <: AbstractIOFormat end
 #####
 
 """
-    load_graph(GraphANN._IO.DiskANN(), path::AbstractString, max_vertices::Integer)
+    load_graph(GraphANN.DiskANN(), path::AbstractString, max_vertices::Integer)
 
 Load a graph saved by the DiskANN C++ code into memory as a `UniDirectedGraph`.
 """
@@ -29,14 +29,18 @@ function load_graph(loader::DiskANN, path::AbstractString, max_vertices; kw...)
     end
 end
 
-function load_graph(::DiskANN, io::IO, max_vertices; verbose = true)
+function load_graph(
+    ::DiskANN, io::IO, max_vertices; verbose = true, allocator = stdallocator
+)
     expected_file_size = read(io, UInt64)
     _width = read(io, Cuint)
     _ep = read(io, Cuint)
 
     # Use a buffer to temporarily store edge information.
     buffer = UInt32[]
-    graph = UniDirectedGraph{UInt32}(max_vertices)
+    graph = UniDirectedGraph{UInt32,FlatAdjacencyList{UInt32}}(
+        max_vertices, _width; allocator = allocator
+    )
 
     verbose && print("Loading Graph")
 
@@ -133,3 +137,72 @@ function save_bin(
     return write(io, data)
 end
 
+"""
+    load_bin(::GraphANN.DiskANN, ::Type{T}, path::AbstractString; [allocator], [groundtruth])
+
+Load DiskANN generated binary data located at `path` with data type `T` into memory
+allocated by `allocator`.
+
+# Example
+```
+julia> using GraphANN
+
+julia> data = GraphANN.load_bin(GraphANN.DiskANN(), GraphANN.SVector{128,Float32}, joinpath(GraphANN.DATADIR, "diskann", "siftsmall_query.bin)
+100-element Vector{StaticArrays.SVector{128, Float32}}:
+...
+```
+
+# Keyword Arguments
+* `allocator` - Source of Dynamic memory allocation. Default: `stdallocator`.
+* `groundtruth::Bool` - Indicate if a groundtruth dataset is being loaded. If so, then
+"""
+function load_bin(
+    diskann::DiskANN,
+    ::Type{T},
+    path::AbstractString;
+    allocator = stdallocator,
+    groundtruth = false,
+) where {T}
+    return open(path) do io
+        load_bin(diskann, T, io; allocator, groundtruth)
+    end
+end
+
+function load_bin(
+    diskann::DiskANN,
+    ::Type{SVector{N,T}},
+    io::IO;
+    allocator = stdallocator,
+    groundtruth = false,
+) where {T,N}
+    num_points = read(io, Cuint)
+    point_dim = read(io, Cuint)
+    if N != point_dim
+        msg = """
+        Point dimension mismatch. Expected dataset with $N dimensions. Instead, found $point_dim
+        """
+        throw(ArgumentError(msg))
+    end
+    data = allocator(SVector{N,T}, num_points)
+    read!(io, data)
+    if groundtruth
+        # Increment each entry by 1 to account for Julia's index-1 system.
+        for i in eachindex(data)
+            @inbounds data[i] = data[i] .+ one(T)
+        end
+    end
+    return data
+end
+
+function load_bin(
+    diskann::DiskANN, ::Type{T}, io::IO; allocator = stdallocator, groundtruth = false
+) where {T}
+    num_points = read(io, Cuint)
+    point_dim = read(io, Cuint)
+    data = allocator(T, point_dim, num_points)
+    read!(io, data)
+    if groundtruth
+        data .+= one(T)
+    end
+    return data
+end
