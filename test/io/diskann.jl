@@ -34,4 +34,34 @@
     crc_original = open(crc32c, diskann_query_bin)
     crc_new = open(crc32c, path)
     @test crc_original == crc_new
+
+    #####
+    ##### Test loading of binary data files.
+    #####
+
+    path = joinpath(diskann_dir, "siftsmall_query.bin")
+    queries_diskann = GraphANN.load_bin(GraphANN.DiskANN(), Float32, path)
+    @test queries_diskann == queries
+
+    queries_diskann_mock_gt = GraphANN.load_bin(
+        GraphANN.DiskANN(), Float32, path; groundtruth = true
+    )
+    @test queries_diskann_mock_gt == (queries .+ 1)
+
+    # Try loading as SVector
+    queries_diskann = GraphANN.load_bin(GraphANN.DiskANN(), SVector{128,Float32}, path)
+    @test all(queries_diskann .== eachcol(queries))
+
+    # Groundtruth adjustment.
+    queries_diskann = GraphANN.load_bin(
+        GraphANN.DiskANN(), SVector{128,Float32}, path; groundtruth = true
+    )
+    queries .+= 1
+    @test all(queries_diskann .== eachcol(queries))
+    queries .-= 1
+
+    # Error for loading with wrong dimension
+    @test_throws ArgumentError GraphANN.load_bin(
+        GraphANN.DiskANN(), SVector{127,Float32}, path
+    )
 end
