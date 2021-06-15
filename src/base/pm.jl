@@ -43,7 +43,7 @@ function pmmap(::Type{T}, dir::AbstractString, dims::Integer...; rmfile = true) 
     path = joinpath(dir, join((mmap_prefix(), num)))
 
     ispath(path) && rm(path; force = true)
-    array = Mmap.mmap(path, Array{T,length(dims)}, dims)
+    array = Mmap.mmap(path, Array{T,length(dims)}, convert.(Int64, dims))
     if rmfile
         finalizer(array) do _
             # NB: Finalizers in Julia are not allowed to cause Task switches.
