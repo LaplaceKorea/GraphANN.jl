@@ -12,22 +12,23 @@ function _run_diskann(
 )
     # Parameter Space
     # Order to the largest search list is first for more accurate progress meters.
-    search_list_sizes = reverse(20:10:300)
+    search_list_sizes = reverse(60:60)
     latencies, callbacks = GraphANN.Algorithms.latency_callbacks(runner)
 
     # Run once to force precompilation
     resize!(runner, maximum(search_list_sizes))
-    ids = GraphANN.search(runner, index, queries; num_neighbors = 5, callbacks = callbacks)
+    ids = GraphANN.search(runner, index, queries; num_neighbors = 20, callbacks = callbacks)
 
     @showprogress 1 for search_list_size in search_list_sizes
         resize!(runner, search_list_size)
         empty!(latencies)
         rt = @elapsed ids = GraphANN.search(
-            runner, index, queries; num_neighbors = 5, callbacks = callbacks
+            runner, index, queries; num_neighbors = 20, callbacks = callbacks
         )
 
         # Compute recalls
-        recall_at_5 = mean(GraphANN.recall(groundtruth, ids))
+        recall_at_20 = mean(GraphANN.recall(groundtruth, ids))
+        recall_at_5 = mean(GraphANN.recall(groundtruth, view(ids, 1:5, :)))
         recall_at_1 = mean(GraphANN.recall(groundtruth, view(ids, 1:1, :)))
 
         # Get the latencies and record some statistics
@@ -35,12 +36,14 @@ function _run_diskann(
 
         results = makeresult(
             Dict(
+                :recall_at_20 => recall_at_20,
                 :recall_at_5 => recall_at_5,
                 :recall_at_1 => recall_at_1,
                 :runtime => rt,
                 :qps => length(queries) / rt,
                 :search_list_size => search_list_size,
                 :num_queries => length(queries),
+                :num_threads => Threads.nthreads(),
                 # Latencies
                 :mean_latency => mean(times),
                 :latency_9 => getnine(times, 0.9),

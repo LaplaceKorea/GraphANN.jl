@@ -92,6 +92,14 @@ path = "../.."
 uuid = "38438e65-754f-449b-9041-06b96401f6e7"
 version = "0.1.0"
 
+[[HugepageMmap]]
+deps = ["Mmap"]
+git-tree-sha1 = "2be9e0b58642a22133b4581bf75d539c14314ef4"
+repo-rev = "master"
+repo-url = "https://github.com/hildebrandmw/HugepageMmap.jl"
+uuid = "ee95d29b-bb10-4127-aa09-5a5a9fa6956a"
+version = "0.1.0"
+
 [[Inflate]]
 git-tree-sha1 = "f5fc07d4e706b84f72d54eedcc1c13d92fb0871c"
 uuid = "d25df0c9-e2be-5dd7-82c8-3ad0b3e990b9"
