@@ -7,6 +7,7 @@ using Mmap: Mmap
 
 # deps
 using DataStructures: DataStructures
+using HugepageMmap: HugepageMmap
 using ProgressMeter: ProgressMeter
 using SIMD: SIMD
 import StaticArrays: SVector
@@ -65,7 +66,7 @@ function search! end
 ##### Allocators
 #####
 
-export stdallocator, pmallocator
+export stdallocator, pmallocator, hugepage_1gib_allocator, hugepage_2mib_allocator
 
 """
     stdallocator
@@ -88,6 +89,32 @@ julia> size(A)
 """
 stdallocator(::Type{T}, dims...) where {T} = Array{T}(undef, dims...)
 include("pm.jl")
+
+"""
+    hugepage_1gib_allocator
+
+**EXPERIMENTAL**: Allocator implementation that backs allocated vectors using 1 GiB
+hugepages. Note that the hugepages must be allocated beforehand using a tool like
+`hugeadm`. See: `https://github.com/hildebrandmw/HugepageMmap.jl`.
+
+See also: [`hugepage_2mib_allocator`](@ref)
+"""
+function hugepage_1gib_allocator(::Type{T}, len::Integer) where {T}
+    return HugepageMmap.hugepage_mmap(T, len, HugepageMmap.PageSize1G())
+end
+
+"""
+    hugepage_2mib_allocator
+
+**EXPERIMENTAL**: Allocator implementation that backs allocated vectors using 2 MiB
+hugepages. Note that the hugepages must be allocated beforehand using a tool like
+`hugeadm`. See: `https://github.com/hildebrandmw/HugepageMmap.jl`.
+
+See also: [`hugepage_1gib_allocator`](@ref)
+"""
+function hugepage_2mib_allocator(::Type{T}, len::Integer) where {T}
+    return HugepageMmap.hugepage_mmap(T, len, HugepageMmap.PageSize2M())
+end
 
 #####
 ##### Threading
