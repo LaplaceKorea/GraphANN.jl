@@ -99,8 +99,8 @@ hugepages. Note that the hugepages must be allocated beforehand using a tool lik
 
 See also: [`hugepage_2mib_allocator`](@ref)
 """
-function hugepage_1gib_allocator(::Type{T}, len::Integer) where {T}
-    return HugepageMmap.hugepage_mmap(T, len, HugepageMmap.PageSize1G())
+function hugepage_1gib_allocator(::Type{T}, dims::Integer...) where {T}
+    return HugepageMmap.hugepage_mmap(T, HugepageMmap.PageSize1G(), dims...)
 end
 
 """
@@ -112,8 +112,8 @@ hugepages. Note that the hugepages must be allocated beforehand using a tool lik
 
 See also: [`hugepage_1gib_allocator`](@ref)
 """
-function hugepage_2mib_allocator(::Type{T}, len::Integer) where {T}
-    return HugepageMmap.hugepage_mmap(T, len, HugepageMmap.PageSize2M())
+function hugepage_2mib_allocator(::Type{T}, dims::Integer...) where {T}
+    return HugepageMmap.hugepage_mmap(T, HugepageMmap.PageSize2M(), dims...)
 end
 
 #####
