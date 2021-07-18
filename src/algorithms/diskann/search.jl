@@ -149,13 +149,13 @@ function Base.insert!(x::BestBuffer, v::MaskWrap)
     @unpack entries, currentlength, bestunvisited, maxlength = x
     i = 1
     while i <= currentlength
-        isless(v, entries[i]) && break
+        isless(v, @inbounds(entries[i])) && break
         i += 1
     end
     i > maxlength && return nothing
 
     shift!(x, i)
-    entries[i] = v
+    @inbounds entries[i] = v
 
     # Update best unvisited.
     if i < bestunvisited
@@ -168,15 +168,16 @@ function shift!(x::BestBuffer, i)
     @unpack entries, currentlength, maxlength = x
     droplast = currentlength == maxlength
     if droplast
-        for j in (maxlength-1):-1:i
-            entries[j+1] = entries[j]
-        end
+        maxind = (maxlength - 1)
     else
-        for j in currentlength:-1:i
-            entries[j+1] = entries[j]
-        end
-        x.currentlength = (currentlength + 1)
+        maxind = currentlength
+        x.currentlength = currentlength + 1
     end
+
+    for j in (maxlength-1):-1:i
+        @inbounds(entries[j+1] = entries[j])
+    end
+
     return nothing
 end
 
@@ -188,7 +189,7 @@ function getcandidate!(x::BestBuffer)
     # Find the next unvisited candidate.
     i = bestunvisited + 1
     while i <= currentlength
-        !isvisited(entries[i]) && break
+        !isvisited(@inbounds(entries[i])) && break
         i += 1
     end
     x.bestunvisited = i
@@ -246,8 +247,8 @@ function DiskANNRunner{I,D}(
 ) where {I,D,F}
     buffer = BestBuffer{I,D}(search_list_size)
     visited = RobinSet{I}()
-    runner = DiskANNRunner{I,D,typeof(visited),typeof(prefetch_queue)}(
-        convert(Int, search_list_size), buffer, visited, prefetch_queue
+    runner = DiskANNRunner{I,D,typeof(visited)}(
+        convert(Int, search_list_size), buffer, visited,
     )
 
     return threadlocal_wrap(executor, runner)
@@ -266,11 +267,10 @@ function DiskANNRunner(
     index::DiskANNIndex,
     search_list_size;
     executor::F = single_thread,
-    prefetch_queue = nothing,
 ) where {F}
     I = eltype(index.graph)
     D = costtype(index.metric, index.data)
-    return DiskANNRunner{I,D}(search_list_size; executor, prefetch_queue)
+    return DiskANNRunner{I,D}(search_list_size; executor)
 end
 
 # Prepare for another run.
@@ -316,7 +316,6 @@ Return the top `num_neighbor` results from `runner`.
 function getresults!(runner::DiskANNRunner, num_neighbors)
     results = view(runner.buffer.entries, Base.OneTo(num_neighbors))
     return results
-    #return destructive_extract!(runner.best, num_neighbors)
 end
 
 #####
@@ -365,7 +364,7 @@ function _Base.search(
 
         # Distance computations
         for v in neighbors
-            # Perform distance query, and try to prefetch the next datapoint.
+            # Perform distance query, and try to trefetch the next datapoint.
             # NOTE: Checking if a vertex has been visited here is actually SLOWER than
             # deferring until after the distance comparison.
             @inbounds d = evaluate(metric, query, pointer(data, v))
@@ -379,7 +378,7 @@ function _Base.search(
         callbacks.postdistance(algo, p, neighbors)
     end
 
-    return rt
+    return nothing
 end
 
 """

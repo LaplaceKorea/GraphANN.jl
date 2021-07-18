@@ -152,6 +152,7 @@ export recall
 export prefetch, prefetch_llc, unsafe_prefetch
 export BatchedRange, batched
 export Keeper, KeepLargest, KeepSmallest
+export destructive_extract!
 include("utils.jl")
 
 #####

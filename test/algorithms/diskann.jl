@@ -71,10 +71,11 @@ end
     @test maximum(x) === Neighbor(x, 2, 10.0)
 
     GraphANN.Algorithms.pushcandidate!(x, Neighbor(x, 3, -10.0))
-    @test maximum(x) === Neighbor(x, 2, 10.0)
-
-    GraphANN.Algorithms.reduce!(x)
     @test maximum(x) === Neighbor(x, 1, 0.0)
+    # @test maximum(x) === Neighbor(x, 2, 10.0)
+
+    # GraphANN.Algorithms.reduce!(x)
+    # @test maximum(x) === Neighbor(x, 1, 0.0)
 end
 
 @testset "Pruner" begin

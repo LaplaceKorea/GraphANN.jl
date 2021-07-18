@@ -55,7 +55,6 @@ const sptag_tree = joinpath(sptag_dir, "siftsmall", "tree.bin")
 include("base/pm.jl")
 include("base/utils.jl")
 include("base/threading.jl")
-include("base/minmax_heap.jl")
 include("base/euclidean.jl")
 include("base/partition.jl")
 
@@ -74,7 +73,7 @@ include("prefetch/queue.jl")
 include("prefetch/prefetch.jl")
 
 # Algorithms
-include("algorithms/exhaustive.jl")
+# include("algorithms/exhaustive.jl")
 include("algorithms/diskann.jl")
 include("algorithms/sptag/bktree.jl")
 include("algorithms/sptag/tptree.jl")
