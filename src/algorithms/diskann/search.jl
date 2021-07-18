@@ -174,7 +174,7 @@ function shift!(x::BestBuffer, i)
         x.currentlength = currentlength + 1
     end
 
-    for j in (maxlength-1):-1:i
+    for j in maxind:-1:i
         @inbounds(entries[j+1] = entries[j])
     end
 
