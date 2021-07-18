@@ -504,7 +504,7 @@ end
                 # Perform a greedy search from this node.
                 # The visited list will live inside the `greedy` object and will be extracted
                 # using the `getvisited` function.
-                point = data[vertex]
+                point = pointer(data, vertex)
                 search(storage.greedy, index, point, StartNode(vertex, point))
                 candidates = getvisited(storage.greedy)
 

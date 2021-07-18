@@ -161,7 +161,6 @@ Base.length(::PtrWrap{V,K}) where {V,K} = K
 
 wrap(::Type{V}, x::SVector) where {V} = ValueWrap{V}(x)
 wrap(::Type{V}, x::Ptr{<:SVector}) where {V} = PtrWrap{V}(x)
-const MaybePtr{T} = Union{T,Ptr{<:T}}
 
 #####
 ##### SIMD Promotion and Stuff

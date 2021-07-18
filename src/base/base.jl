@@ -24,10 +24,24 @@ gettimer() = timer
 resettimer!() = TimerOutputs.reset_timer!(gettimer())
 
 #####
+##### Compiler Hints
+#####
+
+export @_nointerleave_meta
+macro _interleave_meta(n)
+    return Expr(
+        :loopinfo,
+        (Symbol("llvm.loop.interleave.count"), n),
+        (Symbol("llvm.loop.unroll.disable"), 2),
+    )
+end
+
+#####
 ##### Generic Distance
 #####
 
-export evaluate, prehook, build, search, search!
+export MaybePtr, evaluate, prehook, build, search, search!
+const MaybePtr{T} = Union{T,Ptr{<:T}}
 
 """
     evaluate(metric, x, y)
@@ -124,14 +138,6 @@ export ThreadPool, ThreadLocal, MaybeThreadLocal, TaskHandle
 export getall, getlocal, getpool, allthreads, single_thread, dynamic_thread, on_threads
 export threadcopy
 include("threading.jl")
-
-#####
-##### MinMaxHeap
-#####
-
-export BinaryMinMaxHeap,
-    destructive_extract!, popmax!, popmin!, _unsafe_maximum, _unsafe_minimum
-include("minmax_heap.jl")
 
 #####
 ##### Utilities
