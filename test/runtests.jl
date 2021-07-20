@@ -72,7 +72,7 @@ include("clustering/kmeans.jl")
 include("prefetch/queue.jl")
 include("prefetch/prefetch.jl")
 
-Algorithms
+# Algorithms
 include("algorithms/exhaustive.jl")
 include("algorithms/diskann.jl")
 include("algorithms/sptag/bktree.jl")

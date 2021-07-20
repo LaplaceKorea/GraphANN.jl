@@ -1,10 +1,36 @@
+#####
+##### Bit Manipulations
+#####
+
+# Get bit set info
+getlsb(x::T) where {T<:Integer} = x & one(T)
+getlsb(x::Float32) = getlsb(reinterpret(UInt32, x))
+getlsb(x::Float64) = getlsb(reinterpret(UInt64, x))
+getmsb(x::T) where {T<:Integer} = x & bitrotate(one(T), -1)
+
+# Clear bits
+clearlsb(x::T) where {T<:Integer} = x & ~(one(T))
+clearlsb(x::Float32) = reinterpret(Float32, clearlsb(reinterpret(UInt32, x)))
+clearlsb(x::Float64) = reinterpret(Float64, clearlsb(reinterpret(UInt64, x)))
+clearmsb(x::T) where {T<:Integer} = x & ~bitrotate(one(T), -1)
+
+# Set bits
+setlsb(x::T) where {T<:Integer} = x | one(T)
+setlsb(x::Float32) = reinterpret(Float32, setlsb(reinterpret(UInt32, x)))
+setlsb(x::Float64) = reinterpret(Float64, setlsb(reinterpret(UInt64, x)))
+setmsb(x::T) where {T<:Integer} = x | bitrotate(one(T), -1)
+
+#####
+##### Mask Wrap
+#####
+
 # Wrapper for Neighbors that uses the LSB of the distance field to track if the
 # neighbor has been expanded/visited yet.
 abstract type AbstractMaskType end
 struct DistanceLSB <: AbstractMaskType end
 struct IDMSB <: AbstractMaskType end
 
-struct MaskWrap{T <: AbstractMaskType,I,D}
+struct MaskWrap{T<:AbstractMaskType,I,D}
     neighbor::Neighbor{I,D}
     MaskWrap{T,I,D}(neighbor::Neighbor{I,D}) where {T,I,D} = new{T,I,D}(neighbor)
 end
@@ -36,29 +62,8 @@ function visited(x::MaskWrap{IDMSB,I,D}) where {I,D}
     return MaskWrap{IDMSB,I,D}(Neighbor{I,D}(setmsb(id), distance))
 end
 
-getlsb(x::T) where {T <: Integer} = x & one(T)
-getlsb(x::Float32) = getlsb(reinterpret(UInt32, x))
-getlsb(x::Float64) = getlsb(reinterpret(UInt64, x))
-
-@inline getmsb(x::T) where {T <: Integer} = x & bitrotate(one(T), -1)
-
-clearlsb(x::T) where {T <: Integer} = x & ~(one(T))
-clearlsb(x::Float32) = reinterpret(Float32, clearlsb(reinterpret(UInt32, x)))
-clearlsb(x::Float64) = reinterpret(Float64, clearlsb(reinterpret(UInt64, x)))
-@inline clearmsb(x::T) where {T <: Integer} = x & ~bitrotate(one(T), -1)
-
-setlsb(x::T) where {T <: Integer} = x | one(T)
-setlsb(x::Float32) = reinterpret(Float32, setlsb(reinterpret(UInt32, x)))
-setlsb(x::Float64) = reinterpret(Float64, setlsb(reinterpret(UInt64, x)))
-
-@inline setmsb(x::T) where {T <: Integer} = x | bitrotate(one(T), -1)
-
-@inline function Base.isless(x::D, y::MaskWrap{T,I,D}) where {T,I,D}
-    # use "<" to generate smaller code for floats
-    return x < getdistance(y)
-end
-@inline function Base.isless(x::MaskWrap{T,I,D}, y::MaskWrap{T,I,D}) where {T,I,D}
-    # use "<" to generate smaller code for floats
+Base.isless(x::D, y::MaskWrap{T,I,D}) where {T,I,D} = x < getdistance(y)
+function Base.isless(x::MaskWrap{T,I,D}, y::MaskWrap{T,I,D}) where {T,I,D}
     return isless(getdistance(x), y)
 end
 
@@ -128,7 +133,7 @@ function shift!(x::BestBuffer, i)
 
     j = maxind
     while j >= i
-        @inbounds(entries[j+1] = entries[j])
+        @inbounds(entries[j + 1] = entries[j])
         j -= 1
     end
     return nothing
