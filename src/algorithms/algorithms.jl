@@ -32,6 +32,7 @@ export exhaustive_search
 include("exhaustive.jl")
 
 # diskann
+include("diskann/maskwrap.jl")
 include("diskann/search.jl")
 include("diskann/build.jl")
 

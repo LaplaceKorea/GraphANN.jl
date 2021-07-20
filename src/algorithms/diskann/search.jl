@@ -68,136 +68,6 @@ function Base.show(io::IO, index::DiskANNIndex)
     return print(io, "Entry point index: ", index.startnode.index, ")")
 end
 
-# Wrapper for Neighbors that uses the LSB of the distance field to track if the
-# neighbor has been expanded/visited yet.
-struct MaskWrap{I,D}
-    neighbor::Neighbor{I,D}
-    MaskWrap{I,D}(neighbor::Neighbor{I,D}) where {I,D} = new{I,D}(neighbor)
-end
-
-function MaskWrap(x::Neighbor{I,D}) where {I,D}
-    return MaskWrap{I,D}(Neighbor{I,D}(x.id, clearlsb(x.distance)))
-end
-
-_Base.getid(x::MaskWrap) = getid(x.neighbor)
-_Base.getdistance(x::MaskWrap) = clearlsb(x.neighbor.distance)
-unwrap(x::MaskWrap) = x.neighbor
-
-isvisited(x::MaskWrap) = isone(getlsb(x))
-
-getlsb(x::T) where {T <: Integer} = x & one(T)
-getlsb(x::Float32) = getlsb(reinterpret(UInt32, x))
-getlsb(x::Float64) = getlsb(reinterpret(UInt64, x))
-getlsb(x::MaskWrap) = getlsb(x.neighbor.distance)
-
-clearlsb(x::T) where {T <: Integer} = x & ~(one(T))
-clearlsb(x::Float32) = reinterpret(Float32, clearlsb(reinterpret(UInt32, x)))
-clearlsb(x::Float64) = reinterpret(Float64, clearlsb(reinterpret(UInt64, x)))
-function clearlsb(x::MaskWrap{I,D}) where {I,D}
-    @unpack id, distance = x.neighbor
-    return MaskWrap{I,D}(Neighbor{I,D}(id, clearlsb(distance)))
-end
-
-setlsb(x::T) where {T <: Integer} = x | one(T)
-setlsb(x::Float32) = reinterpret(Float32, setlsb(reinterpret(UInt32, x)))
-setlsb(x::Float64) = reinterpret(Float64, setlsb(reinterpret(UInt64, x)))
-function setlsb(x::MaskWrap{I,D}) where {I,D}
-    @unpack id, distance = x.neighbor
-    return MaskWrap{I,D}(Neighbor{I,D}(id, setlsb(distance)))
-end
-
-function Base.isless(x::MaskWrap{I,D}, y::MaskWrap{I,D}) where {I,D}
-    # use "<" to generate smaller code for floats
-    return getdistance(x) < getdistance(y)
-end
-
-#####
-##### BestBuffer
-#####
-
-mutable struct BestBuffer{I,D}
-    entries::Vector{MaskWrap{I,D}}
-    # How many entries are currently valid in the vector.
-    currentlength::Int
-    maxlength::Int
-    # The index of the lowest-distance entry that has not yet been visited.
-    bestunvisited::Int
-end
-
-function BestBuffer{I,D}(maxlen::Integer) where {I,D}
-    entries = Vector{MaskWrap{I,D}}(undef, maxlen)
-    return BestBuffer{I,D}(entries, 0, maxlen, 1)
-end
-
-function Base.empty!(buffer::BestBuffer)
-    buffer.currentlength = 0
-    buffer.bestunvisited = 1
-    return nothing
-end
-
-function Base.resize!(buffer::BestBuffer, val)
-    resize!(buffer.entries, val)
-    buffer.maxlength = val
-    return nothing
-end
-
-Base.length(x::BestBuffer) = x.currentlength
-Base.maximum(x::BestBuffer) = unwrap(x.entries[x.currentlength])
-
-Base.insert!(x::BestBuffer, v::Neighbor) = insert!(x, MaskWrap(v))
-function Base.insert!(x::BestBuffer, v::MaskWrap)
-    @unpack entries, currentlength, bestunvisited, maxlength = x
-    i = 1
-    while i <= currentlength
-        isless(v, @inbounds(entries[i])) && break
-        i += 1
-    end
-    i > maxlength && return nothing
-
-    shift!(x, i)
-    @inbounds entries[i] = v
-
-    # Update best unvisited.
-    if i < bestunvisited
-        x.bestunvisited = i
-    end
-    return nothing
-end
-
-function shift!(x::BestBuffer, i)
-    @unpack entries, currentlength, maxlength = x
-    droplast = currentlength == maxlength
-    if droplast
-        maxind = (maxlength - 1)
-    else
-        maxind = currentlength
-        x.currentlength = currentlength + 1
-    end
-
-    for j in (maxlength-1):-1:i
-        @inbounds(entries[j+1] = entries[j])
-    end
-
-    return nothing
-end
-
-function getcandidate!(x::BestBuffer)
-    @unpack entries, bestunvisited, currentlength = x
-    candidate = entries[bestunvisited]
-    entries[bestunvisited] = setlsb(candidate)
-
-    # Find the next unvisited candidate.
-    i = bestunvisited + 1
-    while i <= currentlength
-        !isvisited(@inbounds(entries[i])) && break
-        i += 1
-    end
-    x.bestunvisited = i
-    return unwrap(candidate)
-end
-
-done(x::BestBuffer) = (x.bestunvisited > x.currentlength)
-
 """
     DiskANNRunner
 
@@ -224,11 +94,11 @@ Construct a `DiskANNRunner` with id-type `I` and distance-type `D` with the give
 
 See also: [`search`](@ref)
 """
-mutable struct DiskANNRunner{I<:Integer,D,T<:AbstractSet}
+mutable struct DiskANNRunner{I<:Integer,D,T<:AbstractSet,U<:AbstractMaskType}
     search_list_size::Int64
 
     # Pre-allocated buffer for the search list
-    buffer::BestBuffer{I,D}
+    buffer::BestBuffer{U,I,D}
     visited::T
 end
 
@@ -243,11 +113,11 @@ function _Base.Neighbor(x::DiskANNRunner, id::Integer, distance)
 end
 
 function DiskANNRunner{I,D}(
-    search_list_size::Integer; executor::F = single_thread,
-) where {I,D,F}
-    buffer = BestBuffer{I,D}(search_list_size)
-    visited = RobinSet{I}()
-    runner = DiskANNRunner{I,D,typeof(visited)}(
+    search_list_size::Integer; executor::F = single_thread, masktype::U = DistanceLSB()
+) where {I,D,F,U}
+    buffer = BestBuffer{U,I,D}(search_list_size)
+    visited = Set{I}()
+    runner = DiskANNRunner{I,D,typeof(visited),U}(
         convert(Int, search_list_size), buffer, visited,
     )
 
@@ -267,10 +137,11 @@ function DiskANNRunner(
     index::DiskANNIndex,
     search_list_size;
     executor::F = single_thread,
-) where {F}
+    masktype::U = IDMSB(),
+) where {F,U}
     I = eltype(index.graph)
     D = costtype(index.metric, index.data)
-    return DiskANNRunner{I,D}(search_list_size; executor)
+    return DiskANNRunner{I,D}(search_list_size; executor, masktype)
 end
 
 # Prepare for another run.
@@ -290,13 +161,13 @@ unsafe_peek(runner::DiskANNRunner) = runner.buffer.entries[runner.buffer.bestunv
 getcandidate!(runner::DiskANNRunner) = getcandidate!(runner.buffer)
 isfull(runner::DiskANNRunner) = length(runner) >= runner.search_list_size
 
-function maybe_pushcandidate!(runner::DiskANNRunner, vertex)
+function maybe_pushcandidate!(runner::DiskANNRunner, vertex::Neighbor)
     # If this has already been seen, don't do anything.
     isvisited(runner, vertex) && return nothing
     return pushcandidate!(runner, vertex)
 end
 
-function pushcandidate!(runner::DiskANNRunner, vertex)
+function pushcandidate!(runner::DiskANNRunner, vertex::Neighbor)
     visited!(runner, vertex)
     @unpack buffer = runner
 
@@ -314,8 +185,7 @@ Base.maximum(runner::DiskANNRunner) = maximum(runner.buffer)
 Return the top `num_neighbor` results from `runner`.
 """
 function getresults!(runner::DiskANNRunner, num_neighbors)
-    results = view(runner.buffer.entries, Base.OneTo(num_neighbors))
-    return results
+    return view(runner.buffer.entries, Base.OneTo(num_neighbors))
 end
 
 #####
