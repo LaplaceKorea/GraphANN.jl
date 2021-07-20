@@ -97,38 +97,39 @@ function Base.resize!(buffer::BestBuffer, val)
     return nothing
 end
 
-Base.length(x::BestBuffer) = x.currentlength
-Base.maximum(x::BestBuffer) = unwrap(x.entries[x.currentlength])
+Base.length(buffer::BestBuffer) = buffer.currentlength
+Base.maximum(buffer::BestBuffer) = unwrap(buffer.entries[buffer.currentlength])
 
-Base.insert!(x::BestBuffer{T}, v::Neighbor) where {T} = insert!(x, MaskWrap{T}(v))
-function Base.insert!(x::BestBuffer, v::MaskWrap)
-    @unpack entries, currentlength, bestunvisited, maxlength = x
+Base.insert!(buffer::BestBuffer{T}, v::Neighbor) where {T} = insert!(buffer, MaskWrap{T}(v))
+function Base.insert!(buffer::BestBuffer, v::MaskWrap)
+    @unpack entries, currentlength, maxlength, bestunvisited = buffer
     i = 1
     dv = getdistance(v)
     while i <= currentlength
         isless(dv, @inbounds(entries[i])) && break
         i += 1
     end
-    i > maxlength && return nothing
+    i > maxlength && return false
 
-    shift!(x, i)
+    shift!(buffer, i)
     @inbounds entries[i] = v
 
     # Update best unvisited.
     if i < bestunvisited
-        x.bestunvisited = i
+        buffer.bestunvisited = i
+        return true
     end
-    return nothing
+    return false
 end
 
-function shift!(x::BestBuffer, i)
-    @unpack entries, currentlength, maxlength = x
+function shift!(buffer::BestBuffer, i)
+    @unpack entries, currentlength, maxlength = buffer
     droplast = currentlength == maxlength
     if droplast
         maxind = (maxlength - 1)
     else
         maxind = currentlength
-        x.currentlength = currentlength + 1
+        buffer.currentlength = currentlength + 1
     end
 
     j = maxind
@@ -139,8 +140,8 @@ function shift!(x::BestBuffer, i)
     return nothing
 end
 
-function getcandidate!(x::BestBuffer)
-    @unpack entries, bestunvisited, currentlength = x
+function getcandidate!(buffer::BestBuffer)
+    @unpack entries, currentlength, bestunvisited = buffer
     candidate = entries[bestunvisited]
     entries[bestunvisited] = visited(candidate)
 
@@ -150,9 +151,9 @@ function getcandidate!(x::BestBuffer)
         !isvisited(@inbounds(entries[i])) && break
         i += 1
     end
-    x.bestunvisited = i
+    buffer.bestunvisited = i
     return getid(candidate)
 end
 
-done(x::BestBuffer) = (x.bestunvisited > x.currentlength)
+done(buffer::BestBuffer) = (buffer.bestunvisited > buffer.currentlength)
 

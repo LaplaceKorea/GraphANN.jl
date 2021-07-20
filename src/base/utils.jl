@@ -312,16 +312,26 @@ else
     end
 end
 
-function prefetch(A::AbstractVector{T}, i, f::F = _Base.prefetch) where {T,F}
+function prefetch(
+    A::AbstractVector{T}, i, f::F = _Base.prefetch
+) where {T<:AbstractVector,F}
     # Need to prefetch the entire vector
     # Compute how many cache lines are needed.
     # Divide the number of bytes by 64 to get cache lines.
     cache_lines = sizeof(T) >> 6
     ptr = pointer(A, i)
-    for j in 1:cache_lines
+    for j in Base.OneTo(cache_lines)
         f(ptr + 64 * (j - 1))
     end
     return nothing
+end
+
+function unsafe_prefetch(A::AbstractVector{T}, f::F = _Base.prefetch) where {T <: Number, F}
+    cache_lines = length(A) >> 6
+    ptr = pointer(A)
+    for j in Base.OneTo(cache_lines)
+        f(ptr + 64 * (j - 1))
+    end
 end
 
 #####

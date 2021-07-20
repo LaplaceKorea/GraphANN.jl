@@ -137,7 +137,7 @@ Base.empty!(x::FlatAdjacencyList, i) = (x.lengths[i] = 0)
 Base.push!(x::FlatAdjacencyList, v) = error("Cannot yet push to a FlatAdjacencyList!")
 
 # Use `unsafe_view` because `lenght` will bounds check for us.
-Base.getindex(x::FlatAdjacencyList, i) = Base.unsafe_view(x.adj, 1:length(x, i), i)
+Base.getindex(x::FlatAdjacencyList, i) = Base.unsafe_view(x.adj, 1:length(x, i), Int(i))
 
 # Can insert as long as the row is not completely full.
 caninsert(x::FlatAdjacencyList, i) = (length(x, i) < _max_degree(x))

@@ -163,7 +163,7 @@ isfull(runner::DiskANNRunner) = length(runner) >= runner.search_list_size
 
 function maybe_pushcandidate!(runner::DiskANNRunner, vertex::Neighbor)
     # If this has already been seen, don't do anything.
-    isvisited(runner, vertex) && return nothing
+    isvisited(runner, vertex) && return false
     return pushcandidate!(runner, vertex)
 end
 
@@ -172,8 +172,7 @@ function pushcandidate!(runner::DiskANNRunner, vertex::Neighbor)
     @unpack buffer = runner
 
     # Insert into queue
-    insert!(buffer, vertex)
-    return nothing
+    return insert!(buffer, vertex)
 end
 
 done(runner::DiskANNRunner) = done(runner.buffer)
@@ -232,6 +231,11 @@ function _Base.search(
         getcandidate!(algo)
         algmax = getdistance(maximum(algo))
 
+        # Prefetch potential next neigbors.
+        if !done(algo)
+            unsafe_prefetch(LightGraphs.outneighbors(graph, getid(unsafe_peek(algo))))
+        end
+
         # Distance computations
         for v in neighbors
             # Perform distance query, and try to trefetch the next datapoint.
@@ -241,7 +245,12 @@ function _Base.search(
 
             ## only bother to add if it's better than the worst currently tracked.
             if d < algmax || !isfull(algo)
-                maybe_pushcandidate!(algo, Neighbor(algo, v, d))
+                # "maybe_pushcandidate!" will return "true" if the vertex we just
+                # added is the best unexpanded neighbor.
+                if maybe_pushcandidate!(algo, Neighbor(algo, v, d))
+                    unsafe_prefetch(LightGraphs.outneighbors(graph, v))
+                end
+                algmax = getdistance(maximum(algo))
             end
         end
 
