@@ -284,78 +284,42 @@ function square_accum(x::SIMD.Vec{32,Int16}, y::SIMD.Vec{16,Int32})
 end
 
 # VNNI accumulation for 32xInt16.
-@static if VERSION >= v"1.6.0-beta1"
-    function vnni_accumulate(
-        x::SIMD.Vec{16,Int32}, a::SIMD.Vec{32,Int16}, b::SIMD.Vec{32,Int16}
-    )
-        Base.@_inline_meta
+function vnni_accumulate(
+    x::SIMD.Vec{16,Int32}, a::SIMD.Vec{32,Int16}, b::SIMD.Vec{32,Int16}
+)
+    Base.@_inline_meta
 
-        # Use LLVM call to directly insert the assembly instruction.
-        # Don't worry about the conversion from <32 x i16> to <16 x i32>.
-        # For some reason, the signature of the LLVM instrinsic wants <16 x i32>, but it's
-        # treated correctly by the hardware ...
-        #
-        # This may be related to C++ AVX intrinsic datatypes being element type agnostic.
-        s = """
-            declare <16 x i32> @llvm.x86.avx512.vpdpwssd.512(<16 x i32>, <16 x i32>, <16 x i32>) #0
+    # Use LLVM call to directly insert the assembly instruction.
+    # Don't worry about the conversion from <32 x i16> to <16 x i32>.
+    # For some reason, the signature of the LLVM instrinsic wants <16 x i32>, but it's
+    # treated correctly by the hardware ...
+    #
+    # This may be related to C++ AVX intrinsic datatypes being element type agnostic.
+    s = """
+        declare <16 x i32> @llvm.x86.avx512.vpdpwssd.512(<16 x i32>, <16 x i32>, <16 x i32>) #0
 
-            define <16 x i32> @entry(<16 x i32>, <32 x i16>, <32 x i16>) #0 {
-            top:
-                %a1 = bitcast <32 x i16> %1 to <16 x i32>
-                %a2 = bitcast <32 x i16> %2 to <16 x i32>
-
-                %val = tail call <16 x i32> @llvm.x86.avx512.vpdpwssd.512(<16 x i32> %0, <16 x i32> %a1, <16 x i32> %a2) #3
-                ret <16 x i32> %val
-            }
-
-            attributes #0 = { alwaysinline }
-            """
-
-        # SIMD.Vec's wrap around SIMD.LVec, which Julia knows how to pass correctly to LLVM
-        # as raw LLVM vectors.
-        x = Base.llvmcall(
-            (s, "entry"),
-            SIMD.LVec{16,Int32},
-            Tuple{SIMD.LVec{16,Int32},SIMD.LVec{32,Int16},SIMD.LVec{32,Int16}},
-            x.data,
-            a.data,
-            b.data,
-        )
-
-        return SIMD.Vec(x)
-    end
-else
-    function vnni_accumulate(
-        x::SIMD.Vec{16,Int32}, a::SIMD.Vec{32,Int16}, b::SIMD.Vec{32,Int16}
-    )
-        Base.@_inline_meta
-
-        # Use LLVM call to directly insert the assembly instruction.
-        # Don't worry about the conversion from <32 x i16> to <16 x i32>.
-        # For some reason, the signature of the LLVM instrinsic wants <16 x i32>, but it's
-        # treated correctly by the hardware ...
-        #
-        # This may be related to C++ AVX intrinsic datatypes being element type agnostic.
-        decl = "declare <16 x i32> @llvm.x86.avx512.vpdpwssd.512(<16 x i32>, <16 x i32>, <16 x i32>) #1"
-        s = """
+        define <16 x i32> @entry(<16 x i32>, <32 x i16>, <32 x i16>) #0 {
+        top:
             %a1 = bitcast <32 x i16> %1 to <16 x i32>
             %a2 = bitcast <32 x i16> %2 to <16 x i32>
 
             %val = tail call <16 x i32> @llvm.x86.avx512.vpdpwssd.512(<16 x i32> %0, <16 x i32> %a1, <16 x i32> %a2) #3
             ret <16 x i32> %val
-            """
+        }
 
-        # SIMD.Vec's wrap around SIMD.LVec, which Julia knows how to pass correctly to LLVM
-        # as raw LLVM vectors.
-        x = Base.llvmcall(
-            (decl, s),
-            SIMD.LVec{16,Int32},
-            Tuple{SIMD.LVec{16,Int32},SIMD.LVec{32,Int16},SIMD.LVec{32,Int16}},
-            x.data,
-            a.data,
-            b.data,
-        )
+        attributes #0 = { alwaysinline }
+        """
 
-        return SIMD.Vec(x)
-    end
+    # SIMD.Vec's wrap around SIMD.LVec, which Julia knows how to pass correctly to LLVM
+    # as raw LLVM vectors.
+    x = Base.llvmcall(
+        (s, "entry"),
+        SIMD.LVec{16,Int32},
+        Tuple{SIMD.LVec{16,Int32},SIMD.LVec{32,Int16},SIMD.LVec{32,Int16}},
+        x.data,
+        a.data,
+        b.data,
+    )
+
+    return SIMD.Vec(x)
 end

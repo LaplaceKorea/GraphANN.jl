@@ -234,82 +234,50 @@ end
 # prefetch2 - into LLC
 
 # NOTE: The convention for LLVMCALL changes in Version 1.6
-@static if VERSION >= v"1.6.0-beta1"
-    function prefetch(ptr::Ptr)
-        Base.@_inline_meta
-        Base.llvmcall(
-            (
-                raw"""
-     define void @entry(i64) #0 {
-     top:
-         %val = inttoptr i64 %0 to i8*
-         call void asm sideeffect "prefetch $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
-         ret void
-     }
-
-     attributes #0 = { alwaysinline }
-     """,
-                "entry",
-            ),
-            Cvoid,
-            Tuple{Ptr{Cvoid}},
-            Ptr{Cvoid}(ptr),
-        )
-        return nothing
-    end
-
-    function prefetch_llc(ptr::Ptr)
-        Base.@_inline_meta
-        Base.llvmcall(
-            (
-                raw"""
-     define void @entry(i64) #0 {
-     top:
-         %val = inttoptr i64 %0 to i8*
-         call void asm sideeffect "prefetcht1 $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
-         ret void
-     }
-
-     attributes #0 = { alwaysinline }
-     """,
-                "entry",
-            ),
-            Cvoid,
-            Tuple{Ptr{Cvoid}},
-            Ptr{Cvoid}(ptr),
-        )
-        return nothing
-    end
-else
-    function prefetch(ptr::Ptr)
-        Base.@_inline_meta
-        Base.llvmcall(
+function prefetch(ptr::Ptr)
+    Base.@_inline_meta
+    Base.llvmcall(
+        (
             raw"""
-  %val = inttoptr i64 %0 to i8*
-  call void asm sideeffect "prefetch $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
-  ret void
-  """,
-            Cvoid,
-            Tuple{Ptr{Cvoid}},
-            Ptr{Cvoid}(ptr),
-        )
-        return nothing
-    end
+ define void @entry(i64) #0 {
+ top:
+     %val = inttoptr i64 %0 to i8*
+     call void asm sideeffect "prefetch $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
+     ret void
+ }
 
-    function prefetch_llc(ptr::Ptr)
-        Base.@_inline_meta
-        Base.llvmcall(
+ attributes #0 = { alwaysinline }
+ """,
+            "entry",
+        ),
+        Cvoid,
+        Tuple{Ptr{Cvoid}},
+        Ptr{Cvoid}(ptr),
+    )
+    return nothing
+end
+
+function prefetch_llc(ptr::Ptr)
+    Base.@_inline_meta
+    Base.llvmcall(
+        (
             raw"""
-  %val = inttoptr i64 %0 to i8*
-  call void asm sideeffect "prefetcht1 $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
-  ret void
-  """,
-            Cvoid,
-            Tuple{Ptr{Cvoid}},
-            Ptr{Cvoid}(ptr),
-        )
-        return nothing
-    end
+ define void @entry(i64) #0 {
+ top:
+     %val = inttoptr i64 %0 to i8*
+     call void asm sideeffect "prefetcht1 $0", "*m,~{dirflag},~{fpsr},~{flags}"(i8* nonnull %val)
+     ret void
+ }
+
+ attributes #0 = { alwaysinline }
+ """,
+            "entry",
+        ),
+        Cvoid,
+        Tuple{Ptr{Cvoid}},
+        Ptr{Cvoid}(ptr),
+    )
+    return nothing
 end
 
 function prefetch(
@@ -318,7 +286,7 @@ function prefetch(
     # Need to prefetch the entire vector
     # Compute how many cache lines are needed.
     # Divide the number of bytes by 64 to get cache lines.
-    cache_lines = sizeof(T) >> 6
+    cache_lines = cdiv(sizeof(T), 64)
     ptr = pointer(A, i)
     for j in Base.OneTo(cache_lines)
         f(ptr + 64 * (j - 1))
@@ -327,11 +295,15 @@ function prefetch(
 end
 
 function unsafe_prefetch(A::AbstractVector{T}, f::F = _Base.prefetch) where {T <: Number, F}
-    cache_lines = length(A) >> 6
-    ptr = pointer(A)
+    return unsafe_prefetch(pointer(A), length(A), f)
+end
+
+function unsafe_prefetch(ptr::Ptr{T}, len::Integer, f::F = _Base.prefetch) where {T <: Number, F}
+    cache_lines = cdiv(len, 64)
     for j in Base.OneTo(cache_lines)
         f(ptr + 64 * (j - 1))
     end
+    return nothing
 end
 
 #####

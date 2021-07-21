@@ -137,7 +137,7 @@ function DiskANNRunner(
     index::DiskANNIndex,
     search_list_size;
     executor::F = single_thread,
-    masktype::U = IDMSB(),
+    masktype::U = DistanceLSB(),
 ) where {F,U}
     I = eltype(index.graph)
     D = costtype(index.metric, index.data)
@@ -232,9 +232,7 @@ function _Base.search(
         algmax = getdistance(maximum(algo))
 
         # Prefetch potential next neigbors.
-        if !done(algo)
-            unsafe_prefetch(LightGraphs.outneighbors(graph, getid(unsafe_peek(algo))))
-        end
+        !done(algo) && unsafe_prefetch(graph, getid(unsafe_peek(algo)))
 
         # Distance computations
         for v in neighbors
@@ -245,11 +243,7 @@ function _Base.search(
 
             ## only bother to add if it's better than the worst currently tracked.
             if d < algmax || !isfull(algo)
-                # "maybe_pushcandidate!" will return "true" if the vertex we just
-                # added is the best unexpanded neighbor.
-                if maybe_pushcandidate!(algo, Neighbor(algo, v, d))
-                    unsafe_prefetch(LightGraphs.outneighbors(graph, v))
-                end
+                maybe_pushcandidate!(algo, Neighbor(algo, v, d))
                 algmax = getdistance(maximum(algo))
             end
         end

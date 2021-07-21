@@ -95,8 +95,8 @@ function load(::Type{DefaultAdjacencyList{T}}, io::IO) where {T}
 end
 
 function load(
-    ::Type{FlatAdjacencyList{T}}, io::IO; pad_to = nothing, allocator = stdallocator
-) where {T}
+    ::Type{U}, io::IO; pad_to = nothing, allocator = stdallocator
+) where {T, U <: AbstractFlatAdjacencyList{T}}
     @unpack elsize, nv, ne, max_degree = read_header(io)
     @assert elsize == sizeof(T)
 
@@ -114,7 +114,7 @@ function load(
     read!(io, outdegrees)
 
     # Allocate destination array.
-    g = UniDirectedGraph{T}(FlatAdjacencyList{T}(nv, max_degree; allocator))
+    g = UniDirectedGraph{T}(U(nv, max_degree; allocator))
     buffer = T[]
     ProgressMeter.@showprogress 1 for v in 1:nv
         resize!(buffer, outdegrees[v])

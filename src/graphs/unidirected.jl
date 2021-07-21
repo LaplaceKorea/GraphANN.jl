@@ -135,6 +135,18 @@ end
 # Start with the easy ones
 LightGraphs.nv(x::UniDirectedGraph) = length(fadj(x))
 LightGraphs.ne(x::UniDirectedGraph) = iszero(LightGraphs.nv(x)) ? 0 : sum(length, fadj(x))
+function LightGraphs.ne(x::UniDirectedGraph{T,SuperFlatAdjacencyList{T}}) where {T}
+    nv = LightGraphs.nv(x)
+    iszero(nv) && return 0
+    matrix = fadj(x).adj
+
+    sums = ThreadLocal(0)
+    dynamic_thread(Base.OneTo(nv), 2^16) do i
+        sums[] += matrix[1,i]
+    end
+    return sum(getall(sums))
+end
+
 LightGraphs.outneighbors(x::UniDirectedGraph, v::Integer) = fadj(x, v)
 LightGraphs.vertices(x::UniDirectedGraph) = Base.OneTo(LightGraphs.nv(x))
 
@@ -220,4 +232,4 @@ Efficiently replace the out neighbors of `v` with the contents of `A`.
 **Warning**: Vector `A` **may** be mutated as a side-effect of calling this function.
 """
 Base.copyto!(g::UniDirectedGraph, v, A::AbstractVector) = copyto!(fadj(g), v, A)
-
+_Base.unsafe_prefetch(g::UniDirectedGraph, v) = unsafe_prefetch(fadj(g), v)

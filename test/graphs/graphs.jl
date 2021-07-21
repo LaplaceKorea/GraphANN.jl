@@ -60,45 +60,52 @@
     ##### Now, try with the Flat adjacency list
     #####
 
-    # Graph with 5 nodes, maximum of 2 out edges per node
-    adj = GraphANN.FlatAdjacencyList{UInt32}(5, 2)
-    g = GraphANN.UniDirectedGraph{UInt32}(adj)
-    @test nv(g) == 5
-    @test ne(g) == 0
+    list_types = [
+        GraphANN.FlatAdjacencyList{UInt32},
+        GraphANN.SuperFlatAdjacencyList{UInt32},
+    ]
 
-    @test has_vertex(g, 0) == false
-    @test has_vertex(g, 1) == true
-    @test has_vertex(g, 5) == true
-    @test has_vertex(g, 6) == false
+    for list_type in list_types
+        # Graph with 5 nodes, maximum of 2 out edges per node
+        adj = list_type(5, 2)
+        g = GraphANN.UniDirectedGraph{UInt32}(adj)
+        @test nv(g) == 5
+        @test ne(g) == 0
 
-    degree = add_edge!(g, 1, 5)
-    @test degree == 1
-    @test ne(g) == 1
-    @test has_edge(g, 1, 5)
-    @test has_edge(g, 5, 1) == false
+        @test has_vertex(g, 0) == false
+        @test has_vertex(g, 1) == true
+        @test has_vertex(g, 5) == true
+        @test has_vertex(g, 6) == false
 
-    @test outneighbors(g, 1) == [5]
-    @test outneighbors(g, 5) == []
-    @test collect(inneighbors(g, 1)) == []
-    @test collect(inneighbors(g, 5)) == [1]
+        degree = add_edge!(g, 1, 5)
+        @test degree == 1
+        @test ne(g) == 1
+        @test has_edge(g, 1, 5)
+        @test has_edge(g, 5, 1) == false
 
-    # Test inference properties of edge iter
-    @test eltype(edges(g)) <: LightGraphs.SimpleGraphs.SimpleDiGraphEdge
+        @test outneighbors(g, 1) == [5]
+        @test outneighbors(g, 5) == []
+        @test collect(inneighbors(g, 1)) == []
+        @test collect(inneighbors(g, 5)) == [1]
 
-    degree = add_edge!(g, 1, 2)
-    @test degree == 2
-    @test ne(g) == 2
-    @test has_edge(g, 1, 2)
-    @test outneighbors(g, 1) == [2,5]
+        # Test inference properties of edge iter
+        @test eltype(edges(g)) <: LightGraphs.SimpleGraphs.SimpleDiGraphEdge
 
-    # Now - we shouldn't be able to add another edge to vertex 1
-    degree = add_edge!(g, 1, 3)
-    @test degree == 2
-    @test ne(g) == 2
-    @test has_edge(g, 1, 3) == false
+        degree = add_edge!(g, 1, 2)
+        @test degree == 2
+        @test ne(g) == 2
+        @test has_edge(g, 1, 2)
+        @test outneighbors(g, 1) == [2,5]
 
-    # Try the new sorted copy
-    A = UInt32.([1,2,3,4,5])
-    copyto!(g, 4, A)
-    @test outneighbors(g, 4) == [1,2]
+        # Now - we shouldn't be able to add another edge to vertex 1
+        degree = add_edge!(g, 1, 3)
+        @test degree == 2
+        @test ne(g) == 2
+        @test has_edge(g, 1, 3) == false
+
+        # Try the new sorted copy
+        A = UInt32.([1,2,3,4,5])
+        copyto!(g, 4, A)
+        @test outneighbors(g, 4) == [1,2]
+    end
 end
