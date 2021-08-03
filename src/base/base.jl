@@ -169,4 +169,10 @@ struct MetaGraph{G,D}
     data::D
 end
 
+#####
+##### Cuckoo Filter
+#####
+
+include("cuckoo.jl")
+
 end

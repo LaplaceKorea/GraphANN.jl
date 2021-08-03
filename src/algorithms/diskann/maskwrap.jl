@@ -47,7 +47,10 @@ unwrap(x::MaskWrap) = x.neighbor
 _Base.getid(x::MaskWrap) = getid(x.neighbor)
 @inline _Base.getid(x::MaskWrap{IDMSB}) = clearmsb(getid(x.neighbor))
 _Base.getdistance(x::MaskWrap) = getdistance(x.neighbor)
-_Base.getdistance(x::MaskWrap{DistanceLSB}) = clearlsb(getdistance(x.neighbor))
+
+# NOTE: Don't need this method in order to be correct.
+# Thus, we don't need to mask whenever we unwrap distance fields.
+#_Base.getdistance(x::MaskWrap{DistanceLSB}) = clearlsb(getdistance(x.neighbor))
 
 isvisited(x::MaskWrap{DistanceLSB}) = isone(getlsb(getdistance(x.neighbor)))
 @inline isvisited(x::MaskWrap{IDMSB}) = isone(getmsb(getid(x.neighbor)))

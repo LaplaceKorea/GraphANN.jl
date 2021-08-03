@@ -104,8 +104,7 @@ end
 
 _Base.idtype(::DiskANNRunner{I}) where {I} = I
 _Base.costtype(::DiskANNRunner{I,D}) where {I,D} = D
-function _Base.Neighbor(x::DiskANNRunner, id::Integer, distance)
-    I, D = idtype(x), costtype(x)
+function _Base.Neighbor(x::DiskANNRunner{I,D}, id::Integer, distance) where {I,D}
     # Use `unsafe_trunc` to be slightly faster.
     # In the body of the search routine, we shouldn't see any actual values that will
     # cause the undefined behavior of `unsafe_trunc`.
