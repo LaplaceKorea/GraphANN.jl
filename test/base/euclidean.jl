@@ -81,8 +81,14 @@ end
 
     # now, test our specializations for UInt8 work
     @test find_distance_type(UInt8, UInt8) == Int16
+    @test find_distance_type(UInt8, Int8) == Int16
+    @test find_distance_type(Int8, UInt8) == Int16
+    @test find_distance_type(Int8, Int8) == Int16
+
     @test find_distance_type(UInt8, Int16) == Int16
+    @test find_distance_type(Int8, Int16) == Int16
     @test find_distance_type(Int16, UInt8) == Int16
+    @test find_distance_type(Int16, Int8) == Int16
 
     # Manually try out some promotions - especially check for inference.
     simd_type = GraphANN._Base.simd_type
@@ -135,29 +141,20 @@ end
 
 @testset "Testing Euclidean Calculations" begin
     # Lets do some distance calculations
-    scale = 100
+    lengths = [100, 128]
+    left_types = [Float32, UInt8, Int8]
+    right_types = [Float32, UInt8, Int8]
+    #scale = 100
     metric = GraphANN.Euclidean()
-    x = Vector{SVector{128,Float32}}(undef, 2)
-    for i in 1:50000
-        x[1] = scale .* rand(SVector{128,Float32})
-        x[2] = scale .* rand(SVector{128,Float32})
-        test_euclidean(x)
-    end
 
-    x = Vector{SVector{128,UInt8}}(undef, 2)
-    for i in 1:50000
-        x[1] = rand(SVector{128,UInt8})
-        x[2] = rand(SVector{128,UInt8})
-        test_euclidean(x)
-    end
-
-    # Mixed types
-    x = Vector{SVector{128,UInt8}}(undef, 1)
-    y = Vector{SVector{128,Float32}}(undef, 1)
-    for i in 1:50000
-        x[1] = rand(SVector{128,UInt8})
-        y[1] = scale .* rand(SVector{128,Float32})
-        test_euclidean(x, y)
+    for (left, right, len) in Iterators.product(left_types, right_types, lengths)
+        x = Vector{SVector{len,left}}(undef, 1)
+        y = Vector{SVector{len,right}}(undef, 1)
+        for i in 1:10000
+            x[1] = rand(SVector{len,left})
+            y[1] = rand(SVector{len,right})
+            test_euclidean(x,y)
+        end
     end
 
     # Scalar broadcasting.

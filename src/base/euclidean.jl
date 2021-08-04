@@ -128,29 +128,48 @@ Base.length(::ValueWrap{V,K}) where {V,K} = K
 #####
 
 """
-    PtrWrap{V <: SIMDType, K, N, T} <: AbstractWrap{V, K}
+    PtrWrap{V <: SIMDType, K, N, T, P} <: AbstractWrap{V, K}
 
 Wrap a pointer to data that we which to interpret as `K` copies of a `SIMD.Vec{N,T}` that
 will be converted to `V` upon calling `getindex`.
+
+The last type parameter `P` is the number of elements to load from the last chunk in the
+case that the original `SVector` was an odd size. If no masking is required, this parameter
+will be `0`.
 """
-struct PtrWrap{V<:SIMDType,K,N,T} <: AbstractWrap{V,K}
+struct PtrWrap{V<:SIMDType,K,N,T,P} <: AbstractWrap{V,K}
     ptr::Ptr{SIMD.Vec{N,T}}
 end
 unwrap(x::PtrWrap) = x.ptr
 
 function PtrWrap{SIMD.Vec{N1,T1}}(ptr::Ptr{SVector{N2,T2}}) where {N1,T1,N2,T2}
+    # Number of segments
     K = cdiv(N2, N1)
-    return PtrWrap{SIMD.Vec{N1,T1},K,N1,T2}(convert(Ptr{SIMD.Vec{N1,T2}}, ptr))
+    # Number of unpadded bits for the last load
+    P = mod(N2, N1)
+    return PtrWrap{SIMD.Vec{N1,T1},K,N1,T2,P}(convert(Ptr{SIMD.Vec{N1,T2}}, ptr))
 end
 
-Base.@propagate_inbounds function Base.getindex(x::PtrWrap{V,K,N,T}, i) where {V,K,N,T}
-    return convert(V, unsafe_load(unwrap(x) + (i - 1) * sizeof(SIMD.Vec{N,T})))
+# No masks required
+function Base.getindex(x::PtrWrap{V,K,N,T,0}, i) where {V,K,N,T}
+    return convert(
+        V, SIMD.vload(SIMD.Vec{N,T}, Ptr{T}(unwrap(x) + (i - 1) * sizeof(SIMD.Vec{N,T})))
+    )
 end
 
-Base.@propagate_inbounds function Base.getindex(
-    x::PtrWrap{SIMD.Vec{N,T},<:Any,N,T}, i
-) where {N,T}
-    return unsafe_load(unwrap(x) + (i - 1) * sizeof(SIMD.Vec{N,T}))
+# Maybe mask the the last load
+@generated function __mask(::PtrWrap{V,K,N,T,P}) where {V,K,N,T,P}
+    # Only load the lower entries
+    tup = ntuple(i -> i <= P ? true : false, N)
+    return :(SIMD.Vec($tup))
+end
+
+function Base.getindex(x::PtrWrap{V,K,N,T,P}, i) where {V,K,N,T,P}
+    mask = ifelse(i == K, __mask(x), SIMD.Vec{N,Bool}(true))
+    vec = SIMD.vload(
+        SIMD.Vec{N,T}, Ptr{T}(unwrap(x) + (i - 1) * sizeof(SIMD.Vec{N,T})), mask
+    )
+    return convert(V, vec)
 end
 
 Base.length(::PtrWrap{V,K}) where {V,K} = K
@@ -211,7 +230,11 @@ distance_type(::Type{A}, ::Type{B}) where {A,B} = nothing
 
 # Hijack short ints to allow emission of VNNI instructions.
 distance_type(::Type{UInt8}, ::Type{UInt8}) = Int16
+distance_type(::Type{Int8}, ::Type{UInt8}) = Int16
+distance_type(::Type{Int8}, ::Type{Int8}) = Int16
+
 distance_type(::Type{UInt8}, ::Type{Int16}) = Int16
+distance_type(::Type{Int8}, ::Type{Int16}) = Int16
 
 """
     accum_type(x)
