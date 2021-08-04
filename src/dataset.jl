@@ -60,6 +60,7 @@ function split(
 
     chunks = Vector{typeof(data)}()
     fast_partitions_allocated = 0
+    slow_partitions_allocated = 0
     for batch in batched(eachindex(data), elements_per_partition)
         if fast_partitions_allocated < num_fast_partitions
             chunk = fast_allocator(T, length(batch))
@@ -67,6 +68,7 @@ function split(
             println("Fast")
         else
             chunk = slow_allocator(T, length(batch))
+            slow_partitions_allocated += 1
             println("Slow")
         end
 
@@ -76,5 +78,6 @@ function split(
     end
 
     # TODO: More elegant log2 business ...
-    return SplitDataset{splitsize - Int(log2(sizeof(T)))}(chunks)
+    #return SplitDataset{splitsize - Int(log2(sizeof(T)))}(chunks)
+    return SplitDataset{splitsize - fast_partitions_allocated - slow_partitions_allocated}(chunks)
 end
