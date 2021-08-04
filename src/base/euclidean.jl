@@ -139,7 +139,7 @@ end
 unwrap(x::PtrWrap) = x.ptr
 
 function PtrWrap{SIMD.Vec{N1,T1}}(ptr::Ptr{SVector{N2,T2}}) where {N1,T1,N2,T2}
-    K = div(N2, N1)
+    K = cdiv(N2, N1)
     return PtrWrap{SIMD.Vec{N1,T1},K,N1,T2}(convert(Ptr{SIMD.Vec{N1,T2}}, ptr))
 end
 

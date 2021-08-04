@@ -35,6 +35,14 @@
         @test _Base.fingerprintmask(Bucket{8,1}) == 0b1111_1111
         @test _Base.fingerprintmask(Bucket{12,1}) == 0b1111_1111_1111
 
+        @test length(Bucket{4,1}) == 16
+        @test length(Bucket{4,2}) == 32
+        @test length(Bucket{5,2}) == 12 * 2
+        @test length(Bucket{6,3}) == 10 * 3
+        @test length(Bucket{7,3}) == 9 * 3
+        @test length(Bucket{8,2}) == 8 * 2
+        @test length(Bucket{12,1}) == 5
+
         # Make sure we can match all positions within a 64-bit word.
         ntrials = 10
         for i in [4,5,6,7,8,12]
@@ -86,7 +94,7 @@
             GC.@preserve word begin
                 none_in(bucket, itr) = !any(x -> in(x, bucket), itr)
 
-                # Get for unique fingerprints
+                # Obtain unique fingerprints
                 fingerprints = UInt[]
                 num_fingerprints = _Base.fingerprints_per_word(typeof(bucket)) * nwords
                 mask = _Base.fingerprintmask(typeof(bucket))
@@ -119,6 +127,33 @@
                 # Adding existing fingerprints should work though since they already exist.
                 @test _Base.trypush!(bucket, first(fingerprints)) == true
             end
+        end
+    end
+
+    @testset "Testing Replacement" begin
+        _Base = GraphANN._Base
+        Bucket = _Base.Bucket
+
+        word = zeros(Int, 2)
+        bucket = Bucket{8,2}(pointer(word))
+
+        # Use an auxiliary vector as the groundtruth for stored fingerprints.
+        groundtruth = zeros(UInt64, _Base._size(bucket))
+        numtrials = 10000
+        for _ in 1:numtrials
+
+            fingerprint = rand(UInt64) & _Base.fingerprintmask(bucket)
+            while !in(fingerprint, bucket)
+                fingerprint = rand(UInt64) & _Base.fingerprintmask(bucket)
+            end
+
+            # Random replacement indices
+            big = mod(rand(UInt64), 2) + 1
+            little = mod(rand(UInt64), 8) + 1
+            old = _Base.unsafe_replace!(bucket, fingerprint, big, little)
+
+            @test old == groundtruth[little, big]
+            groundtruth[little, big] = fingerprint
         end
     end
 end
