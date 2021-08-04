@@ -12,7 +12,8 @@ import UnPack: @unpack
 import LightGraphs.SimpleGraphs.fadj
 
 # Top level file - include the implementation files.
-export DefaultAdjacencyList, FlatAdjacencyList, DenseAdjacencyList
+export DefaultAdjacencyList, DenseAdjacencyList
+export AbstractFlatAdjacencyList, FlatAdjacencyList, SuperFlatAdjacencyList
 include("adjacency.jl")
 
 export UniDirectedGraph

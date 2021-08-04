@@ -24,10 +24,24 @@ gettimer() = timer
 resettimer!() = TimerOutputs.reset_timer!(gettimer())
 
 #####
+##### Compiler Hints
+#####
+
+export @_nointerleave_meta
+macro _interleave_meta(n)
+    return Expr(
+        :loopinfo,
+        (Symbol("llvm.loop.interleave.count"), n),
+        (Symbol("llvm.loop.unroll.disable"), 2),
+    )
+end
+
+#####
 ##### Generic Distance
 #####
 
-export evaluate, prehook, build, search, search!
+export MaybePtr, evaluate, prehook, build, search, search!
+const MaybePtr{T} = Union{T,Ptr{<:T}}
 
 """
     evaluate(metric, x, y)
@@ -126,14 +140,6 @@ export threadcopy
 include("threading.jl")
 
 #####
-##### MinMaxHeap
-#####
-
-export BinaryMinMaxHeap,
-    destructive_extract!, popmax!, popmin!, _unsafe_maximum, _unsafe_minimum
-include("minmax_heap.jl")
-
-#####
 ##### Utilities
 #####
 
@@ -146,6 +152,7 @@ export recall
 export prefetch, prefetch_llc, unsafe_prefetch
 export BatchedRange, batched
 export Keeper, KeepLargest, KeepSmallest
+export destructive_extract!
 include("utils.jl")
 
 #####
@@ -161,5 +168,11 @@ struct MetaGraph{G,D}
     graph::G
     data::D
 end
+
+#####
+##### Cuckoo Filter
+#####
+
+include("cuckoo.jl")
 
 end

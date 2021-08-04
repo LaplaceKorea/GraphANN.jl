@@ -8,9 +8,10 @@ export load_graph, save_graph
 export load_vecs, save_vecs
 
 # local deps
-import .._Base: MetaGraph, stdallocator, medioid
+import .._Base: MetaGraph, stdallocator, medioid, dynamic_thread
 import .._Graphs: _Graphs, UniDirectedGraph
-import .._Graphs: DefaultAdjacencyList, FlatAdjacencyList, DenseAdjacencyList
+import .._Graphs: DefaultAdjacencyList, DenseAdjacencyList
+import .._Graphs: AbstractFlatAdjacencyList, FlatAdjacencyList, SuperFlatAdjacencyList
 import .._Trees: TreeNode, Tree, rootindices
 import ..Algorithms: DiskANNIndex
 
@@ -34,6 +35,7 @@ end
 
 export load, save, load_bin, save_bin
 include("native.jl")
+include("extra.jl")
 
 # Support for DiskANN generated binary files.
 include("diskann.jl")

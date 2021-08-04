@@ -68,9 +68,6 @@ function Base.show(io::IO, index::DiskANNIndex)
     return print(io, "Entry point index: ", index.startnode.index, ")")
 end
 
-struct HasPrefetching end
-struct NoPrefetching end
-
 """
     DiskANNRunner
 
@@ -97,35 +94,17 @@ Construct a `DiskANNRunner` with id-type `I` and distance-type `D` with the give
 
 See also: [`search`](@ref)
 """
-mutable struct DiskANNRunner{I<:Integer,D,T<:AbstractSet,P}
+mutable struct DiskANNRunner{I<:Integer,D,T<:AbstractSet,U<:AbstractMaskType}
     search_list_size::Int64
 
     # Pre-allocated buffer for the search list
-    #
-    # Strategy with the search list.
-    # Maintain the invariant that `best_unvisited ⊂ best`.
-    # `best_unvisited` will used to queue up nodes that have not yet been searched.
-    # Since it is a queue, we can easily find the minimum element.
-    #
-    # When popping off neighbors to get the number of elements in `best` under
-    # `search_list_size`, we will also need to pop items off `queue` IF there
-    # is a match.
-    best::BinaryMinMaxHeap{Neighbor{I,D}}
-    best_unvisited::BinaryMinMaxHeap{Neighbor{I,D}}
+    buffer::BestBuffer{U,I,D}
     visited::T
-
-    # Optional `prefetch_queue`.
-    # If `prefetch_queue === nothing` then no prefetching outside of the normal x86 prefetch
-    # instructions will be performed.
-    #
-    # Otherwise, queue must accept vertex IDs.
-    prefetch_queue::P
 end
 
 _Base.idtype(::DiskANNRunner{I}) where {I} = I
 _Base.costtype(::DiskANNRunner{I,D}) where {I,D} = D
-function _Base.Neighbor(x::DiskANNRunner, id::Integer, distance)
-    I, D = idtype(x), costtype(x)
+function _Base.Neighbor(x::DiskANNRunner{I,D}, id::Integer, distance) where {I,D}
     # Use `unsafe_trunc` to be slightly faster.
     # In the body of the search routine, we shouldn't see any actual values that will
     # cause the undefined behavior of `unsafe_trunc`.
@@ -133,18 +112,22 @@ function _Base.Neighbor(x::DiskANNRunner, id::Integer, distance)
 end
 
 function DiskANNRunner{I,D}(
-    search_list_size::Integer; executor::F = single_thread, prefetch_queue = nothing
-) where {I,D,F}
-    best = BinaryMinMaxHeap{Neighbor{I,D}}()
-    best_unvisited = BinaryMinMaxHeap{Neighbor{I,D}}()
-    visited = RobinSet{I}()
-    runner = DiskANNRunner{I,D,typeof(visited),typeof(prefetch_queue)}(
-        convert(Int, search_list_size), best, best_unvisited, visited, prefetch_queue
+    search_list_size::Integer; executor::F = single_thread, masktype::U = DistanceLSB()
+) where {I,D,F,U}
+    buffer = BestBuffer{U,I,D}(search_list_size)
+    visited = Set{I}()
+    runner = DiskANNRunner{I,D,typeof(visited),U}(
+        convert(Int, search_list_size), buffer, visited,
     )
 
     return threadlocal_wrap(executor, runner)
 end
-Base.resize!(runner::DiskANNRunner, val::Integer) = (runner.search_list_size = val)
+
+function Base.resize!(runner::DiskANNRunner, val::Integer)
+    runner.search_list_size = val
+    resize!(runner.buffer, val)
+end
+
 function Base.resize!(runner::ThreadLocal{<:DiskANNRunner}, val::Integer)
     return foreach(x -> resize!(x, val), getall(runner))
 end
@@ -153,112 +136,46 @@ function DiskANNRunner(
     index::DiskANNIndex,
     search_list_size;
     executor::F = single_thread,
-    prefetch_queue = nothing,
-) where {F}
+    masktype::U = DistanceLSB(),
+) where {F,U}
     I = eltype(index.graph)
     D = costtype(index.metric, index.data)
-    return DiskANNRunner{I,D}(search_list_size; executor, prefetch_queue)
+    return DiskANNRunner{I,D}(search_list_size; executor, masktype)
 end
-
-# Base prefetching on the existence of a non-nothing element in the prefetch queue
-hasprefetching(::DiskANNRunner{I,D,T,Nothing}) where {I,D,T} = NoPrefetching()
-hasprefetching(::DiskANNRunner{I,D,T,<:Any}) where {I,D,T} = HasPrefetching()
 
 # Prepare for another run.
 function Base.empty!(runner::DiskANNRunner)
-    empty!(runner.best)
-    empty!(runner.best_unvisited)
+    empty!(runner.buffer)
     return empty!(runner.visited)
 end
 
-Base.length(runner::DiskANNRunner) = length(runner.best)
-
+Base.length(runner::DiskANNRunner) = length(runner.buffer)
 visited!(runner::DiskANNRunner, vertex) = push!(runner.visited, getid(vertex))
 isvisited(runner::DiskANNRunner, vertex) = in(getid(vertex), runner.visited)
 getvisited(runner::DiskANNRunner) = runner.visited
 
 # Get the closest non-visited vertex
 # `unsafe_peek` will not remove top element. Unsafe because it assumes queue is nonempty.
-unsafe_peek(runner::DiskANNRunner) = @inbounds runner.best_unvisited.valtree[1]
-getcandidate!(runner::DiskANNRunner) = getcandidate!(runner, hasprefetching(runner))
-
-# no prefetching case
-getcandidate!(runner::DiskANNRunner, ::NoPrefetching) = popmin!(runner.best_unvisited)
-# prefetching case
-function getcandidate!(runner::DiskANNRunner, ::HasPrefetching)
-    @unpack best_unvisited, prefetch_queue = runner
-    candidate = popmin!(best_unvisited)
-
-    # If there's another candidate in the queue, try to prefetch it.
-    if !isempty(best_unvisited)
-        push!(prefetch_queue, getid(unsafe_peek(runner)))
-        _Prefetcher.commit!(prefetch_queue)
-    end
-
-    return candidate
-end
-
+unsafe_peek(runner::DiskANNRunner) = runner.buffer.entries[runner.buffer.bestunvisited]
+getcandidate!(runner::DiskANNRunner) = getcandidate!(runner.buffer)
 isfull(runner::DiskANNRunner) = length(runner) >= runner.search_list_size
 
-function maybe_pushcandidate!(runner::DiskANNRunner, vertex)
+function maybe_pushcandidate!(runner::DiskANNRunner, vertex::Neighbor)
     # If this has already been seen, don't do anything.
-    isvisited(runner, vertex) && return nothing
+    isvisited(runner, vertex) && return false
     return pushcandidate!(runner, vertex)
 end
 
-function pushcandidate!(runner::DiskANNRunner, vertex)
+function pushcandidate!(runner::DiskANNRunner, vertex::Neighbor)
     visited!(runner, vertex)
-    @unpack best, best_unvisited = runner
+    @unpack buffer = runner
 
-    # Since we have not yet visited this vertex, we have to add it both to `best` and
-    # `best_unvisited`,
-    push!(best, vertex)
-    push!(best_unvisited, vertex)
-
-    # This vertex is a candidate for prefetching if we pushed it right to the front of
-    # the queue.
-    if getid(unsafe_peek(runner)) == getid(vertex)
-        maybe_prefetch(runner, vertex)
-    end
-    return nothing
+    # Insert into queue
+    return insert!(buffer, vertex)
 end
 
-function maybe_prefetch(runner::DiskANNRunner, vertex)
-    return maybe_prefetch(runner, hasprefetching(runner), vertex)
-end
-# non-prefetching case
-maybe_prefetch(runner::DiskANNRunner, ::NoPrefetching, vertex) = nothing
-# prefetching case
-function maybe_prefetch(runner::DiskANNRunner, ::HasPrefetching, vertex)
-    @unpack prefetch_queue = runner
-    push!(prefetch_queue, getid(vertex))
-    return _Prefetcher.commit!(prefetch_queue)
-end
-
-done(runner::DiskANNRunner) = isempty(runner.best_unvisited)
-Base.maximum(runner::DiskANNRunner) = _unsafe_maximum(runner.best)
-
-# Bring the size of the best list down to `search_list_size`
-# TODO: check if type inference works properly.
-# The function `_unsafe_maximum` can return `nothing`, but Julia should be able to
-# handle that
-function reduce!(runner::DiskANNRunner)
-    # Keep ahold of the maximum element in the best_unvisited
-    # Since `best_unvisited` is a subset of `best`, we know that this top element lives
-    # in `best`.
-    # If the element we pull of the top of `best` matches the top of `best_unvisited`, then we
-    # need to pop `queue` as well and maintain a new best.
-    top = _unsafe_maximum(runner.best_unvisited)
-    while length(runner.best) > runner.search_list_size
-        vertex = popmax!(runner.best)
-
-        if top !== nothing && getid(vertex) == getid(top)
-            popmax!(runner.best_unvisited)
-            top = _unsafe_maximum(runner.best_unvisited)
-        end
-    end
-    return nothing
-end
+done(runner::DiskANNRunner) = done(runner.buffer)
+Base.maximum(runner::DiskANNRunner) = maximum(runner.buffer)
 
 """
     getresults!(runner::DiskANNRunner, num_neighbor) -> AbstractVector
@@ -266,7 +183,7 @@ end
 Return the top `num_neighbor` results from `runner`.
 """
 function getresults!(runner::DiskANNRunner, num_neighbors)
-    return destructive_extract!(runner.best, num_neighbors)
+    return view(runner.buffer.entries, Base.OneTo(num_neighbors))
 end
 
 #####
@@ -286,7 +203,7 @@ Callbacks is an optional [`DiskANNCallbacks`](@ref) struct to help with gatherin
 function _Base.search(
     algo::DiskANNRunner,
     index::DiskANNIndex,
-    query::AbstractVector{T},
+    query::MaybePtr{AbstractVector{T}},
     start::StartNode = index.startnode;
     callbacks = DiskANNCallbacks(),
     metric = getlocal(index.metric),
@@ -311,12 +228,14 @@ function _Base.search(
         # Prune
         # Do this here to allow the prefetched vectors time to arrive in the cache.
         getcandidate!(algo)
-        reduce!(algo)
         algmax = getdistance(maximum(algo))
+
+        # Prefetch potential next neigbors.
+        !done(algo) && unsafe_prefetch(graph, getid(unsafe_peek(algo)))
 
         # Distance computations
         for v in neighbors
-            # Perform distance query, and try to prefetch the next datapoint.
+            # Perform distance query, and try to trefetch the next datapoint.
             # NOTE: Checking if a vertex has been visited here is actually SLOWER than
             # deferring until after the distance comparison.
             @inbounds d = evaluate(metric, query, pointer(data, v))
@@ -324,6 +243,7 @@ function _Base.search(
             ## only bother to add if it's better than the worst currently tracked.
             if d < algmax || !isfull(algo)
                 maybe_pushcandidate!(algo, Neighbor(algo, v, d))
+                algmax = getdistance(maximum(algo))
             end
         end
 
@@ -360,11 +280,12 @@ function _Base.search!(
     dest::AbstractMatrix,
     algo::DiskANNRunner,
     index::DiskANNIndex,
-    queries::AbstractVector;
+    queries::AbstractVector{T};
     num_neighbors = 10,
     callbacks = DiskANNCallbacks(),
-)
-    for (col, query) in enumerate(queries)
+) where {T <: AbstractVector}
+    for col in eachindex(queries)
+        query = pointer(queries, col)
         # -- optional telemetry
         callbacks.prequery()
 
@@ -392,9 +313,9 @@ function _Base.search!(
     num_neighbors = 10,
     callbacks = DiskANNCallbacks(),
 )
-    dynamic_thread(getpool(tls), eachindex(queries), 8) do col
+    dynamic_thread(getpool(tls), eachindex(queries), 64) do col
         #_metric = _Base.distribute_distance(metric)
-        query = queries[col]
+        query = pointer(queries, col)
         algo = tls[]
 
         # -- optional telemetry

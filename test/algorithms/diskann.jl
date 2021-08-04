@@ -71,10 +71,11 @@ end
     @test maximum(x) === Neighbor(x, 2, 10.0)
 
     GraphANN.Algorithms.pushcandidate!(x, Neighbor(x, 3, -10.0))
-    @test maximum(x) === Neighbor(x, 2, 10.0)
-
-    GraphANN.Algorithms.reduce!(x)
     @test maximum(x) === Neighbor(x, 1, 0.0)
+    # @test maximum(x) === Neighbor(x, 2, 10.0)
+
+    # GraphANN.Algorithms.reduce!(x)
+    # @test maximum(x) === Neighbor(x, 1, 0.0)
 end
 
 @testset "Pruner" begin
@@ -133,8 +134,10 @@ end
     # Index generation using both Float32 and UInt8
     meta = test_index(dataset)
     test_index(dataset, GraphANN.FlatAdjacencyList{UInt32})
+    test_index(dataset, GraphANN.SuperFlatAdjacencyList{UInt32})
     test_index(dataset_u8)
     test_index(dataset_u8, GraphANN.FlatAdjacencyList{UInt32})
+    test_index(dataset_u8, GraphANN.SuperFlatAdjacencyList{UInt32})
 
     #####
     ##### Graph IO
@@ -161,10 +164,16 @@ end
         graphs_equal(flat, meta.graph)
         graphs_equal(flat, default)
 
+        superflat = GraphANN.load(GraphANN.SuperFlatAdjacencyList{UInt32}, original_save)
+        graphs_equal(superflat, meta.graph)
+        graphs_equal(superflat, default)
+        graphs_equal(superflat, flat)
+
         dense = GraphANN.load(GraphANN.DenseAdjacencyList{UInt32}, original_save)
         graphs_equal(dense, meta.graph)
         graphs_equal(dense, default)
         graphs_equal(dense, flat)
+        graphs_equal(dense, superflat)
     end
 end
 
@@ -325,5 +334,4 @@ end
     # latency.
     @test mean(get(latencies_st)) < mean(get(latencies_mt))
 end
-
 end

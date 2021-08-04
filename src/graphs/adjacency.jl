@@ -45,6 +45,7 @@ In addition, implementors of the `AbstractAdjacencyList` api must implement the 
 interface to iterate over the adjacencylist of each vertex in order.
 """
 abstract type AbstractAdjacencyList{T<:Integer} end
+_Base.unsafe_prefetch(fadj::AbstractAdjacencyList, i) = unsafe_prefetch(fadj[i])
 
 #####
 ##### Default implementation
@@ -98,6 +99,15 @@ end
 ##### Flat Implementation
 #####
 
+abstract type AbstractFlatAdjacencyList{T} <: AbstractAdjacencyList{T} end
+
+Base.push!(x::AbstractFlatAdjacencyList, v) = error("Cannot yet push to a FlatAdjacencyList!")
+
+function Base.iterate(x::AbstractFlatAdjacencyList, s = 1)
+    s > length(x) && return nothing
+    return @inbounds (x[s], s + 1)
+end
+
 """
 Adjacency list implementation that allocates adjacency lists as a single 2D array.
 Individual neighbor lists are found in the columns of the matrix, sorted from smallest to
@@ -109,7 +119,7 @@ to persistent memory.
 **Note**: Trying to additional neighbors to a vertex beyond the length of the columns will
 silently become a no-op.
 """
-struct FlatAdjacencyList{T} <: AbstractAdjacencyList{T}
+struct FlatAdjacencyList{T} <: AbstractFlatAdjacencyList{T}
     adj::Matrix{T}
     # Store how many neighbors each vertex actually has.
     lengths::Vector{T}
@@ -124,7 +134,9 @@ function FlatAdjacencyList{T}(
     nv::Integer, max_degree::Integer; allocator = stdallocator
 ) where {T}
     adj = allocator(T, max_degree, nv)
-    zero!(adj)
+    dynamic_thread(eachindex(adj), 8192) do i
+        @inbounds adj[i] = zero(T)
+    end
     lengths = zeros(T, nv)
     return FlatAdjacencyList{T}(adj, lengths)
 end
@@ -134,10 +146,8 @@ Base.length(x::FlatAdjacencyList) = size(x.adj, 2)
 Base.length(x::FlatAdjacencyList, i) = x.lengths[i]
 Base.empty!(x::FlatAdjacencyList, i) = (x.lengths[i] = 0)
 
-Base.push!(x::FlatAdjacencyList, v) = error("Cannot yet push to a FlatAdjacencyList!")
-
 # Use `unsafe_view` because `lenght` will bounds check for us.
-Base.getindex(x::FlatAdjacencyList, i) = Base.unsafe_view(x.adj, 1:length(x, i), i)
+Base.getindex(x::FlatAdjacencyList, i) = Base.unsafe_view(x.adj, 1:length(x, i), Int(i))
 
 # Can insert as long as the row is not completely full.
 caninsert(x::FlatAdjacencyList, i) = (length(x, i) < _max_degree(x))
@@ -175,6 +185,77 @@ function Base.copyto!(x::FlatAdjacencyList, v, A::AbstractVector)
     # Start index for `dst` pointer: Compute linear offset based on the length of each
     # column.
     dst = pointer(x.adj, (md * (v - 1)) + 1)
+    src = pointer(A)
+    unsafe_copyto!(dst, src, len)
+    return nothing
+end
+
+#####
+##### SuperFlatAdjacencyList
+#####
+
+# Like a FlatAdjacencyList, but the number of neighbors is stored inline
+struct SuperFlatAdjacencyList{T} <: AbstractFlatAdjacencyList{T}
+    adj::Matrix{T}
+    SuperFlatAdjacencyList{T}(adj::Matrix{T}) where {T} = new{T}(adj)
+end
+
+function SuperFlatAdjacencyList{T}(
+    nv::Integer, max_degree::Integer; allocator = stdallocator
+) where {T}
+    # Allocate one extra slot in each column to store the length as the first entry.
+    adj = allocator(T, max_degree + 1, nv)
+    dynamic_thread(eachindex(adj), 8192) do i
+        @inbounds adj[i] = zero(T)
+    end
+    return SuperFlatAdjacencyList{T}(adj)
+end
+
+function _Base.unsafe_prefetch(fadj::SuperFlatAdjacencyList, i)
+    sz = size(fadj.adj, 1)
+    offset = sz * i + 1
+    unsafe_prefetch(pointer(fadj.adj, offset), sz)
+end
+
+_max_degree(x::SuperFlatAdjacencyList) = size(x.adj, 1) - 1
+Base.length(x::SuperFlatAdjacencyList) = size(x.adj, 2)
+Base.length(x::SuperFlatAdjacencyList, i) = x.adj[1, i]
+setlength!(x::SuperFlatAdjacencyList, v, i) = x.adj[1, i] = v
+Base.empty!(x::SuperFlatAdjacencyList, i) = setlength!(x, 0, i)
+
+# Use `unsafe_view` because `lenght` will bounds check for us.
+Base.getindex(x::SuperFlatAdjacencyList, i) = Base.unsafe_view(x.adj, 2:(1+length(x, i)), Int(i))
+
+# Can insert as long as the row is not completely full.
+caninsert(x::SuperFlatAdjacencyList, i) = (length(x, i) < _max_degree(x))
+
+# This is marked unsafe, so assume bounds checking has already happened.
+# Note: This is why we define `caninsert`
+function unsafe_insert!(x::SuperFlatAdjacencyList, v, index, value)
+    @inbounds current_length = length(x, v)
+    vw = Base.unsafe_view(x.adj, 2:(current_length + 2), v)
+
+    num_to_move = current_length - index + 1
+    if !iszero(num_to_move)
+        src = pointer(vw, index)
+        dst = pointer(vw, index + 1)
+        unsafe_copyto!(dst, src, num_to_move)
+    end
+    @inbounds vw[index] = value
+    @inbounds setlength!(x, current_length + 1, v)
+    return nothing
+end
+
+function Base.copyto!(x::SuperFlatAdjacencyList, v, A::AbstractVector)
+    # Resize - make sure we don't copy too many things
+    md = _max_degree(x)
+    len = min(length(A), md)
+    setlength!(x, len, v)
+    sort!(A; alg = Base.QuickSort)
+
+    # Start index for `dst` pointer: Compute linear offset based on the length of each
+    # column.
+    dst = pointer(x.adj, ((md + 1) * (v - 1)) + 2)
     src = pointer(A)
     unsafe_copyto!(dst, src, len)
     return nothing
