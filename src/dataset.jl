@@ -61,7 +61,6 @@ function split_partition_size(::Type{T}, fastbytes, slack) where {T}
     s = ceil(Int, log2(fastbytes))
     bytes = _bytes(T, s)
     while (fastbytes - bytes * div(fastbytes, bytes)) > slack
-        x = fastbytes - bytes * div(fastbytes, bytes)
         s -= 1
         bytes = _bytes(T, s)
     end
