@@ -47,28 +47,60 @@ end
 ##### Top Constructor
 #####
 
+_bytes(::Type{T}, s) where {T} = sizeof(T) * 2^s
+
+"""
+    split_partition_size(::Type{T}, fastbytes, slack) -> NamedTuple
+
+Compute the largest partition size (expressed as the exponent for a power of 2) that can
+be used to partition a dataset with element type `T` such that an integer number of
+partitions can be allocated in fewer than `fastbytes` bytes without losing more than `slack`
+bytes.
+"""
+function split_partition_size(::Type{T}, fastbytes, slack) where {T}
+    s = ceil(Int, log2(fastbytes))
+    bytes = _bytes(T, s)
+    while (fastbytes - bytes * div(fastbytes, bytes)) > slack
+        x = fastbytes - bytes * div(fastbytes, bytes)
+        s -= 1
+        bytes = _bytes(T, s)
+    end
+
+    bytes_lost = fastbytes - bytes * div(fastbytes, bytes)
+    return (
+        partition_size = s,
+        num_fast_partitions = div(fastbytes, bytes),
+        bytes_lost = bytes_lost,
+    )
+end
+
+"""
+    split(data, partition_size, num_fast_partitions; [fast_allocator], [slow_allocator])
+
+Split the dataset into partitions with `num_fast_partitions` allocated by the
+`fast_allocator` and the remainder allocated by the `slow_allocator`.
+
+Each partition will hold `2 ^ partition_size` elements.
+
+Arguments `partition_size` and `num_fast_partitions` should come from the
+[`split_partition_size`](@ref) method.
+"""
 function split(
     data::AbstractVector{T},
-    splitsize::Integer,
-    max_fast_bytes::Integer;
+    partition_size::Integer,
+    num_fast_partitions::Integer;
     fast_allocator = stdallocator,
     slow_allocator = stdallocator,
 ) where {T}
-    # Find appropriate split size.
-    num_fast_partitions = div(max_fast_bytes, 2^splitsize)
-    elements_per_partition = div(2^splitsize, sizeof(T))
-
     chunks = Vector{typeof(data)}()
     fast_partitions_allocated = 0
-    slow_partitions_allocated = 0
-    for batch in batched(eachindex(data), elements_per_partition)
+    for batch in batched(eachindex(data), 2^partition_size)
         if fast_partitions_allocated < num_fast_partitions
             chunk = fast_allocator(T, length(batch))
             fast_partitions_allocated += 1
             println("Fast")
         else
             chunk = slow_allocator(T, length(batch))
-            slow_partitions_allocated += 1
             println("Slow")
         end
 
@@ -76,8 +108,5 @@ function split(
         chunk .= view(data, batch)
         push!(chunks, chunk)
     end
-
-    # TODO: More elegant log2 business ...
-    #return SplitDataset{splitsize - Int(log2(sizeof(T)))}(chunks)
-    return SplitDataset{splitsize - fast_partitions_allocated - slow_partitions_allocated}(chunks)
+    return SplitDataset{partition_size}(chunks)
 end

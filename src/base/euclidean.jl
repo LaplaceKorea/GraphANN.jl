@@ -158,6 +158,8 @@ function Base.getindex(x::PtrWrap{V,K,N,T,0}, i) where {V,K,N,T}
 end
 
 # Maybe mask the the last load
+# This may not need to be `@generated`, but I don't really want to have to rely on
+# constant propagation for this.
 @generated function __mask(::PtrWrap{V,K,N,T,P}) where {V,K,N,T,P}
     # Only load the lower entries
     tup = ntuple(i -> i <= P ? true : false, N)
@@ -230,11 +232,11 @@ distance_type(::Type{A}, ::Type{B}) where {A,B} = nothing
 
 # Hijack short ints to allow emission of VNNI instructions.
 distance_type(::Type{UInt8}, ::Type{UInt8}) = Int16
-distance_type(::Type{Int8}, ::Type{UInt8}) = Int16
-distance_type(::Type{Int8}, ::Type{Int8}) = Int16
+distance_type(::Type{Int8},  ::Type{UInt8}) = Int16
+distance_type(::Type{Int8},  ::Type{Int8}) = Int16
 
 distance_type(::Type{UInt8}, ::Type{Int16}) = Int16
-distance_type(::Type{Int8}, ::Type{Int16}) = Int16
+distance_type(::Type{Int8},  ::Type{Int16}) = Int16
 
 """
     accum_type(x)
