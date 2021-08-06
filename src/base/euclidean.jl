@@ -231,12 +231,8 @@ end
 distance_type(::Type{A}, ::Type{B}) where {A,B} = nothing
 
 # Hijack short ints to allow emission of VNNI instructions.
-distance_type(::Type{UInt8}, ::Type{UInt8}) = Int16
-distance_type(::Type{Int8},  ::Type{UInt8}) = Int16
-distance_type(::Type{Int8},  ::Type{Int8}) = Int16
-
-distance_type(::Type{UInt8}, ::Type{Int16}) = Int16
-distance_type(::Type{Int8},  ::Type{Int16}) = Int16
+const SMALL_INTS = Union{Int8,UInt8,Int16}
+distance_type(::Type{A}, ::Type{B}) where {A <: SMALL_INTS, B <: SMALL_INTS} = Int16
 
 """
     accum_type(x)
@@ -274,8 +270,8 @@ function evaluate(
     metric::Euclidean, a::MaybePtr{A}, b::MaybePtr{B}
 ) where {A<:SVector,B<:SVector}
     Base.@_inline_meta
-    T = simd_type(A, B)
-    return evaluate(metric, wrap(T, a), wrap(T, b))
+    V = simd_type(A, B)
+    return evaluate(metric, wrap(V, a), wrap(V, b))
 end
 
 function evaluate(::Euclidean, a::AbstractWrap{V,K}, b::AbstractWrap{V,K}) where {V,K}

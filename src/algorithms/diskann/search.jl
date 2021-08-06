@@ -150,8 +150,14 @@ function Base.empty!(runner::DiskANNRunner)
 end
 
 Base.length(runner::DiskANNRunner) = length(runner.buffer)
-visited!(runner::DiskANNRunner, vertex) = push!(runner.visited, getid(vertex))
-isvisited(runner::DiskANNRunner, vertex) = in(getid(vertex), runner.visited)
+
+visited!(runner::DiskANNRunner, vertex, ::Nothing) = push!(runner.visited, getid(vertex))
+visited!(runner::DiskANNRunner, vertex, token) = _Base.set_with_token!(runner.visited, getid(vertex), token)
+
+function isvisited(runner::DiskANNRunner, vertex)
+    return _Base.in_with_token(getid(vertex), runner.visited)
+end
+
 getvisited(runner::DiskANNRunner) = runner.visited
 
 # Get the closest non-visited vertex
@@ -162,12 +168,14 @@ isfull(runner::DiskANNRunner) = length(runner) >= runner.search_list_size
 
 function maybe_pushcandidate!(runner::DiskANNRunner, vertex::Neighbor)
     # If this has already been seen, don't do anything.
-    isvisited(runner, vertex) && return false
-    return pushcandidate!(runner, vertex)
+    seen, token = isvisited(runner, vertex)
+    seen && return false
+
+    return pushcandidate!(runner, vertex, token)
 end
 
-function pushcandidate!(runner::DiskANNRunner, vertex::Neighbor)
-    visited!(runner, vertex)
+function pushcandidate!(runner::DiskANNRunner, vertex::Neighbor, token = nothing)
+    visited!(runner, vertex, token)
     @unpack buffer = runner
 
     # Insert into queue

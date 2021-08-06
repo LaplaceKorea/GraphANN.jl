@@ -461,3 +461,29 @@ end
 ziptimes(a::Number, b::Number) = a * b
 ziptimes(a::AbstractVector, b::AbstractVector) = a .* b
 
+#####
+##### Set Utils
+#####
+
+in_with_token(key, h::Set) = in_with_token(key, h.dict)
+function in_with_token(key, h::Dict{K,V}) where {K,V}
+    index = Base.ht_keyindex2!(h, key)
+    return (index >= 0, index)
+end
+
+function set_with_token!(h::Set{K}, key::K, index) where {K}
+    return set_with_token!(h.dict, nothing, key, index)
+end
+
+function set_with_token!(h::Dict{K,V}, v0, key::K, index) where {K,V}
+    v = convert(V, v0)
+    if index > 0
+        h.age += 1
+        @inbounds h.keys[index] = key
+        @inbounds h.vals[index] = v
+    else
+        @inbounds Base._setindex!(h, v, key, -index)
+    end
+
+    return h
+end
