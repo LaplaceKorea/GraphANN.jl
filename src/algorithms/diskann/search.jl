@@ -58,8 +58,12 @@ struct DiskANNIndex{G,D<:AbstractVector,S<:StartNode,M}
 end
 
 # constructor
-function DiskANNIndex(graph, data::AbstractVector, metric = Euclidean())
-    return DiskANNIndex(graph, data, StartNode(data), metric)
+_forward(_, x::StartNode) = x
+_forward(data, index::Integer) = StartNode(index, data[index])
+function DiskANNIndex(
+    graph, data::AbstractVector, metric = Euclidean(); startnode = StartNode(data)
+)
+    return DiskANNIndex(graph, data, _forward(data, startnode), metric)
 end
 _Base.Neighbor(::DiskANNIndex, id::T, distance::D) where {T,D} = Neighbor{T,D}(id, distance)
 
@@ -117,7 +121,7 @@ function DiskANNRunner{I,D}(
     buffer = BestBuffer{U,I,D}(search_list_size)
     visited = Set{I}()
     runner = DiskANNRunner{I,D,typeof(visited),U}(
-        convert(Int, search_list_size), buffer, visited,
+        convert(Int, search_list_size), buffer, visited
     )
 
     return threadlocal_wrap(executor, runner)
@@ -125,7 +129,7 @@ end
 
 function Base.resize!(runner::DiskANNRunner, val::Integer)
     runner.search_list_size = val
-    resize!(runner.buffer, val)
+    return resize!(runner.buffer, val)
 end
 
 function Base.resize!(runner::ThreadLocal{<:DiskANNRunner}, val::Integer)
@@ -151,13 +155,8 @@ end
 
 Base.length(runner::DiskANNRunner) = length(runner.buffer)
 
-visited!(runner::DiskANNRunner, vertex, ::Nothing) = push!(runner.visited, getid(vertex))
-visited!(runner::DiskANNRunner, vertex, token) = _Base.set_with_token!(runner.visited, getid(vertex), token)
-
-function isvisited(runner::DiskANNRunner, vertex)
-    return _Base.in_with_token(getid(vertex), runner.visited)
-end
-
+visited!(runner::DiskANNRunner, vertex) = push!(runner.visited, getid(vertex))
+isvisited(runner::DiskANNRunner, vertex) = in(getid(vertex), runner.visited)
 getvisited(runner::DiskANNRunner) = runner.visited
 
 # Get the closest non-visited vertex
@@ -168,14 +167,12 @@ isfull(runner::DiskANNRunner) = length(runner) >= runner.search_list_size
 
 function maybe_pushcandidate!(runner::DiskANNRunner, vertex::Neighbor)
     # If this has already been seen, don't do anything.
-    seen, token = isvisited(runner, vertex)
-    seen && return false
-
-    return pushcandidate!(runner, vertex, token)
+    isvisited(runner, vertex) && return false
+    return pushcandidate!(runner, vertex)
 end
 
-function pushcandidate!(runner::DiskANNRunner, vertex::Neighbor, token = nothing)
-    visited!(runner, vertex, token)
+function pushcandidate!(runner::DiskANNRunner, vertex::Neighbor)
+    visited!(runner, vertex)
     @unpack buffer = runner
 
     # Insert into queue
@@ -291,7 +288,7 @@ function _Base.search!(
     queries::AbstractVector{T};
     num_neighbors = 10,
     callbacks = DiskANNCallbacks(),
-) where {T <: AbstractVector}
+) where {T<:AbstractVector}
     for col in eachindex(queries)
         query = pointer(queries, col)
         # -- optional telemetry
