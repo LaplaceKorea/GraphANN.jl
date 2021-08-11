@@ -34,8 +34,8 @@ struct StartNode{U,T}
     value::T
 end
 
-function StartNode(dataset::AbstractVector)
-    index = medioid(dataset)
+function StartNode(dataset::AbstractVector; metric = Euclidean())
+    index = medioid(dataset; metric)
     return StartNode(index, dataset[index])
 end
 
@@ -61,7 +61,7 @@ end
 _forward(_, x::StartNode) = x
 _forward(data, index::Integer) = StartNode(index, data[index])
 function DiskANNIndex(
-    graph, data::AbstractVector, metric = Euclidean(); startnode = StartNode(data)
+    graph, data::AbstractVector, metric = Euclidean(); startnode = StartNode(data; metric)
 )
     return DiskANNIndex(graph, data, _forward(data, startnode), metric)
 end

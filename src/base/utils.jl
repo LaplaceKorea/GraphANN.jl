@@ -170,23 +170,44 @@ end
 #####
 
 """
-    medioid(dataset) -> Int64
+    medioid(dataset; [metric], [blocksize]) -> Int64
 
 Return the index of the element in `dataset` that is nearest to the true `medioid` of the
 dataset.
+Keyword `blocksize` is the size where the algorithm switches from pairwise summation to
+linear summation and is used for numerical stability purposes.
 
 The `medioid` is defined as the element-wise mean of all items in the dataset.
 """
-function medioid(data::AbstractVector{SVector{N,T}}) where {N,T}
+function medioid(
+    data::AbstractVector{SVector{N,T}}; metric = Euclidean(), blocksize = 1024
+) where {N,T}
     # Thread to make fast for larger datasets.
     # Also, use floating-point for accumulation to avoid overflow errors.
     # It's not perfect, but probably okay.
     tls = ThreadLocal(zero(SVector{N,Float32}))
-    dynamic_thread(data, 1024) do i
-        tls[] += i
+    batchsize = cdiv(length(data), 5 * Threads.nthreads())
+    ranges = batched(eachindex(data), batchsize)
+
+    dynamic_thread(ranges) do range
+        tls[] += _sum_pairwise(view(data, range), blocksize)
     end
+
     medioid = sum(getall(tls)) / length(data)
-    return first(nearest_neighbor(medioid, data))
+    return first(nearest_neighbor(medioid, data; metric))
+end
+
+# Use pairwise summation to provide better numerical stability for large datasets.
+_sum_pairwise(x, blocksize) = _sum_pairwise(x, 1, lastindex(x), blocksize)
+function _sum_pairwise(x, start, stop, blocksize)
+    if start + blocksize > stop
+        return mapreduce(i -> toeltype(Float32, i), +, view(x, start:stop))
+    else
+        midpoint = div(start + stop, 2)
+        a = _sum_pairwise(x, start, midpoint, blocksize)
+        b = _sum_pairwise(x, midpoint + 1, stop, blocksize)
+        return a + b
+    end
 end
 
 #####
@@ -294,11 +315,13 @@ function prefetch(
     return nothing
 end
 
-function unsafe_prefetch(A::AbstractVector{T}, f::F = _Base.prefetch) where {T <: Number, F}
+function unsafe_prefetch(A::AbstractVector{T}, f::F = _Base.prefetch) where {T<:Number,F}
     return unsafe_prefetch(pointer(A), length(A), f)
 end
 
-function unsafe_prefetch(ptr::Ptr{T}, len::Integer, f::F = _Base.prefetch) where {T <: Number, F}
+function unsafe_prefetch(
+    ptr::Ptr{T}, len::Integer, f::F = _Base.prefetch
+) where {T<:Number,F}
     cache_lines = cdiv(len, 64)
     for j in Base.OneTo(cache_lines)
         f(ptr + 64 * (j - 1))
