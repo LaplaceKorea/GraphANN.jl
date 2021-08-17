@@ -51,7 +51,7 @@ struct DistanceTable{N}
     end
 end
 
-GraphANN.costtype(::MaybeThreadLocal{DistanceTable}, ::AbstractVector{<:NTuple}) = Float32
+#GraphANN.costtype(::MaybeThreadLocal{DistanceTable}, ::AbstractVector{<:NTuple}) = Float32
 
 # For the thread copy - keep the centroids the same to slightly reduce memory.
 GraphANN._Base.threadcopy(x::DistanceTable) = DistanceTable(x.centroids)
@@ -126,53 +126,77 @@ function precompute!(table::DistanceTable{N}, query::SVector) where {N}
     end
 end
 
-function GraphANN.prehook(table::MaybeThreadLocal{DistanceTable}, query::SVector)
-    precompute!(GraphANN.getlocal(table), query)
-    return nothing
-end
-
-const MaybePtr{T} = Union{T,Ptr{<:T}}
 maybeload(x) = x
 maybeload(ptr::Ptr) = unsafe_load(ptr)
 
+function GraphANN.prehook(table::DistanceTable, query::GraphANN.MaybePtr{SVector})
+    precompute!(GraphANN.getlocal(table), maybeload(query))
+    return nothing
+end
+
 @inline function GraphANN.evaluate(
-    table::MaybeThreadLocal{DistanceTable}, ::SVector, x::MaybePtr{NTuple}
+    table::DistanceTable,
+    ::GraphANN.MaybePtr{SVector},
+    x::GraphANN.MaybePtr{NTuple},
 )
-    return lookup(GraphANN.getlocal(table), maybeload(x))
+    return lookup(table, maybeload(x))
 end
 
-# N.B.: The indices in `inds` are index-0 to take full advantage of the range offered by UInt8's.
-@inline function lookup(table::DistanceTable, inds::NTuple{K}) where {K}
-    @unpack distances = table
-    s0 = zero(Float32)
-    s1 = zero(Float32)
-    s2 = zero(Float32)
-    s3 = zero(Float32)
-    i = 1
-
-    # Unroll 4 times as long as possible.
-    @inbounds while i + 3 <= K
-        j0 = Int(inds[i + 0]) + 1
-        j1 = Int(inds[i + 1]) + 1
-        j2 = Int(inds[i + 2]) + 1
-        j3 = Int(inds[i + 3]) + 1
-
-        s0 += distances[j0, i + 0]
-        s1 += distances[j1, i + 1]
-        s2 += distances[j2, i + 2]
-        s3 += distances[j3, i + 3]
-
-        i += 4
-    end
-
-    # Catch the remainders
-    @inbounds while i <= K
-        s0 += distances[Int(inds[i]) + 1, i]
-        i += 1
-    end
-
-    return s0 + s1 + s2 + s3
+@generated function lookup(table::DistanceTable, inds::NTuple{K}) where {K}
+    return _lookup_impl(K)
 end
+
+_gensym(i; prefix = "s") = Symbol("$(prefix)_$(i)")
+function _lookup_impl(K)
+    loads = [:($(_gensym(i)) = @inbounds(Int(inds[$i]))) for i in 1:K]
+    incr = [:($(_gensym(i; prefix = "j")) = $(_gensym(i)) + 1) for i in 1:K]
+    exprs = map(1:K) do i
+        :($(_gensym(i, prefix = "k")) = @inbounds(distances[$(_gensym(i; prefix = "j")), $i]))
+    end
+    syms = [:($(_gensym(i; prefix = "k"))) for i in 1:K]
+
+    return quote
+        Base.@_inline_meta
+        @unpack distances = table
+        $(loads...)
+        $(incr...)
+        $(exprs...)
+        return sum(($(syms...),))
+    end
+end
+
+# # N.B.: The indices in `inds` are index-0 to take full advantage of the range offered by UInt8's.
+# @inline function lookup(table::DistanceTable, inds::NTuple{K}) where {K}
+#     @unpack distances = table
+#     s0 = zero(Float32)
+#     s1 = zero(Float32)
+#     s2 = zero(Float32)
+#     s3 = zero(Float32)
+#     i = 1
+#
+#     # Unroll 4 times as long as possible.
+#     @inbounds while i + 3 <= K
+#         j0 = Int(inds[i + 0]) + 1
+#         j1 = Int(inds[i + 1]) + 1
+#         j2 = Int(inds[i + 2]) + 1
+#         j3 = Int(inds[i + 3]) + 1
+#
+#         s0 += distances[j0, i + 0]
+#         s1 += distances[j1, i + 1]
+#         s2 += distances[j2, i + 2]
+#         s3 += distances[j3, i + 3]
+#
+#         i += 4
+#     end
+#
+#     # Catch the remainders
+#     @inbounds while i <= K
+#         s0 += distances[Int(inds[i]) + 1, i]
+#         i += 1
+#     end
+#
+#     return s0 + s1 + s2 + s3
+# end
 
 function encode(
     _table::DistanceTable{N},

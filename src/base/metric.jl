@@ -1,34 +1,3 @@
-# Singleton to dispatch to optimized square euclidean distance computations.
-"""
-    Euclidean()
-
-When passed to [`evaluate`](@ref), return the square Euclidean distance between two points.
-
-# Example
-```jldoctest
-julia> a = ones(GraphANN.SVector{4,Float32})
-4-element StaticArrays.SVector{4, Float32} with indices SOneTo(4):
- 1.0
- 1.0
- 1.0
- 1.0
-
-julia> b = 2 * a
-4-element StaticArrays.SVector{4, Float32} with indices SOneTo(4):
- 2.0
- 2.0
- 2.0
- 2.0
-
-julia> GraphANN.evaluate(GraphANN.Euclidean(), a, b)
-4.0f0
-```
-"""
-struct Euclidean end
-
-# scalar broadcasting
-Base.broadcastable(x::Euclidean) = (x,)
-
 #####
 ##### Eager Conversion
 #####
@@ -260,14 +229,75 @@ simd_type(::Type{T}) where {T} = simd_type(T, T)
 ##### Distance Computation
 #####
 
-"""
-    evaluate(::Euclidean, a::SVector, b::SVector)
+abstract type AbstractMetric end
 
-Return the euclidean distance between `a` and `b`.
-Return type can be queried by `costtype(Euclidean(), a, b)`.
+# scalar broadcasting
+Base.broadcastable(x::AbstractMetric) = (x,)
+
+"""
+    Euclidean()
+
+When passed to [`evaluate`](@ref), return the square Euclidean distance between two points.
+
+# Example
+```jldoctest
+julia> a = ones(GraphANN.SVector{4,Float32})
+4-element StaticArrays.SVector{4, Float32} with indices SOneTo(4):
+ 1.0
+ 1.0
+ 1.0
+ 1.0
+
+julia> b = 2 * a
+4-element StaticArrays.SVector{4, Float32} with indices SOneTo(4):
+ 2.0
+ 2.0
+ 2.0
+ 2.0
+
+julia> GraphANN.evaluate(GraphANN.Euclidean(), a, b)
+4.0f0
+```
+"""
+struct Euclidean <: AbstractMetric end
+
+"""
+    InnerProduct()
+
+When passed to [`evaluate`](@ref), return the negative inner product between two points.
+Note: the result is negated since algorithms in GraphANN try to minimize the result
+of the metric.
+
+# Example
+```jldoctest
+julia> a = ones(GraphANN.SVector{4,Float32})
+4-element StaticArrays.SVector{4, Float32} with indices SOneTo(4):
+ 1.0
+ 1.0
+ 1.0
+ 1.0
+
+julia> b = 2 * a
+4-element StaticArrays.SVector{4, Float32} with indices SOneTo(4):
+ 2.0
+ 2.0
+ 2.0
+ 2.0
+
+julia> GraphANN.evaluate(GraphANN.InnerProduct(), a, b)
+-4.0f0
+```
+"""
+struct InnerProduct <: AbstractMetric end
+
+"""
+    evaluate(metric::AbstractMetric, a::SVector, b::SVector)
+
+Return the distance between `a` and `b`.
+Return type can be queried by `costtype(metric, a, b)`.
 """
 function evaluate(
-    metric::Euclidean, a::MaybePtr{A}, b::MaybePtr{B}
+    metric::AbstractMetric, a::MaybePtr{A}, b::MaybePtr{B}
 ) where {A<:SVector,B<:SVector}
     Base.@_inline_meta
     V = simd_type(A, B)
@@ -279,9 +309,18 @@ function evaluate(::Euclidean, a::AbstractWrap{V,K}, b::AbstractWrap{V,K}) where
     s = zero(accum_type(V))
     for i in 1:K
         z = @inbounds(a[i] - b[i])
-        s = square_accum(z, s)
+        s = muladd(z, z, s)
     end
     return _sum(s)
+end
+
+function evaluate(::InnerProduct, a::AbstractWrap{V,K}, b::AbstractWrap{V,K}) where {V,K}
+    Base.@_inline_meta
+    s = zero(accum_type(V))
+    for i in 1:K
+        s = muladd(@inbounds(a[i]), @inbounds(b[i]), s)
+    end
+    return -(_sum(s))
 end
 
 # The generic "sum" function in SIMD.jl is actually really slow - probably because it has
@@ -297,11 +336,13 @@ function _sum(x::SIMD.Vec{N,T}) where {N,T}
     return s
 end
 
-# Specialize to use special AVX instructions.
-square(x::T) where {T<:SIMD.Vec} = square_accum(x, zero(accum_type(T)))
-square_accum(x::SIMD.Vec, y::SIMD.Vec) = Base.muladd(x, x, y)
-function square_accum(x::SIMD.Vec{32,Int16}, y::SIMD.Vec{16,Int32})
-    return vnni_accumulate(y, x, x)
+# # Specialize to use special AVX instructions.
+# square(x::T) where {T<:SIMD.Vec} = square_accum(x, zero(accum_type(T)))
+# square_accum(x::SIMD.Vec, y::SIMD.Vec) = muladd(x, x, y)
+
+muladd(x::SIMD.Vec, y::SIMD.Vec, z::SIMD.Vec) = Base.muladd(x, y, z)
+function muladd(x::SIMD.Vec{32,Int16}, y::SIMD.Vec{32,Int16}, z::SIMD.Vec{16,Int32})
+    return vnni_accumulate(z, x, y)
 end
 
 # VNNI accumulation for 32xInt16.

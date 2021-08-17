@@ -151,6 +151,8 @@ function nearest_neighbor(query::T, data::AbstractVector; metric = Euclidean()) 
     dynamic_thread(1:length(data), 128) do i
         @inbounds x = data[i]
         @unpack min_ind, min_dist = tls[]
+
+        prehook(metric, query)
         dist = evaluate(metric, query, x)
 
         # Update Thread Local Storage is closer
@@ -303,7 +305,7 @@ end
 
 function prefetch(
     A::AbstractVector{T}, i, f::F = _Base.prefetch
-) where {T<:AbstractVector,F}
+) where {T<:Union{AbstractVector,Tuple},F}
     # Need to prefetch the entire vector
     # Compute how many cache lines are needed.
     # Divide the number of bytes by 64 to get cache lines.

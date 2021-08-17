@@ -244,7 +244,7 @@ function neighbor_updates!(
     target_degree::Integer,
 )
     # Destructure some parameters
-    @unpack graph, data = index
+    @unpack graph, data, metric = index
 
     # If the passed `candidates` is a Set, then append the current out neighbors
     # of the query vertex to the set.
@@ -256,7 +256,7 @@ function neighbor_updates!(
     # Use lazy functions to efficientaly initialize the Pruner object
     vertex_data = data[vertex]
     initialize!(
-        u -> Neighbor(index, u, evaluate(Euclidean(), vertex_data, pointer(data, u))),
+        u -> Neighbor(index, u, evaluate(metric, vertex_data, pointer(data, u))),
         !isequal(vertex),
         pruner,
         candidates,
@@ -278,11 +278,12 @@ function neighbor_updates!(
 
         # Note: We're indexing `data` with `Neighbor` objects, but that's fine because
         # we've defined that behavior in `utils.jl`.
-        f =
-            x -> (
-                alpha * evaluate(Euclidean(), pointer(data, i), pointer(data, x)) <=
-                getdistance(x)
-            )
+        # f = x -> (
+        #     alpha * evaluate(metric, pointer(data, i), pointer(data, x)) <= getdistance(x)
+        # )
+        f = x -> (
+            alpha * evaluate(metric, pointer(data, i), pointer(data, x)) >= getdistance(x)
+        )
         prune!(f, pruner; start = state)
         length(nextlist) >= target_degree && break
 
@@ -307,7 +308,6 @@ function apply_nextlists!(graph, locks, tls::ThreadLocal; empty = false)
         for (u, neighbors) in pairs(storage.nextlists)
             Base.@lock locks[u] copyto!(graph, u, neighbors)
         end
-
         empty && empty!(storage.nextlists)
     end
 end

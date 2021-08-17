@@ -1,12 +1,20 @@
 # Reference implementation
-# This isn't exactly meant to be robust - just be pretty obcious
-function euclidean_reference(A, B)
+# This isn't exactly meant to be robust - just be pretty obcvous
+function reference(::GraphANN.Euclidean, A, B)
     s = zero(Float64)
-    for (a,b) in zip(A,B)
+    for (a, b) in zip(A, B)
         c = Float64(a) - Float64(b)
         s += c^2
     end
     return s
+end
+
+function reference(::GraphANN.InnerProduct, A, B)
+    s = zero(Float64)
+    for (a, b) in zip(A, B)
+        s += Float64(a) * Float64(b)
+    end
+    return -s
 end
 
 @testset "Testing SIMD" begin
@@ -22,12 +30,12 @@ end
     x = SVector(_merge(a, b, c, d))
 
     t = GraphANN._Base.cast(SVector{32,UInt8}, x)
-    @test isa(t, NTuple{4, SVector{32,UInt8}})
+    @test isa(t, NTuple{4,SVector{32,UInt8}})
     @test t == (a, b, c, d)
 
     # For comparison with SIMD.Vec, convert both to Tuples
     t = GraphANN._Base.cast(SIMD.Vec{32,UInt8}, x)
-    @test isa(t, NTuple{4, SIMD.Vec{32,UInt8}})
+    @test isa(t, NTuple{4,SIMD.Vec{32,UInt8}})
     @test Tuple(t[1]) == Tuple(a)
     @test Tuple(t[2]) == Tuple(b)
     @test Tuple(t[3]) == Tuple(c)
@@ -36,15 +44,15 @@ end
     # Test zero padding
     a = ntuple(_ -> rand(UInt8), 30)
     x = SVector(a)
-    @test isa(x, SVector{30, UInt8})
+    @test isa(x, SVector{30,UInt8})
     t = GraphANN._Base.cast(SVector{32,UInt8}, x)
-    @test isa(t, Tuple{SVector{32, UInt8}})
+    @test isa(t, Tuple{SVector{32,UInt8}})
     @test Tuple(t[1])[1:30] == a
     @test iszero(t[1][31])
     @test iszero(t[1][32])
 
     t = GraphANN._Base.cast(SIMD.Vec{32,UInt8}, x)
-    @test isa(t, Tuple{SIMD.Vec{32, UInt8}})
+    @test isa(t, Tuple{SIMD.Vec{32,UInt8}})
     @test Tuple(t[1])[1:30] == a
     @test iszero(t[1][31])
     @test iszero(t[1][32])
@@ -98,27 +106,27 @@ end
     F64 = SVector{128,Float64}
     U8 = SVector{128,UInt8}
 
-    @test simd_type(F32, F32) == SIMD.Vec{16, Float32}
+    @test simd_type(F32, F32) == SIMD.Vec{16,Float32}
     @inferred simd_type(F32, F32)
 
-    @test simd_type(F64, F64) == SIMD.Vec{8, Float64}
+    @test simd_type(F64, F64) == SIMD.Vec{8,Float64}
     @inferred simd_type(F64, F64)
 
-    @test simd_type(F64, F32) == SIMD.Vec{8, Float64}
+    @test simd_type(F64, F32) == SIMD.Vec{8,Float64}
     @inferred simd_type(F64, F32)
 
-    @test simd_type(F32, U8) == SIMD.Vec{16, Float32}
+    @test simd_type(F32, U8) == SIMD.Vec{16,Float32}
     @inferred simd_type(F32, U8)
 
-    @test simd_type(U8, F32) == SIMD.Vec{16, Float32}
+    @test simd_type(U8, F32) == SIMD.Vec{16,Float32}
     @inferred simd_type(U8, F32)
 
-    @test simd_type(U8, U8) == SIMD.Vec{32, Int16}
+    @test simd_type(U8, U8) == SIMD.Vec{32,Int16}
     @inferred simd_type(U8, U8)
 
     # Now - test that the shorter vectors also work.
-    @test simd_type(SVector{4, Float32}, SVector{4, Float32}) == SIMD.Vec{4, Float32}
-    @inferred simd_type(SVector{4, Float32}, SVector{4, Float32})
+    @test simd_type(SVector{4,Float32}, SVector{4,Float32}) == SIMD.Vec{4,Float32}
+    @inferred simd_type(SVector{4,Float32}, SVector{4,Float32})
 
     # Neighbor Types
     E = GraphANN.Euclidean()
@@ -126,17 +134,31 @@ end
     @test GraphANN.costtype(E, U8, U8) == Int32
 end
 
-test_euclidean(V::Vector) = test_euclidean(V[1], V[2], pointer(V, 1), pointer(V, 2))
-test_euclidean(A::Vector, B::Vector) = test_euclidean(A[1], B[1], pointer(A, 1), pointer(B, 1))
+function test_metric(V::Vector; kw...)
+    return test_metric(V[1], V[2], pointer(V, 1), pointer(V, 2); kw...)
+end
+function test_metric(A::Vector, B::Vector; kw...)
+    return test_metric(A[1], B[1], pointer(A, 1), pointer(B, 1); kw...)
+end
 
-function test_euclidean(a, b, pa::Ptr, pb::Ptr)
-    metric = GraphANN.Euclidean()
-    ref = euclidean_reference(a, b)
+function test_metric(a, b, pa::Ptr, pb::Ptr; metric = Euclidean, rtol = sqrt(eps(Float32)))
+    ref = reference(metric, a, b)
     # Try all pointer/value pairs
-    @test isapprox(GraphANN.evaluate(metric, a, b), ref)
-    @test isapprox(GraphANN.evaluate(metric, pa, pb), ref)
-    @test isapprox(GraphANN.evaluate(metric, pa, b), ref)
-    @test isapprox(GraphANN.evaluate(metric, a, pb), ref)
+    @test isapprox(GraphANN.evaluate(metric, a, b), ref; rtol)
+    @test isapprox(GraphANN.evaluate(metric, pa, pb), ref; rtol)
+    @test isapprox(GraphANN.evaluate(metric, pa, b), ref; rtol)
+    @test isapprox(GraphANN.evaluate(metric, a, pb), ref; rtol)
+
+    passed = true
+    passed &= isapprox(GraphANN.evaluate(metric, a, b), ref; rtol)
+    passed &= isapprox(GraphANN.evaluate(metric, pa, pb), ref; rtol)
+    passed &= isapprox(GraphANN.evaluate(metric, pa, b), ref; rtol)
+    passed &= isapprox(GraphANN.evaluate(metric, a, pb), ref; rtol)
+
+    if !passed
+        @show repr(a) repr(b)
+        error()
+    end
 end
 
 @testset "Testing Euclidean Calculations" begin
@@ -153,15 +175,47 @@ end
         for i in 1:10000
             x[1] = rand(SVector{len,left})
             y[1] = rand(SVector{len,right})
-            test_euclidean(x,y)
+            test_metric(x, y; metric)
         end
     end
 
     # Scalar broadcasting.
-    x = rand(SVector{128, Float32}, 3)
-    y = rand(SVector{128, Float32}, 3)
+    x = rand(SVector{128,Float32}, 3)
+    y = rand(SVector{128,Float32}, 3)
 
     metric = GraphANN.Euclidean()
+    d = GraphANN.evaluate.(metric, x, y)
+    for i in eachindex(x, y)
+        @test d[i] == GraphANN.evaluate(metric, x[i], y[i])
+    end
+end
+
+maybescale(x::SVector{N,Float32}, scale) where {N} = scale .* x
+maybescale(x::SVector, scale) = x
+
+@testset "Testing InnerProduct Calculations" begin
+    # Lets do some distance calculations
+    lengths = [100, 128]
+    left_types = [Float32, UInt8, Int8]
+    right_types = [Float32, UInt8, Int8]
+    scale = 100
+    metric = GraphANN.InnerProduct()
+
+    for (left, right, len) in Iterators.product(left_types, right_types, lengths)
+        x = Vector{SVector{len,left}}(undef, 1)
+        y = Vector{SVector{len,right}}(undef, 1)
+        for i in 1:10000
+            x[1] = maybescale(rand(SVector{len,left}), scale)
+            y[1] = maybescale(rand(SVector{len,right}), scale)
+            test_metric(x, y; metric, rtol = 0.03)
+        end
+    end
+
+    # Scalar broadcasting.
+    x = rand(SVector{128,Float32}, 3)
+    y = rand(SVector{128,Float32}, 3)
+
+    metric = GraphANN.InnerProduct()
     d = GraphANN.evaluate.(metric, x, y)
     for i in eachindex(x, y)
         @test d[i] == GraphANN.evaluate(metric, x[i], y[i])

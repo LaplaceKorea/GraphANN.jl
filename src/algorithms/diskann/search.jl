@@ -119,7 +119,8 @@ function DiskANNRunner{I,D}(
     search_list_size::Integer; executor::F = single_thread, masktype::U = DistanceLSB()
 ) where {I,D,F,U}
     buffer = BestBuffer{U,I,D}(search_list_size)
-    visited = Set{I}()
+    #visited = Set{I}()
+    visited = FastSet{I}()
     runner = DiskANNRunner{I,D,typeof(visited),U}(
         convert(Int, search_list_size), buffer, visited
     )

@@ -56,9 +56,9 @@ const sptag_tree = joinpath(sptag_dir, "siftsmall", "tree.bin")
 include("base/pm.jl")
 include("base/utils.jl")
 include("base/threading.jl")
-include("base/euclidean.jl")
+include("base/metric.jl")
 include("base/partition.jl")
-include("base/cuckoo.jl")
+include("base/fastset.jl")
 
 # Graphs
 include("graphs/adjacency.jl")

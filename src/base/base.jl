@@ -44,29 +44,21 @@ export MaybePtr, evaluate, prehook, build, search, search!
 const MaybePtr{T} = Union{T,Ptr{<:T}}
 
 """
-    evaluate(metric, x, y)
+    evaluate(metric, x::MaybePtr, y::MaybePtr)
 
 Return the distance with respect to `metric` between points `x` and `y`.
 """
 function evaluate end
 
 """
-    distribute(metric)
-
-Optional metric function. Distribute a necessary version of `metric` to each thread.
-Useful if metrics require local mutable scratch space.
-"""
-distribute(metric) = x
-
-"""
-    prehook(metric, x)
+    prehook(metric, x::MaybePtr)
 
 Optional metric function. Perform necessary pre-distance computations on query `x`.
 """
 prehook(metric, x) = nothing
 
-export Euclidean
-include("euclidean.jl")
+export Euclidean, InnerProduct
+include("metric.jl")
 
 #####
 ##### Search Hooks
@@ -170,9 +162,10 @@ struct MetaGraph{G,D}
 end
 
 #####
-##### Cuckoo Filter
+##### FastSet
 #####
 
-include("cuckoo.jl")
+export FastSet
+include("fastset.jl")
 
 end
