@@ -397,18 +397,18 @@ end
 ##### Utilities
 #####
 
-function norm(x::MaybePtr{T}) where {T<:SVector}
-    Base.@_inline_meta
-    V = simd_type(T)
-    return norm(wrap(V, x))
-end
-
-function norm(x::AbstractWrap{V,K})
-    Base.@_inline_meta
-    s = zero(accum_type(V))
-    for i in Base.OneTo(K)
-        a = @inbounds(x[i])
-        s = muladd(a, a, s)
-    end
-    return sqrt(_sum(s))
-end
+# function norm(x::MaybePtr{T}) where {T<:SVector}
+#     Base.@_inline_meta
+#     V = simd_type(T)
+#     return norm(wrap(V, x))
+# end
+#
+# function norm(x::AbstractWrap{V,K})
+#     Base.@_inline_meta
+#     s = zero(accum_type(V))
+#     for i in Base.OneTo(K)
+#         a = @inbounds(x[i])
+#         s = muladd(a, a, s)
+#     end
+#     return sqrt(_sum(s))
+# end
