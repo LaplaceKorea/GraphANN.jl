@@ -278,11 +278,8 @@ function neighbor_updates!(
 
         # Note: We're indexing `data` with `Neighbor` objects, but that's fine because
         # we've defined that behavior in `utils.jl`.
-        # f = x -> (
-        #     alpha * evaluate(metric, pointer(data, i), pointer(data, x)) <= getdistance(x)
-        # )
         f = x -> (
-            alpha * evaluate(metric, pointer(data, i), pointer(data, x)) >= getdistance(x)
+            alpha * evaluate(metric, pointer(data, i), pointer(data, x)) <= getdistance(x)
         )
         prune!(f, pruner; start = state)
         length(nextlist) >= target_degree && break

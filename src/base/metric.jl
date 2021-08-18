@@ -201,7 +201,7 @@ distance_type(::Type{A}, ::Type{B}) where {A,B} = nothing
 
 # Hijack short ints to allow emission of VNNI instructions.
 const SMALL_INTS = Union{Int8,UInt8,Int16}
-distance_type(::Type{A}, ::Type{B}) where {A <: SMALL_INTS, B <: SMALL_INTS} = Int16
+distance_type(::Type{A}, ::Type{B}) where {A<:SMALL_INTS,B<:SMALL_INTS} = Int16
 
 """
     accum_type(x)
@@ -307,20 +307,27 @@ end
 function evaluate(::Euclidean, a::AbstractWrap{V,K}, b::AbstractWrap{V,K}) where {V,K}
     Base.@_inline_meta
     s = zero(accum_type(V))
-    for i in 1:K
+    for i in Base.OneTo(K)
         z = @inbounds(a[i] - b[i])
         s = muladd(z, z, s)
     end
     return _sum(s)
 end
 
-function evaluate(::InnerProduct, a::AbstractWrap{V,K}, b::AbstractWrap{V,K}) where {V,K}
+function evaluate(
+    metric::InnerProduct, a::AbstractWrap{V,K}, b::AbstractWrap{V,K}
+) where {V,K}
+    Base.@_inline_meta
+    return -(_evalaute(metric, a, b))
+end
+
+function _evaluate(::InnerProduct, a::AbstractWrap{V,K}, b::AbstractWrap{V,K}) where {V,K}
     Base.@_inline_meta
     s = zero(accum_type(V))
-    for i in 1:K
+    for i in Base.OneTo(K)
         s = muladd(@inbounds(a[i]), @inbounds(b[i]), s)
     end
-    return -(_sum(s))
+    return _sum(s)
 end
 
 # The generic "sum" function in SIMD.jl is actually really slow - probably because it has
@@ -384,4 +391,24 @@ function vnni_accumulate(
     )
 
     return SIMD.Vec(x)
+end
+
+#####
+##### Utilities
+#####
+
+function norm(x::MaybePtr{T}) where {T<:SVector}
+    Base.@_inline_meta
+    V = simd_type(T)
+    return norm(wrap(V, x))
+end
+
+function norm(x::AbstractWrap{V,K})
+    Base.@_inline_meta
+    s = zero(accum_type(V))
+    for i in Base.OneTo(K)
+        a = @inbounds(x[i])
+        s = muladd(a, a, s)
+    end
+    return sqrt(_sum(s))
 end

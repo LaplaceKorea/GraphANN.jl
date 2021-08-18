@@ -14,8 +14,7 @@ mutable struct FastSet{K} <: AbstractSet{K}
     maxprobe::Int
 
     function FastSet{K}() where {K}
-        n = 16
-        new(fill(sentinel(K), n), 0, 0, 1, 0)
+        new(fill(sentinel(K), 16), 0, 0, 1, 0)
     end
 
     function FastSet{K}(d::FastSet{K}) where {K}
