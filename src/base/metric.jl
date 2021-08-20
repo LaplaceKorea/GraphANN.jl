@@ -318,7 +318,7 @@ function evaluate(
     metric::InnerProduct, a::AbstractWrap{V,K}, b::AbstractWrap{V,K}
 ) where {V,K}
     Base.@_inline_meta
-    return -(_evalaute(metric, a, b))
+    return -(_evaluate(metric, a, b))
 end
 
 function _evaluate(::InnerProduct, a::AbstractWrap{V,K}, b::AbstractWrap{V,K}) where {V,K}
@@ -397,18 +397,19 @@ end
 ##### Utilities
 #####
 
-# function norm(x::MaybePtr{T}) where {T<:SVector}
-#     Base.@_inline_meta
-#     V = simd_type(T)
-#     return norm(wrap(V, x))
-# end
-#
-# function norm(x::AbstractWrap{V,K})
-#     Base.@_inline_meta
-#     s = zero(accum_type(V))
-#     for i in Base.OneTo(K)
-#         a = @inbounds(x[i])
-#         s = muladd(a, a, s)
-#     end
-#     return sqrt(_sum(s))
-# end
+function norm(x::MaybePtr{T}) where {T<:SVector}
+    Base.@_inline_meta
+    V = simd_type(T)
+    return norm(wrap(V, x))
+end
+
+function norm(x::AbstractWrap{V,K}) where {V,K}
+    Base.@_inline_meta
+    s = zero(accum_type(V))
+    for i in Base.OneTo(K)
+        a = @inbounds(x[i])
+        s = muladd(a, a, s)
+    end
+    return sqrt(_sum(s))
+end
+

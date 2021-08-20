@@ -170,11 +170,11 @@ end
 
 function load_bin(
     diskann::DiskANN,
-    ::Type{SVector{N,T}},
+    ::Type{U},
     io::IO;
     allocator = stdallocator,
     groundtruth = false,
-) where {T,N}
+) where {N,T,U <: Union{SVector{N,T},NTuple{N,T}}}
     num_points = read(io, Cuint)
     point_dim = read(io, Cuint)
     if N != point_dim
@@ -183,7 +183,7 @@ function load_bin(
         """
         throw(ArgumentError(msg))
     end
-    data = allocator(SVector{N,T}, num_points)
+    data = allocator(U, num_points)
     read!(io, data)
     if groundtruth
         # Increment each entry by 1 to account for Julia's index-1 system.

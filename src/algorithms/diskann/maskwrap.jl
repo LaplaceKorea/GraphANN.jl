@@ -160,3 +160,9 @@ end
 
 done(buffer::BestBuffer) = (buffer.bestunvisited > buffer.currentlength)
 
+function unsafe_replace!(buffer::BestBuffer{T,I,D}, i, id, distance) where {T,I,D}
+    wrap = MaskWrap{T,I,D}(Neighbor{I,D}(id, convert(D, distance)))
+    buffer.entries[i] = wrap
+    return nothing
+end
+

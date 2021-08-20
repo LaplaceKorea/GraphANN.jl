@@ -1,5 +1,5 @@
 using PQ
-using Test
+using Test, Statistics
 
 # main dep
 using GraphANN: GraphANN
@@ -8,7 +8,12 @@ using GraphANN: GraphANN
 using SIMD: SIMD
 import StaticArrays: SVector
 
-@testset "Testing PQ" begin
+const DATADIR = joinpath(@__DIR__, "..", "data")
+const COMPRESSED_DATASET = joinpath(DATADIR, "siftsmall_compressed.bin")
+const PQ_PIVOTS = joinpath(DATADIR, "siftsmall_pq_pivots.bin")
+const PQ_CENTER = joinpath(DATADIR, "siftsmall_pq_pivots_centroid.bin")
+
+@testset "Testing PQ Units" begin
     @test PQ.exact_div(10, 5) == 2
     @test_throws Exception PQ.exact_div(10, 4)
 
@@ -56,7 +61,7 @@ import StaticArrays: SVector
     query = rand(SVector{4,Float32})
 
     # This will test both the auto broadcasting as well as distance computation.
-    PQ.store_distances!(dst, src, query)
+    PQ.store_distances!(GraphANN.Euclidean(), dst, src, query)
     reference = GraphANN.evaluate.(Ref(GraphANN.Euclidean()), src, Ref(query))
     @test dst == reference
 
@@ -68,7 +73,7 @@ import StaticArrays: SVector
 
     # Also try promotion.
     query = rand(SVector{4,UInt8})
-    PQ.store_distances!(dst, src, query)
+    PQ.store_distances!(GraphANN.Euclidean(), dst, src, query)
     reference = GraphANN.evaluate.(Ref(GraphANN.Euclidean()), src, Ref(query))
     @test dst == reference
 
@@ -117,3 +122,35 @@ import StaticArrays: SVector
         @test isapprox(reference, dist)
     end
 end # @testset
+
+@testset "Testing End to End" begin
+    # Load ALL the things.
+    data = GraphANN.sample_dataset()
+    queries = GraphANN.sample_queries()
+    groundtruth = GraphANN.sample_groundtruth()
+    graph = GraphANN.sample_graph()
+
+    quantized_reference = GraphANN.load_bin(GraphANN.DiskANN(), NTuple{32,UInt8}, COMPRESSED_DATASET)
+
+    # Load DiskANN encoded centroids
+    centroids = PQ.load_diskann_centroids(PQ_PIVOTS, 128, 4; offsetpath = PQ_CENTER)
+    metric = PQ.DistanceTable(centroids)
+
+    # Encode the dataset and ensure it matches the one from DiskANN
+    data_encoded = PQ.encode(metric, data, UInt8)
+    @test data_encoded == quantized_reference
+
+    # Try once without reranking.
+    index = GraphANN.DiskANNIndex(graph, data_encoded, metric; startnode = GraphANN.medioid(data))
+    runner = GraphANN.DiskANNRunner(index, 20)
+
+    ids = GraphANN.search(runner, index, queries; num_neighbors = 10)
+    mean_recall = mean(GraphANN.recall(groundtruth, ids))
+    @test mean_recall > 0.83
+
+    # Now try with reranking
+    reranker = PQ.Reranker(data)
+    ids = GraphANN.search(runner, index, queries; num_neighbors = 10, postprocess! = reranker)
+    mean_recall = mean(GraphANN.recall(groundtruth, ids))
+    @test mean_recall > 0.956
+end

@@ -142,6 +142,9 @@ function sizecheck(groundtruth::AbstractMatrix, num_neighbors, num_queries)
     @assert size(groundtruth) == (num_neighbors, num_queries)
 end
 
+struct QueryMajor end
+struct DataMajor end
+
 function _Base.search!(
     runner::ExhaustiveRunner,
     queries::AbstractVector,
@@ -151,6 +154,7 @@ function _Base.search!(
     metric = Euclidean(),
     skip_size_check = false,
     num_neighbors = _num_neighbors(runner.groundtruth),
+    style = QueryMajor(),
 )
     # Destructure runner
     @unpack groundtruth, exhaustive_local, executor = runner
@@ -161,12 +165,13 @@ function _Base.search!(
     # Batch the query range so each thread works on a chunk of queries at a time.
     # The dynamic load balancer will give one batch at a time to each worker.
     batched_iter = BatchedRange(1:num_queries, groupsize)
+    metrics = ThreadLocal(metric)
     executor(batched_iter) do range
         heaps = _Base.getlocal(exhaustive_local)
 
         # Compute nearest neighbors for this batch across the whole dataset.
         # Implement this as an inner function to help out type inference.
-        _nearest_neighbors!(heaps, dataset, queries, range, metric)
+        _nearest_neighbors!(style, heaps, dataset, queries, range, metrics[])
         _commit!(groundtruth, heaps, range)
 
         # Note: ProgressMeter is threadsafe - so calling it here is okay.
@@ -189,6 +194,7 @@ end
 
 # Define there to help out inference in the "exhaustive_search!" closure.
 Base.@propagate_inbounds function _nearest_neighbors!(
+    ::QueryMajor,
     heaps::AbstractVector{KeepSmallest{T}},
     dataset::AbstractVector,
     queries::AbstractVector,
@@ -197,7 +203,6 @@ Base.@propagate_inbounds function _nearest_neighbors!(
 ) where {T<:Neighbor}
     @inbounds for base_id in eachindex(dataset)
         base = dataset[base_id]
-
         for (heap_num, query_id) in enumerate(range)
             query = queries[query_id]
             prehook(metric, query)
@@ -207,6 +212,28 @@ Base.@propagate_inbounds function _nearest_neighbors!(
             push!(heaps[heap_num], T(base_id - 1, dist))
         end
     end
+    return nothing
+end
+
+Base.@propagate_inbounds function _nearest_neighbors!(
+    ::DataMajor,
+    heaps::AbstractVector{KeepSmallest{T}},
+    dataset::AbstractVector,
+    queries::AbstractVector,
+    range,
+    metric,
+) where {T<:Neighbor}
+    for (heap_num, query_id) in enumerate(range)
+        query = queries[query_id]
+        prehook(metric, query)
+        @inbounds for base_id in eachindex(dataset)
+            base = dataset[base_id]
+            dist = evaluate(metric, query, base)
+
+            # Need to convert from 1 based indexing to 0 based indexing...
+            push!(heaps[heap_num], T(base_id - 1, dist))
+            end
+        end
     return nothing
 end
 

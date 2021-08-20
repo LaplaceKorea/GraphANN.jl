@@ -40,6 +40,11 @@ end
 function sample_groundtruth()
     return load_vecs(joinpath(VECSDIR, "siftsmall_groundtruth.ivecs"); groundtruth = true)
 end
+function sample_graph()
+    return load_graph(
+        DiskANN(), joinpath(DATADIR, "diskann", "siftsmall_base_20_20_1.2.index"), 10000
+    )
+end
 
 ############################################################################################
 function test(runner, index, queries; num_neighbors = 5, batchsize = 32)

@@ -184,13 +184,15 @@ done(runner::DiskANNRunner) = done(runner.buffer)
 Base.maximum(runner::DiskANNRunner) = maximum(runner.buffer)
 
 """
-    getresults!(runner::DiskANNRunner, num_neighbor) -> AbstractVector
+    getresults!(runner::DiskANNRunner, num_neighbor, [query]) -> AbstractVector
 
 Return the top `num_neighbor` results from `runner`.
 """
-function getresults!(runner::DiskANNRunner, num_neighbors)
+function getresults!(runner::DiskANNRunner, num_neighbors, query)
     return view(runner.buffer.entries, Base.OneTo(num_neighbors))
 end
+
+
 
 #####
 ##### Greedy Search Implementation
@@ -260,7 +262,7 @@ function _Base.search(
 end
 
 """
-    search(runner::DiskANNRunner, index::DiskANNIndex, queries; [num_neighbors], [callbacks])
+    search(runner::DiskANNRunner, index::DiskANNIndex, queries; [num_neighbors], [callbacks], [postprocess!])
 
 Perform approximate nearest neighbor search for all entries in `queries`, returning
 `num_neighbors` results for each query. The results is a `num_neighbors × length(queries)`
@@ -268,6 +270,17 @@ matrix. The nearest neighbors for `queries[i]` will be in column `i` of the retu
 matrix, sorted from nearest to furthest.
 
 Callbacks is an optional [`DiskANNCallbacks`](@ref) struct to help with gathering metrics.
+
+Post Processing
+---------------
+
+The keyword argument `postprocess!` lets users to apply their own extraction methods
+for data located in the `runner`, allowing for operations like final reranking when
+quantization is being used. This function is allowed to modify the state of `runner` and
+leave it in a potentially illegal state.
+
+The default implementation is `GraphANN._Base.getresults!`. Take inspiration from the
+implementation of that function when defining your own.
 """
 function _Base.search(
     runner::MaybeThreadLocal{DiskANNRunner},
@@ -289,17 +302,19 @@ function _Base.search!(
     queries::AbstractVector{T};
     num_neighbors = 10,
     callbacks = DiskANNCallbacks(),
-) where {T<:AbstractVector}
+    postprocess!::F = getresults!
+) where {T<:AbstractVector, F}
+    metric = getlocal(index.metric)
     for col in eachindex(queries)
         query = pointer(queries, col)
         # -- optional telemetry
         callbacks.prequery()
 
-        _Base.prehook(getlocal(index.metric), query)
+        _Base.prehook(metric, query)
         search(algo, index, query; callbacks)
 
         # Copy over the results to the destination
-        results = getresults!(algo, num_neighbors)
+        results = postprocess!(algo, num_neighbors, query)
         for i in 1:num_neighbors
             @inbounds dest[i, col] = getid(results[i])
         end
@@ -318,20 +333,22 @@ function _Base.search!(
     queries::AbstractVector;
     num_neighbors = 10,
     callbacks = DiskANNCallbacks(),
-)
+    postprocess!::F = getresults!
+) where {F}
     dynamic_thread(getpool(tls), eachindex(queries), 64) do col
         #_metric = _Base.distribute_distance(metric)
+        metric = getlocal(index.metric)
         query = pointer(queries, col)
         algo = tls[]
 
         # -- optional telemetry
         callbacks.prequery()
 
-        _Base.prehook(getlocal(index.metric), query)
+        _Base.prehook(metric, query)
         search(algo, index, query; callbacks = callbacks)
 
         # Copy over the results to the destination
-        results = getresults!(algo, num_neighbors)
+        results = postprocess!(algo, num_neighbors, query)
         for i in 1:num_neighbors
             @inbounds dest[i, col] = getid(results[i])
         end

@@ -7,9 +7,11 @@ using Statistics
 
 # deps
 using SIMD: SIMD
-import StaticArrays: SVector
+import StaticArrays: SVector, SMatrix, SDiagonal
 using ProgressMeter: ProgressMeter
 import UnPack: @unpack
+
+include("compress.jl")
 
 ####
 ##### Product Quantize a dataset
@@ -35,26 +37,33 @@ const BroadcastVector = SVector{16,Float32}
 # For now - hardcode centroid eltypes as `Float32`.
 # This always seems to perform better than keeping the centroids as integers anyways
 # so we don't lose much flexibility with this.
-struct DistanceTable{N}
+struct DistanceTable{N,M}
     # Stored in a column major form.
     # - `centroids[1,1]` returns the first centroid for the first partition.
     # - `centroids[2,1]` returns the second centroid for the first partition.
     centroids::Matrix{SVector{N,Float32}}
     # Cached distance table
     distances::Matrix{Float32}
+    metric::M
 
     # Use an inner constructor to ensure that the distance `table` is always the same
     # size as `centroids`.
-    function DistanceTable(centroids::Matrix{SVector{N,Float32}}) where {N}
+    function DistanceTable(
+        centroids::Matrix{SVector{N,Float32}}, metric::M = GraphANN.Euclidean();
+    ) where {N,M}
         distances = Matrix{Float32}(undef, size(centroids))
-        return new{N}(centroids, distances)
+        return new{N,M}(centroids, distances, metric)
     end
 end
 
-#GraphANN.costtype(::MaybeThreadLocal{DistanceTable}, ::AbstractVector{<:NTuple}) = Float32
+# Help out type inference - we'll always end up in Float32 land anyways.
+GraphANN.costtype(::MaybeThreadLocal{DistanceTable}, args...) = Float32
+GraphANN.costtype(::MaybeThreadLocal{DistanceTable}, ::AbstractVector) = Float32
+GraphANN.costtype(::MaybeThreadLocal{DistanceTable}, ::Type{<:Any}) = Float32
+GraphANN.costtype(::MaybeThreadLocal{DistanceTable}, ::Type{<:Any}, ::Type{<:Any}) = Float32
 
 # For the thread copy - keep the centroids the same to slightly reduce memory.
-GraphANN._Base.threadcopy(x::DistanceTable) = DistanceTable(x.centroids)
+GraphANN._Base.threadcopy(x::DistanceTable) = DistanceTable(x.centroids, x.metric)
 
 # Broadcast to a cacheline
 broadcast(x::SVector{N,T}) where {N,T} = broadcast(GraphANN.toeltype(Float32, x))
@@ -89,6 +98,7 @@ force_load(::Type{T}, ptr::Ptr) where {T} = unsafe_load(Ptr{T}(ptr))
 #
 # These invariants must be maintained within the top level `DistanceTable`.
 @inline function store_distances!( # Not a safe function
+    metric,
     dest::AbstractVector{Float32},
     src::AbstractVector{SVector{N,Float32}},
     point::SVector{N},
@@ -115,13 +125,16 @@ function _getindex(x::SVector, ::Val{N}, i::Integer) where {N}
 end
 
 function precompute!(table::DistanceTable{N}, query::SVector) where {N}
-    @unpack centroids, distances = table
+    @unpack centroids, distances, metric = table
     num_partitions = size(centroids, 2)
 
     @assert N * size(table.centroids, 2) == length(query)
     for i in Base.OneTo(num_partitions)
         @inbounds store_distances!(
-            view(distances, :, i), view(centroids, :, i), _getindex(query, Val(N), i)
+            metric,
+            view(distances, :, i),
+            view(centroids, :, i),
+            _getindex(query, Val(N), i),
         )
     end
 end
@@ -135,13 +148,16 @@ function GraphANN.prehook(table::DistanceTable, query::GraphANN.MaybePtr{SVector
 end
 
 @inline function GraphANN.evaluate(
-    table::DistanceTable,
-    ::GraphANN.MaybePtr{SVector},
-    x::GraphANN.MaybePtr{NTuple},
+    table::DistanceTable, ::GraphANN.MaybePtr{SVector}, x::GraphANN.MaybePtr{NTuple}
 )
     return lookup(table, maybeload(x))
 end
 
+# The generated lookup basically unrolls the entire distance lookup.
+# It seems to be slightly faster than having a loop.
+#
+# However, we may need to fall back to a loop for large "K".
+# If performance degrades for datasets with high dimensionality, we'll revisit this.
 @generated function lookup(table::DistanceTable, inds::NTuple{K}) where {K}
     return _lookup_impl(K)
 end
@@ -151,7 +167,7 @@ function _lookup_impl(K)
     loads = [:($(_gensym(i)) = @inbounds(Int(inds[$i]))) for i in 1:K]
     incr = [:($(_gensym(i; prefix = "j")) = $(_gensym(i)) + 1) for i in 1:K]
     exprs = map(1:K) do i
-        :($(_gensym(i, prefix = "k")) = @inbounds(distances[$(_gensym(i; prefix = "j")), $i]))
+        :($(_gensym(i; prefix = "k")) = @inbounds(distances[$(_gensym(i; prefix = "j")), $i]))
     end
     syms = [:($(_gensym(i; prefix = "k"))) for i in 1:K]
 
@@ -164,39 +180,6 @@ function _lookup_impl(K)
         return sum(($(syms...),))
     end
 end
-
-# # N.B.: The indices in `inds` are index-0 to take full advantage of the range offered by UInt8's.
-# @inline function lookup(table::DistanceTable, inds::NTuple{K}) where {K}
-#     @unpack distances = table
-#     s0 = zero(Float32)
-#     s1 = zero(Float32)
-#     s2 = zero(Float32)
-#     s3 = zero(Float32)
-#     i = 1
-#
-#     # Unroll 4 times as long as possible.
-#     @inbounds while i + 3 <= K
-#         j0 = Int(inds[i + 0]) + 1
-#         j1 = Int(inds[i + 1]) + 1
-#         j2 = Int(inds[i + 2]) + 1
-#         j3 = Int(inds[i + 3]) + 1
-#
-#         s0 += distances[j0, i + 0]
-#         s1 += distances[j1, i + 1]
-#         s2 += distances[j2, i + 2]
-#         s3 += distances[j3, i + 3]
-#
-#         i += 4
-#     end
-#
-#     # Catch the remainders
-#     @inbounds while i <= K
-#         s0 += distances[Int(inds[i]) + 1, i]
-#         i += 1
-#     end
-#
-#     return s0 + s1 + s2 + s3
-# end
 
 function encode(
     _table::DistanceTable{N},
@@ -214,15 +197,19 @@ function encode(
 
     batchsize = 2048
     meter = ProgressMeter.Progress(length(data), 1, "Converting Dataset")
-
     executor(GraphANN.batched(eachindex(data), batchsize)) do range
         for i in range
-            table = GraphANN.getlocal(tables)
             # Compute distance from this data point to all centroids.
+            # Then iterate over each partition, finding the best match within that partition
+            # and storing it to the final result.
+            table = GraphANN.getlocal(tables)
             precompute!(table, data[i])
             @unpack distances = table
             ptr = pointer(dest, i)
-            for j in 1:tuple_dim
+
+            # Iterating over partitions
+            for j in Base.OneTo(tuple_dim)
+                # Iterating down distances to centroids within the partition.
                 _, min_ind = findmin(view(distances, :, j))
                 force_store!(ptr, convert(I, min_ind - one(min_ind)))
                 ptr += sizeof(I)
@@ -233,13 +220,66 @@ function encode(
     return dest
 end
 
-function fullrecall(ids, groundtruth, num_neighbors)
-    function intersect_length((x, y),)
-        vy = view(y, 1:num_neighbors)
-        return length(intersect(x, vy))
+#####
+##### Post Processing
+#####
+
+struct Reranker{A<:AbstractVector,M}
+    dataset::A
+    metric::M
+end
+
+function Reranker(dataset::AbstractVector; metric = GraphANN.Euclidean())
+    return Reranker(dataset, metric)
+end
+
+function (reranker::Reranker)(
+    runner::GraphANN.Algorithms.DiskANNRunner, num_neighbors, query
+)
+    @unpack dataset, metric = reranker
+    @unpack buffer = runner
+    @unpack entries = buffer
+
+    # Populate the full distance for each candidate.
+    for i in eachindex(entries)
+        id = GraphANN.getid(entries[i])
+        distance = GraphANN.evaluate(metric, query, pointer(dataset, id))
+        @inbounds GraphANN.Algorithms.unsafe_replace!(buffer, i, id, distance)
     end
-    overlap = sum(intersect_length, zip(eachcol(ids), eachcol(groundtruth)))
-    return overlap / (num_neighbors * size(ids, 2))
+
+    # Sort based on distance.
+    return partialsort!(entries, Base.OneTo(num_neighbors))
+end
+
+#####
+##### IO
+#####
+
+function load_diskann_centroids(path::AbstractString, args...; kw...)
+    return open(path; read = true) do io
+        load_diskann_centroids(io, args...; kw...)
+    end
+end
+
+# DiskANN has an offset that they apply to the data points for some reason.
+# Perhaps it helps when product quantizing InnerProduct based
+function load_diskann_centroids(io::IO, fulldim, centroiddim; offsetpath = nothing)
+    pre_centroids = GraphANN.load_bin(GraphANN.DiskANN(), SVector{fulldim,Float32}, io)
+    if offsetpath !== nothing
+        offset = SVector{fulldim,Float32}(
+            GraphANN.load_bin(GraphANN.DiskANN(), Float32, offsetpath)
+        )
+        pre_centroids .+= Ref(offset)
+    end
+    ncentroids = length(pre_centroids)
+    centroids = collect(
+        permutedims(
+            reinterpret(reshape, SVector{centroiddim,Float32}, pre_centroids), (2, 1)
+        ),
+    )
+
+    # Maybe get an offset as well.
+    return centroids
 end
 
 end # module
