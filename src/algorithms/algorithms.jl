@@ -26,6 +26,7 @@ import UnPack: @unpack, @pack!
 # utility for dispatching to the `ThreadLocal` constructor if desired.
 threadlocal_wrap(::typeof(dynamic_thread), x) = ThreadLocal(x)
 threadlocal_wrap(::typeof(single_thread), x) = x
+threadlocal_wrap(tids::AbstractRange, x) = ThreadLocal(ThreadPool(tids), x)
 
 # exhaustive search
 export exhaustive_search
