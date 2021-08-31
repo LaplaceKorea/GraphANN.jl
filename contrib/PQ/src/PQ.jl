@@ -7,7 +7,7 @@ using Statistics
 
 # deps
 using SIMD: SIMD
-import StaticArrays: SVector, SMatrix, SDiagonal
+import StaticArrays: StaticVector, SVector, MVector
 using ProgressMeter: ProgressMeter
 import UnPack: @unpack
 
