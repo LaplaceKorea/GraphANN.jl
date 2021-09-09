@@ -99,8 +99,11 @@ force_load(::Type{T}, ptr::Ptr) where {T} = unsafe_load(Ptr{T}(ptr))
 # of the size of `point` and that the destination is valid.
 #
 # These invariants must be maintained within the top level `DistanceTable`.
+@inline op(::GraphANN.Euclidean, x, y) = (x .- y) .^ 2
+@inline op(::GraphANN.InnerProduct, x, y) = (x .* y)
+
 @inline function store_distances!( # Not a safe function
-    metric::Any,
+    metric,
     dest::AbstractVector{Float32},
     src::AbstractVector{SVector{N,Float32}},
     point::SVector{N},
@@ -113,7 +116,7 @@ force_load(::Type{T}, ptr::Ptr) where {T} = unsafe_load(Ptr{T}(ptr))
     while src_ptr < src_stop
         # Compute square Euclidean distances using SIMD parallelism.
         src_point = force_load(typeof(point_broadcast), src_ptr)
-        distances = sum_every((src_point - point_broadcast) .^ 2, Val(N))
+        distances = sum_every(op(metric, src_point, point_broadcast), Val(N))
         force_store!(dst_ptr, distances)
 
         src_ptr += sizeof(point_broadcast)
