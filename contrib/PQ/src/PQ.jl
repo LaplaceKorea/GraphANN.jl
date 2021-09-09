@@ -3,10 +3,12 @@ module PQ
 import GraphANN: GraphANN, MaybeThreadLocal
 
 # stdlib
+using LinearAlgebra
 using Statistics
 
 # deps
-using SIMD: SIMD
+import LoopVectorization
+import SIMD
 import StaticArrays: StaticVector, SVector, MVector
 using ProgressMeter: ProgressMeter
 import UnPack: @unpack
@@ -98,7 +100,7 @@ force_load(::Type{T}, ptr::Ptr) where {T} = unsafe_load(Ptr{T}(ptr))
 #
 # These invariants must be maintained within the top level `DistanceTable`.
 @inline function store_distances!( # Not a safe function
-    metric,
+    metric::Any,
     dest::AbstractVector{Float32},
     src::AbstractVector{SVector{N,Float32}},
     point::SVector{N},
@@ -158,18 +160,26 @@ end
 #
 # However, we may need to fall back to a loop for large "K".
 # If performance degrades for datasets with high dimensionality, we'll revisit this.
+const GENERIC_FALLBACK_THRESHOLD = 32
 @generated function lookup(table::DistanceTable, inds::NTuple{K}) where {K}
-    return _lookup_impl(K)
+    # If our tuple is very big, we don't want to fully unroll the lookup operation because
+    # that will likely cause spilling from registers.
+    # Thus, we have a heuristic threshold at which point we use a generic fallback.
+    if K > GENERIC_FALLBACK_THRESHOLD
+        return :(lookup_generic(table, inds))
+    else
+        return _lookup_full_unroll_impl(K)
+    end
 end
 
 _gensym(i; prefix = "s") = Symbol("$(prefix)_$(i)")
-function _lookup_impl(K)
-    loads = [:($(_gensym(i)) = @inbounds(Int(inds[$i]))) for i in 1:K]
-    incr = [:($(_gensym(i; prefix = "j")) = $(_gensym(i)) + 1) for i in 1:K]
-    exprs = map(1:K) do i
+function _lookup_full_unroll_impl(K)
+    loads = [:($(_gensym(i)) = @inbounds(UInt(inds[$i]))) for i in 1:K]
+    incr = [:($(_gensym(i; prefix = "j")) = $(_gensym(i)) + one(UInt)) for i in 1:K]
+    exprs = map(Base.OneTo(K)) do i
         :($(_gensym(i; prefix = "k")) = @inbounds(distances[$(_gensym(i; prefix = "j")), $i]))
     end
-    syms = [:($(_gensym(i; prefix = "k"))) for i in 1:K]
+    syms = [:($(_gensym(i; prefix = "k"))) for i in Base.OneTo(K)]
 
     return quote
         Base.@_inline_meta
@@ -179,6 +189,34 @@ function _lookup_impl(K)
         $(exprs...)
         return sum(($(syms...),))
     end
+end
+
+function lookup_generic(table::DistanceTable, inds::NTuple{K}) where {K}
+    Base.@_inline_meta
+    @unpack distances = table
+    i = one(UInt)
+    s1 = zero(Float32)
+    s2 = zero(Float32)
+    s3 = zero(Float32)
+    s4 = zero(Float32)
+    @inbounds while i <= (K - 3)
+        a1 = UInt(inds[i + 0]) + one(UInt)
+        a2 = UInt(inds[i + 1]) + one(UInt)
+        a3 = UInt(inds[i + 2]) + one(UInt)
+        a4 = UInt(inds[i + 3]) + one(UInt)
+        s1 += distances[a1, i + 0]
+        s2 += distances[a2, i + 1]
+        s3 += distances[a3, i + 2]
+        s4 += distances[a4, i + 3]
+        i += 4
+    end
+
+    # Get any leftovers
+    @inbounds while i <= K
+        s1 += distances[UInt(inds[i]) + one(UInt), i]
+        i += 1
+    end
+    return s1 + s2 + s3 + s4
 end
 
 function encode(

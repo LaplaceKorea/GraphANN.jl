@@ -108,6 +108,7 @@ const PQ_CENTER = joinpath(DATADIR, "siftsmall_pq_pivots_centroid.bin")
     for _ in 1:10000
         inds = ntuple(_ -> rand(UInt8), Val(length(queries)))
         dist = PQ.lookup(table, inds)
+        dist_generic = PQ.lookup_generic(table, inds)
 
         # Manual computation.
         reference = zero(Float32)
@@ -120,6 +121,8 @@ const PQ_CENTER = joinpath(DATADIR, "siftsmall_pq_pivots_centroid.bin")
             )
         end
         @test isapprox(reference, dist)
+        @test isapprox(reference, dist_generic)
+        @test isapprox(dist, dist_generic)
     end
 end # @testset
 
