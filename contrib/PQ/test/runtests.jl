@@ -13,6 +13,8 @@ const COMPRESSED_DATASET = joinpath(DATADIR, "siftsmall_compressed.bin")
 const PQ_PIVOTS = joinpath(DATADIR, "siftsmall_pq_pivots.bin")
 const PQ_CENTER = joinpath(DATADIR, "siftsmall_pq_pivots_centroid.bin")
 
+include("compress.jl")
+
 @testset "Testing PQ Units" begin
     @test PQ.exact_div(10, 5) == 2
     @test_throws Exception PQ.exact_div(10, 4)

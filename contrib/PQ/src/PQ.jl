@@ -100,7 +100,7 @@ force_load(::Type{T}, ptr::Ptr) where {T} = unsafe_load(Ptr{T}(ptr))
 #
 # These invariants must be maintained within the top level `DistanceTable`.
 @inline op(::GraphANN.Euclidean, x, y) = (x .- y) .^ 2
-@inline op(::GraphANN.InnerProduct, x, y) = (x .* y)
+@inline op(::GraphANN.InnerProduct, x, y) = (-).(x .* y)
 
 @inline function store_distances!( # Not a safe function
     metric,
@@ -148,12 +148,12 @@ maybeload(x) = x
 maybeload(ptr::Ptr) = unsafe_load(ptr)
 
 function GraphANN.prehook(table::DistanceTable, query::GraphANN.MaybePtr{SVector})
-    precompute!(GraphANN.getlocal(table), maybeload(query))
+    precompute!(table, maybeload(query))
     return nothing
 end
 
 @inline function GraphANN.evaluate(
-    table::DistanceTable, ::GraphANN.MaybePtr{SVector}, x::GraphANN.MaybePtr{NTuple}
+    table::DistanceTable, _::GraphANN.MaybePtr{SVector}, x::GraphANN.MaybePtr{NTuple}
 )
     return lookup(table, maybeload(x))
 end
@@ -222,10 +222,13 @@ function lookup_generic(table::DistanceTable, inds::NTuple{K}) where {K}
     return s1 + s2 + s3 + s4
 end
 
+"""
+    encode(metric::DistanceTable, data, eltype)
+"""
 function encode(
     _table::DistanceTable{N},
     data::AbstractVector{<:SVector{K}},
-    itype::Type{I};
+    ::Type{I};
     allocator = GraphANN.stdallocator,
     executor = GraphANN.dynamic_thread,
 ) where {N,K,I}
@@ -312,7 +315,6 @@ function load_diskann_centroids(io::IO, fulldim, centroiddim; offsetpath = nothi
         )
         pre_centroids .+= Ref(offset)
     end
-    ncentroids = length(pre_centroids)
     centroids = collect(
         permutedims(
             reinterpret(reshape, SVector{centroiddim,Float32}, pre_centroids), (2, 1)

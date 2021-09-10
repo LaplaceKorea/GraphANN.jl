@@ -82,6 +82,9 @@ function optimize!(
                 changed = true
                 assignments[partition] = minindex
             end
+
+            # Revert our inermediate tracking to the minimum index.
+            setslice!(xbar, centroids[minindex, partition], partition)
         end
         iter += 1
         (iter > maxiters || (changed == false)) && break
@@ -98,6 +101,11 @@ Base.@propagate_inbounds function setslice!(
     end
 end
 
+Base.@propagate_inbounds function getslice(::Type{SVector{N,Float32}}, y::SVector, index::Integer) where {N}
+    base = N * (index - 1)
+    return SVector(ntuple(i -> Float32(y[base + i]), Val(N)))
+end
+
 function pass!(
     data::AbstractVector{SVector{N1,T}},
     centroids::AbstractMatrix{SVector{N2,Float32}};
@@ -105,20 +113,27 @@ function pass!(
 ) where {N1,N2,T}
     # TODO: Validate sizes of data and centroids
     x̄ = GraphANN.ThreadLocal(zero(MVector{N1,Float32}))
+    counts = GraphANN.ThreadLocal(zeros(Int, size(centroids)))
 
     assignments = ones(UInt32, size(centroids, 2), length(data))
     losses = zeros(Float32, length(data))
 
     meter = ProgressMeter.Progress(length(data), 1)
-    iter = GraphANN.batched(eachindex(data), 128)
+    iter = GraphANN.batched(eachindex(data), 256)
     GraphANN.dynamic_thread(iter) do range
+        local_counts = counts[]
         for i in range
-            losses[i] = optimize!(view(assignments, :, i), centroids, data[i], x̄[]; η)
+            va = view(assignments, :, i)
+            losses[i] = optimize!(va, centroids, data[i], x̄[]; η)
+            for i in eachindex(va)
+                local_counts[va[i], i] += 1
+            end
         end
         ProgressMeter.next!(meter; step = length(range))
     end
+    total_counts = sum(GraphANN.getall(counts))
 
-    return assignments, losses
+    return assignments, losses, total_counts
 end
 
 #####
@@ -126,9 +141,8 @@ end
 #####
 
 function accum!(C::AbstractMatrix, A::AbstractMatrix, B::Vector{Int})
-    @inbounds for j in axes(A, 2), i in axes(A, 1)
-        m, n = B[i], B[j]
-        C[m, n] += A[i, j]
+    for j in axes(A, 2), i in axes(A, 1)
+        C[B[i], B[j]] += A[i, j]
     end
 end
 
@@ -179,7 +193,7 @@ function process!(
     centroid_dim = 4,
 ) where {N}
     # Step 1 - Fill out the set columns for the "B" matrix
-    @unpack columns = runner
+    columns = runner.columns
     resize!(columns, centroid_dim * length(assignments))
     columns_index = 1
     for (i, assignment) in enumerate(assignments)
@@ -192,7 +206,7 @@ function process!(
     end
 
     # Step 2 - Compute the inner matrix for the left accumulation
-    @unpack scratch, left_accum = runner
+    scratch, left_accum = runner.scratch, runner.left_accum
     zero!(scratch)
     outerproduct!(scratch, x)
     scalar = (h₌ - h₊) / GraphANN._Base.norm_square(x)
@@ -202,14 +216,14 @@ function process!(
 
     # Add h₌ along the diagonal
     for i in Base.OneTo(size(scratch, 1))
-        scratch[i, i] += h₌
+        scratch[i, i] += h₊
     end
 
     # Step 3 - Perform the operation `Bᵀ * A * B` operation
     accum!(left_accum, scratch, columns)
 
     # Step 4 - Complete the right accumulation
-    @unpack right_accum = runner
+    right_accum = runner.right_accum
     for i in Base.OneTo(N)
         right_accum[columns[i]] += h₌ * x[i]
     end
@@ -224,5 +238,76 @@ function go!(runner, data, assignments; η = one(Float32))
         process!(runner, data[i], view(assignments, :, i), η, one(Float32))
     end
     return runner
+end
+
+#####
+##### Squish
+#####
+
+# The matrix/vector combination may contain rows and columns of zeros.
+# In order to solve the system of linear equations, we need to make the matrix non-singular
+# which means we need to remove all these missing entries, solve the system, and then expand
+# the solution back to the original size.
+#
+# Rows/columns of the large matrix will be zero if a particular centroid is not chosen for
+# any data point.
+#
+# If that is the case, then we will also need to repick any unused centroids.
+squish(runner::UpdateRunner) = squish(runner.left_accum, runner.right_accum)
+function squish(matrix::AbstractMatrix, vector::AbstractVector)
+    @assert size(matrix, 1) == size(matrix, 2)
+    @assert size(matrix, 2) == length(vector)
+
+    # Find all columns with at least one entry.
+    indices = [i for i in Base.OneTo(size(matrix, 2)) if any(!iszero, view(matrix, :, i))]
+
+    # Fast path - all entries are valid.
+    # NOTE: Return type here is not type stable.
+    if length(indices) == length(vector)
+        return (matrix = matrix, vector = vector, indices = (:))
+    end
+
+    new_length = length(indices)
+    squished_matrix = similar(matrix, eltype(matrix), (new_length, new_length))
+    squished_vector = similar(vector, eltype(vector), new_length)
+
+    matrix_view = view(matrix, indices, indices)
+    Threads.@threads for i in eachindex(squished_matrix, matrix_view)
+        squished_matrix[i] = matrix_view[i]
+    end
+    squished_vector .= view(vector, indices)
+    return (matrix = squished_matrix, vector = squished_vector, indices = indices)
+end
+
+function update_centroids!(centroids, nt::NamedTuple)
+    return update_centroids!(centroids, nt.matrix, nt.vector, nt.indices)
+end
+function update_centroids!(
+    centroids::AbstractMatrix{SVector{N,T}}, matrix, vector, indices
+) where {N,T}
+    # Reinterpret "centroids" appropriately.
+    centroid_view = view(reinterpret(T, centroids), indices)
+    updates = matrix \ vector
+    centroid_view .= updates
+    return nothing
+end
+
+#####
+##### Repick unused centroids
+#####
+
+function repick!(
+    centroids::AbstractMatrix{SVector{N,Float32}},
+    data::AbstractVector{SVector{N1,T}},
+    counts::AbstractMatrix,
+) where {N,N1,T}
+    inds = findall(iszero, counts)
+    for ind in inds
+        # Convert CartesianIndex to a tuple to get the partition number and the centroid's
+        # position in this partition.
+        partition = ind[2]
+        centroids[ind] = getslice(SVector{N,Float32}, rand(data), partition)
+    end
+    return length(inds)
 end
 
