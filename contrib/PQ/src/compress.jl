@@ -282,6 +282,7 @@ end
 function update_centroids!(centroids, nt::NamedTuple)
     return update_centroids!(centroids, nt.matrix, nt.vector, nt.indices)
 end
+
 function update_centroids!(
     centroids::AbstractMatrix{SVector{N,T}}, matrix, vector, indices
 ) where {N,T}

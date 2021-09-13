@@ -14,7 +14,7 @@ function reference(::GraphANN.InnerProduct, A, B)
     for (a, b) in zip(A, B)
         s += Float64(a) * Float64(b)
     end
-    return -s
+    return s
 end
 
 @testset "Testing SIMD" begin

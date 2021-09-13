@@ -66,6 +66,7 @@ function visited(x::MaskWrap{IDMSB,I,D}) where {I,D}
 end
 
 Base.isless(x::D, y::MaskWrap{T,I,D}) where {T,I,D} = x < getdistance(y)
+Base.isless(x::MaskWrap{T,I,D}, y::D) where {T,I,D} = getdistance(x) < y
 function Base.isless(x::MaskWrap{T,I,D}, y::MaskWrap{T,I,D}) where {T,I,D}
     return isless(getdistance(x), y)
 end
@@ -74,18 +75,20 @@ end
 ##### BestBuffer
 #####
 
-mutable struct BestBuffer{T,I,D}
+mutable struct BestBuffer{T,I,D,O <: Base.Ordering}
     entries::Vector{MaskWrap{T,I,D}}
     # How many entries are currently valid in the vector.
     currentlength::Int
     maxlength::Int
     # The index of the lowest-distance entry that has not yet been visited.
     bestunvisited::Int
+    ordering::O
 end
+Base.lt(o::BestBuffer, x, y) = Base.lt(o.ordering, x, y)
 
-function BestBuffer{T,I,D}(maxlen::Integer) where {T,I,D}
+function BestBuffer{T,I,D}(maxlen::Integer, ordering::O) where {T,I,D,O}
     entries = Vector{MaskWrap{T,I,D}}(undef, maxlen)
-    return BestBuffer{T,I,D}(entries, 0, maxlen, 1)
+    return BestBuffer{T,I,D,O}(entries, 0, maxlen, 1, ordering)
 end
 
 function Base.empty!(buffer::BestBuffer)
@@ -109,7 +112,7 @@ function Base.insert!(buffer::BestBuffer, v::MaskWrap)
     i = 1
     dv = getdistance(v)
     while i <= currentlength
-        isless(dv, @inbounds(entries[i])) && break
+        Base.lt(buffer, dv, @inbounds(entries[i])) && break
         i += 1
     end
     i > maxlength && return false

@@ -55,7 +55,7 @@ end
 
 @testset "DiskANN Search" begin
     # Test some properties of `Neighbor`
-    x = GraphANN.DiskANNRunner{Int64,Float64}(2)
+    x = GraphANN.DiskANNRunner{Int64,Float64}(2, Base.Forward)
     GraphANN.Algorithms.pushcandidate!(x, Neighbor(x, 1, 0.0))
 
     # Test `Neighbor` constructor for the `DiskANNRunner` type.

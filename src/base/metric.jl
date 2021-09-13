@@ -1,9 +1,5 @@
-#####
-##### Eager Conversion
-#####
-
+# Conversion of SVectors to SIMD sized chunks
 const SIMDType{N,T} = Union{SVector{N,T},SIMD.Vec{N,T}}
-
 abstract type AbstractWrap{V<:SIMDType,K} end
 
 # Ideally, the generated code for this should be a no-op, it's just awkward because
@@ -233,6 +229,7 @@ abstract type AbstractMetric end
 
 # scalar broadcasting
 Base.broadcastable(x::AbstractMetric) = (x,)
+Base.lt(metric::AbstractMetric, x, y) = Base.lt(ordering(metric), x, y)
 
 """
     Euclidean()
@@ -289,6 +286,7 @@ julia> GraphANN.evaluate(GraphANN.InnerProduct(), a, b)
 ```
 """
 struct InnerProduct <: AbstractMetric end
+ordering(::InnerProduct) = Base.Reverse
 
 """
     evaluate(metric::AbstractMetric, a::SVector, b::SVector)
@@ -318,7 +316,7 @@ function evaluate(
     metric::InnerProduct, a::AbstractWrap{V,K}, b::AbstractWrap{V,K}
 ) where {V,K}
     Base.@_inline_meta
-    return -(_evaluate(metric, a, b))
+    return _evaluate(metric, a, b)
 end
 
 function _evaluate(::InnerProduct, a::AbstractWrap{V,K}, b::AbstractWrap{V,K}) where {V,K}

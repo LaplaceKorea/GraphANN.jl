@@ -98,17 +98,18 @@ Construct a `DiskANNRunner` with id-type `I` and distance-type `D` with the give
 
 See also: [`search`](@ref)
 """
-mutable struct DiskANNRunner{I<:Integer,D,T<:AbstractSet,U<:AbstractMaskType}
+mutable struct DiskANNRunner{I<:Integer,D,O <: Base.Ordering}
     search_list_size::Int64
 
     # Pre-allocated buffer for the search list
-    buffer::BestBuffer{U,I,D}
-    visited::T
+    buffer::BestBuffer{DistanceLSB,I,D,O}
+    visited::FastSet{I}
 end
 
 _Base.idtype(::DiskANNRunner{I}) where {I} = I
 _Base.costtype(::DiskANNRunner{I,D}) where {I,D} = D
-function _Base.Neighbor(x::DiskANNRunner{I,D}, id::Integer, distance) where {I,D}
+
+function _Base.Neighbor(::DiskANNRunner{I,D}, id::Integer, distance) where {I,D}
     # Use `unsafe_trunc` to be slightly faster.
     # In the body of the search routine, we shouldn't see any actual values that will
     # cause the undefined behavior of `unsafe_trunc`.
@@ -116,17 +117,14 @@ function _Base.Neighbor(x::DiskANNRunner{I,D}, id::Integer, distance) where {I,D
 end
 
 function DiskANNRunner{I,D}(
-    search_list_size::Integer; executor::F = single_thread, masktype::U = DistanceLSB()
-) where {I,D,F,U}
-    buffer = BestBuffer{U,I,D}(search_list_size)
-    #visited = Set{I}()
+    search_list_size::Integer, ordering::O; executor::F = single_thread
+) where {I,D,F,O <: Base.Ordering}
+    buffer = BestBuffer{DistanceLSB,I,D}(search_list_size, ordering)
     visited = FastSet{I}()
-    runner = DiskANNRunner{I,D,typeof(visited),U}(
-        convert(Int, search_list_size), buffer, visited
-    )
-
+    runner = DiskANNRunner{I,D,O}(convert(Int, search_list_size), buffer, visited)
     return threadlocal_wrap(executor, runner)
 end
+Base.lt(o::DiskANNRunner, x, y) = Base.lt(o.buffer, x, y)
 
 function Base.resize!(runner::DiskANNRunner, val::Integer)
     runner.search_list_size = val
@@ -141,11 +139,10 @@ function DiskANNRunner(
     index::DiskANNIndex,
     search_list_size;
     executor::F = single_thread,
-    masktype::U = DistanceLSB(),
 ) where {F,U}
     I = eltype(index.graph)
     D = costtype(index.metric, index.data)
-    return DiskANNRunner{I,D}(search_list_size; executor, masktype)
+    return DiskANNRunner{I,D}(search_list_size, ordering(index.metric); executor)
 end
 
 # Prepare for another run.
@@ -191,8 +188,6 @@ Return the top `num_neighbor` results from `runner`.
 function getresults!(runner::DiskANNRunner, num_neighbors, query)
     return view(runner.buffer.entries, Base.OneTo(num_neighbors))
 end
-
-
 
 #####
 ##### Greedy Search Implementation
@@ -249,7 +244,7 @@ function _Base.search(
             @inbounds d = evaluate(metric, query, pointer(data, v))
 
             ## only bother to add if it's better than the worst currently tracked.
-            if d < algmax || !isfull(algo)
+            if Base.lt(algo, d, algmax) || !isfull(algo)
                 maybe_pushcandidate!(algo, Neighbor(algo, v, d))
                 algmax = getdistance(maximum(algo))
             end
@@ -302,8 +297,8 @@ function _Base.search!(
     queries::AbstractVector{T};
     num_neighbors = 10,
     callbacks = DiskANNCallbacks(),
-    postprocess!::F = getresults!
-) where {T<:AbstractVector, F}
+    postprocess!::F = getresults!,
+) where {T<:AbstractVector,F}
     metric = getlocal(index.metric)
     for col in eachindex(queries)
         query = pointer(queries, col)
@@ -333,7 +328,7 @@ function _Base.search!(
     queries::AbstractVector;
     num_neighbors = 10,
     callbacks = DiskANNCallbacks(),
-    postprocess!::F = getresults!
+    postprocess!::F = getresults!,
 ) where {F}
     dynamic_thread(getpool(tls), eachindex(queries), 64) do col
         #_metric = _Base.distribute_distance(metric)
@@ -363,8 +358,8 @@ end
 ##### DiskANN Callbacks
 #####
 
-function visited_callbacks()
-    histogram = zeros(Int, 1_000_000_000)
+function visited_callbacks(data)
+    histogram = zeros(Int, length(data))
     postdistance = function __postdistance(_, _, neighbors)
         for v in neighbors
             histogram[v] += 1

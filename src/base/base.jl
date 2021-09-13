@@ -36,12 +36,14 @@ macro _interleave_meta(n)
     )
 end
 
+
 #####
 ##### Generic Distance
 #####
 
-export MaybePtr, evaluate, prehook, build, search, search!
+export MaybePtr, evaluate, prehook, build, search, search!, ordering
 const MaybePtr{T} = Union{T,Ptr{<:T}}
+ordering(metric) = Base.Forward
 
 """
     evaluate(metric, x::MaybePtr, y::MaybePtr)
