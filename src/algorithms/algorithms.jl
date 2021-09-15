@@ -1,6 +1,6 @@
 module Algorithms
 
-export DiskANNRunner, DiskANNIndex, DiskANNIndexParameters
+export AbstractDiskANNRunner, DiskANNRunner, DiskANNIndex, DiskANNIndexParameters
 export SPTAGRunner, SPTAGIndex
 
 # stdlib

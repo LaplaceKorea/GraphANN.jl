@@ -261,7 +261,7 @@ function neighbor_updates!(
         pruner,
         candidates,
     )
-    sort!(pruner; alg = Base.QuickSort)
+    sort!(pruner; alg = Base.QuickSort, order = ordering(metric))
 
     # As a precaution, make sure the list of updates for this node is empty.
     empty!(nextlist)
@@ -278,9 +278,11 @@ function neighbor_updates!(
 
         # Note: We're indexing `data` with `Neighbor` objects, but that's fine because
         # we've defined that behavior in `utils.jl`.
-        f = x -> (
-            alpha * evaluate(metric, pointer(data, i), pointer(data, x)) <= getdistance(x)
-        )
+        function f(x)
+            scaled = alpha * evaluate(metric, pointer(data, i), pointer(data, x))
+            return Base.lt(ordering(metric), scaled, getdistance(x))
+        end
+
         prune!(f, pruner; start = state)
         length(nextlist) >= target_degree && break
 

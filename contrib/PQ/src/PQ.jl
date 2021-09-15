@@ -9,7 +9,7 @@ using Statistics
 # deps
 import LoopVectorization
 import SIMD
-import StaticArrays: StaticVector, SVector, MVector
+import StaticArrays: StaticVector, SVector, MVector, MMatrix
 using ProgressMeter: ProgressMeter
 import UnPack: @unpack
 

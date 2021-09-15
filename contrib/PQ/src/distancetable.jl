@@ -287,7 +287,7 @@ function Reranker(dataset::AbstractVector; metric = GraphANN.Euclidean())
 end
 
 function (reranker::Reranker)(
-    runner::GraphANN.Algorithms.DiskANNRunner, num_neighbors, query
+    runner::GraphANN.AbstractDiskANNRunner, num_neighbors, query
 )
     @unpack dataset, metric = reranker
     @unpack buffer = runner

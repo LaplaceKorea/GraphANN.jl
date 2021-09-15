@@ -72,6 +72,8 @@ function Base.show(io::IO, index::DiskANNIndex)
     return print(io, "Entry point index: ", index.startnode.index, ")")
 end
 
+abstract type AbstractDiskANNRunner{I<:Integer,D,O<:Base.Ordering} end
+
 """
     DiskANNRunner
 
@@ -98,7 +100,7 @@ Construct a `DiskANNRunner` with id-type `I` and distance-type `D` with the give
 
 See also: [`search`](@ref)
 """
-mutable struct DiskANNRunner{I<:Integer,D,O <: Base.Ordering}
+mutable struct DiskANNRunner{I,D,O} <: AbstractDiskANNRunner{I,D,O}
     search_list_size::Int64
 
     # Pre-allocated buffer for the search list
@@ -106,10 +108,10 @@ mutable struct DiskANNRunner{I<:Integer,D,O <: Base.Ordering}
     visited::FastSet{I}
 end
 
-_Base.idtype(::DiskANNRunner{I}) where {I} = I
-_Base.costtype(::DiskANNRunner{I,D}) where {I,D} = D
+_Base.idtype(::AbstractDiskANNRunner{I}) where {I} = I
+_Base.costtype(::AbstractDiskANNRunner{I,D}) where {I,D} = D
 
-function _Base.Neighbor(::DiskANNRunner{I,D}, id::Integer, distance) where {I,D}
+function _Base.Neighbor(::AbstractDiskANNRunner{I,D}, id::Integer, distance) where {I,D}
     # Use `unsafe_trunc` to be slightly faster.
     # In the body of the search routine, we shouldn't see any actual values that will
     # cause the undefined behavior of `unsafe_trunc`.
@@ -118,15 +120,15 @@ end
 
 function DiskANNRunner{I,D}(
     search_list_size::Integer, ordering::O; executor::F = single_thread
-) where {I,D,F,O <: Base.Ordering}
+) where {I,D,F,O<:Base.Ordering}
     buffer = BestBuffer{DistanceLSB,I,D}(search_list_size, ordering)
     visited = FastSet{I}()
     runner = DiskANNRunner{I,D,O}(convert(Int, search_list_size), buffer, visited)
     return threadlocal_wrap(executor, runner)
 end
-Base.lt(o::DiskANNRunner, x, y) = Base.lt(o.buffer, x, y)
+Base.lt(o::AbstractDiskANNRunner, x, y) = Base.lt(o.buffer, x, y)
 
-function Base.resize!(runner::DiskANNRunner, val::Integer)
+function Base.resize!(runner::AbstractDiskANNRunner, val::Integer)
     runner.search_list_size = val
     return resize!(runner.buffer, val)
 end
@@ -136,9 +138,7 @@ function Base.resize!(runner::ThreadLocal{<:DiskANNRunner}, val::Integer)
 end
 
 function DiskANNRunner(
-    index::DiskANNIndex,
-    search_list_size;
-    executor::F = single_thread,
+    index::DiskANNIndex, search_list_size; executor::F = single_thread
 ) where {F,U}
     I = eltype(index.graph)
     D = costtype(index.metric, index.data)
@@ -146,30 +146,32 @@ function DiskANNRunner(
 end
 
 # Prepare for another run.
-function Base.empty!(runner::DiskANNRunner)
+function Base.empty!(runner::AbstractDiskANNRunner)
     empty!(runner.buffer)
     return empty!(runner.visited)
 end
 
-Base.length(runner::DiskANNRunner) = length(runner.buffer)
+Base.length(runner::AbstractDiskANNRunner) = length(runner.buffer)
 
-visited!(runner::DiskANNRunner, vertex) = push!(runner.visited, getid(vertex))
-isvisited(runner::DiskANNRunner, vertex) = in(getid(vertex), runner.visited)
-getvisited(runner::DiskANNRunner) = runner.visited
+visited!(runner::AbstractDiskANNRunner, vertex) = push!(runner.visited, getid(vertex))
+isvisited(runner::AbstractDiskANNRunner, vertex) = in(getid(vertex), runner.visited)
+getvisited(runner::AbstractDiskANNRunner) = runner.visited
 
 # Get the closest non-visited vertex
 # `unsafe_peek` will not remove top element. Unsafe because it assumes queue is nonempty.
-unsafe_peek(runner::DiskANNRunner) = runner.buffer.entries[runner.buffer.bestunvisited]
-getcandidate!(runner::DiskANNRunner) = getcandidate!(runner.buffer)
-isfull(runner::DiskANNRunner) = length(runner) >= runner.search_list_size
+function unsafe_peek(runner::AbstractDiskANNRunner)
+    return runner.buffer.entries[runner.buffer.bestunvisited]
+end
+getcandidate!(runner::AbstractDiskANNRunner) = getcandidate!(runner.buffer)
+isfull(runner::AbstractDiskANNRunner) = length(runner) >= runner.search_list_size
 
-function maybe_pushcandidate!(runner::DiskANNRunner, vertex::Neighbor)
+function maybe_pushcandidate!(runner::AbstractDiskANNRunner, vertex::Neighbor)
     # If this has already been seen, don't do anything.
     isvisited(runner, vertex) && return false
     return pushcandidate!(runner, vertex)
 end
 
-function pushcandidate!(runner::DiskANNRunner, vertex::Neighbor)
+function pushcandidate!(runner::AbstractDiskANNRunner, vertex::Neighbor)
     visited!(runner, vertex)
     @unpack buffer = runner
 
@@ -177,15 +179,15 @@ function pushcandidate!(runner::DiskANNRunner, vertex::Neighbor)
     return insert!(buffer, vertex)
 end
 
-done(runner::DiskANNRunner) = done(runner.buffer)
-Base.maximum(runner::DiskANNRunner) = maximum(runner.buffer)
+done(runner::AbstractDiskANNRunner) = done(runner.buffer)
+Base.maximum(runner::AbstractDiskANNRunner) = maximum(runner.buffer)
 
 """
-    getresults!(runner::DiskANNRunner, num_neighbor, [query]) -> AbstractVector
+    getresults!(runner::AbstractDiskANNRunner, num_neighbor, [query]) -> AbstractVector
 
 Return the top `num_neighbor` results from `runner`.
 """
-function getresults!(runner::DiskANNRunner, num_neighbors, query)
+function getresults!(runner::AbstractDiskANNRunner, num_neighbors, query)
     return view(runner.buffer.entries, Base.OneTo(num_neighbors))
 end
 
@@ -196,7 +198,7 @@ end
 # NOTE: leave `startnode` as an extra `arg` because we override the default behavior of
 # unpacking the `index` during the building process.
 """
-    search(runner::DiskANNRunner, index::DiskANNIndex, query; [callbacks])
+    search(runner::AbstractDiskANNRunner, index::DiskANNIndex, query; [callbacks])
 
 Perform approximate nearest neighbor search for `query` over `index`.
 Results can be obtained using [`getresults!`](@ref)
@@ -204,7 +206,7 @@ Results can be obtained using [`getresults!`](@ref)
 Callbacks is an optional [`DiskANNCallbacks`](@ref) struct to help with gathering metrics.
 """
 function _Base.search(
-    algo::DiskANNRunner,
+    algo::AbstractDiskANNRunner,
     index::DiskANNIndex,
     query::MaybePtr{AbstractVector{T}},
     start::StartNode = index.startnode;
@@ -257,7 +259,7 @@ function _Base.search(
 end
 
 """
-    search(runner::DiskANNRunner, index::DiskANNIndex, queries; [num_neighbors], [callbacks], [postprocess!])
+    search(runner::AbstractDiskANNRunner, index::DiskANNIndex, queries; [num_neighbors], [callbacks], [postprocess!])
 
 Perform approximate nearest neighbor search for all entries in `queries`, returning
 `num_neighbors` results for each query. The results is a `num_neighbors × length(queries)`
@@ -278,7 +280,7 @@ The default implementation is `GraphANN._Base.getresults!`. Take inspiration fro
 implementation of that function when defining your own.
 """
 function _Base.search(
-    runner::MaybeThreadLocal{DiskANNRunner},
+    runner::MaybeThreadLocal{AbstractDiskANNRunner},
     index::DiskANNIndex,
     queries::AbstractVector{T};
     num_neighbors = 10,
@@ -292,7 +294,7 @@ end
 # Single Threaded Query
 function _Base.search!(
     dest::AbstractMatrix,
-    algo::DiskANNRunner,
+    algo::AbstractDiskANNRunner,
     index::DiskANNIndex,
     queries::AbstractVector{T};
     num_neighbors = 10,
@@ -323,7 +325,7 @@ end
 # Multi Threaded Query
 function _Base.search!(
     dest::AbstractMatrix,
-    tls::ThreadLocal{<:DiskANNRunner},
+    tls::ThreadLocal{<:AbstractDiskANNRunner},
     index::DiskANNIndex,
     queries::AbstractVector;
     num_neighbors = 10,
