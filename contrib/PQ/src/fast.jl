@@ -180,7 +180,7 @@ end
 function GraphANN._Base.search(
     algo::PQDiskANNRunner,
     index::GraphANN.DiskANNIndex,
-    _::GraphANN.MaybePtr{AbstractVector{T}},
+    ::GraphANN.MaybePtr{AbstractVector{T}},
     start::GraphANN.Algorithms.StartNode = index.startnode;
     callbacks = GraphANN.Algorithms.DiskANNCallbacks(),
     metric::FastTable = GraphANN.getlocal(index.metric),

@@ -18,8 +18,8 @@ Fields and Signatures
     Does not automatically differentiate between multithreaded and singlethreaded cases.
 
 * `postdistance` - Called after distance computations for a vertex have been completed.
-    Signature: `postdistance(algo::DiskANNRunner, vertex::Integer, neighbors::AbstractVector)`.
-    - `algo` provides the current state of the search.
+    Signature: `postdistance(runner::DiskANNRunner, vertex::Integer, neighbors::AbstractVector)`.
+    - `runner` provides the current state of the search.
     - `neighbors` the adjacency list for the vertex that was just processed.
         *NOTE*: Do NOT mutate neighbors, it MUST be constant.
 """
@@ -206,22 +206,22 @@ Results can be obtained using [`getresults!`](@ref)
 Callbacks is an optional [`DiskANNCallbacks`](@ref) struct to help with gathering metrics.
 """
 function _Base.search(
-    algo::AbstractDiskANNRunner,
+    runner::AbstractDiskANNRunner,
     index::DiskANNIndex,
     query::MaybePtr{AbstractVector{T}},
     start::StartNode = index.startnode;
     callbacks = DiskANNCallbacks(),
     metric = getlocal(index.metric),
 ) where {T<:Number}
-    empty!(algo)
+    empty!(runner)
 
     # Destructure argument
     @unpack graph, data = index
     initial_distance = evaluate(metric, query, start.value)
-    pushcandidate!(algo, Neighbor(algo, start.index, initial_distance))
+    pushcandidate!(runner, Neighbor(runner, start.index, initial_distance))
 
-    @inbounds while !done(algo)
-        p = getid(unsafe_peek(algo))
+    @inbounds while !done(runner)
+        p = getid(unsafe_peek(runner))
         neighbors = LightGraphs.outneighbors(graph, p)
 
         # Prefetch all new datapoints.
@@ -232,11 +232,11 @@ function _Base.search(
 
         # Prune
         # Do this here to allow the prefetched vectors time to arrive in the cache.
-        getcandidate!(algo)
-        algmax = getdistance(maximum(algo))
+        getcandidate!(runner)
+        algmax = getdistance(maximum(runner))
 
         # Prefetch potential next neigbors.
-        !done(algo) && unsafe_prefetch(graph, getid(unsafe_peek(algo)))
+        !done(runner) && unsafe_prefetch(graph, getid(unsafe_peek(runner)))
 
         # Distance computations
         for v in neighbors
@@ -246,13 +246,13 @@ function _Base.search(
             @inbounds d = evaluate(metric, query, pointer(data, v))
 
             ## only bother to add if it's better than the worst currently tracked.
-            if Base.lt(algo, d, algmax) || !isfull(algo)
-                maybe_pushcandidate!(algo, Neighbor(algo, v, d))
-                algmax = getdistance(maximum(algo))
+            if Base.lt(runner, d, algmax) || !isfull(runner)
+                maybe_pushcandidate!(runner, Neighbor(runner, v, d))
+                algmax = getdistance(maximum(runner))
             end
         end
 
-        callbacks.postdistance(algo, p, neighbors)
+        callbacks.postdistance(runner, p, neighbors)
     end
 
     return nothing
@@ -294,7 +294,7 @@ end
 # Single Threaded Query
 function _Base.search!(
     dest::AbstractMatrix,
-    algo::AbstractDiskANNRunner,
+    runner::AbstractDiskANNRunner,
     index::DiskANNIndex,
     queries::AbstractVector{T};
     num_neighbors = 10,
@@ -308,10 +308,10 @@ function _Base.search!(
         callbacks.prequery()
 
         _Base.prehook(metric, query)
-        search(algo, index, query; callbacks)
+        search(runner, index, query; callbacks)
 
         # Copy over the results to the destination
-        results = postprocess!(algo, num_neighbors, query)
+        results = postprocess!(runner, num_neighbors, query)
         for i in 1:num_neighbors
             @inbounds dest[i, col] = getid(results[i])
         end
@@ -336,16 +336,16 @@ function _Base.search!(
         #_metric = _Base.distribute_distance(metric)
         metric = getlocal(index.metric)
         query = pointer(queries, col)
-        algo = tls[]
+        runner = tls[]
 
         # -- optional telemetry
         callbacks.prequery()
 
         _Base.prehook(metric, query)
-        search(algo, index, query; callbacks = callbacks)
+        search(runner, index, query; callbacks = callbacks)
 
         # Copy over the results to the destination
-        results = postprocess!(algo, num_neighbors, query)
+        results = postprocess!(runner, num_neighbors, query)
         for i in 1:num_neighbors
             @inbounds dest[i, col] = getid(results[i])
         end

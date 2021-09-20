@@ -112,7 +112,7 @@ function Base.insert!(buffer::BestBuffer, v::MaskWrap)
     i = 1
     dv = getdistance(v)
     while i <= currentlength
-        Base.lt(buffer, dv, @inbounds(entries[i])) && break
+        Base.lt(buffer, dv, @inbounds entries[i]) && break
         i += 1
     end
     i > maxlength && return false
@@ -139,8 +139,8 @@ function shift!(buffer::BestBuffer, i)
     end
 
     j = maxind
-    while j >= i
-        @inbounds(entries[j + 1] = entries[j])
+    @inbounds while j >= i
+        entries[j + 1] = entries[j]
         j -= 1
     end
     return nothing
@@ -154,7 +154,7 @@ function getcandidate!(buffer::BestBuffer)
     # Find the next unvisited candidate.
     i = bestunvisited + 1
     while i <= currentlength
-        !isvisited(@inbounds(entries[i])) && break
+        !isvisited(@inbounds entries[i]) && break
         i += 1
     end
     buffer.bestunvisited = i

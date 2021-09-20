@@ -213,7 +213,7 @@ end
 # Dispatch on behavior based on Sets vs Arrays.
 # Use a closure to avoid code that doesn't necessarily need to run.
 maybeunion!(f::F, candidates::AbstractSet) where {F} = union!(candidates, f())
-maybeunion!(f::F, candidates::AbstractArray) where {F} = nothing
+maybeunion!(f::F, _) where {F} = nothing
 
 # """
 #     neighbor_updates!(args...)

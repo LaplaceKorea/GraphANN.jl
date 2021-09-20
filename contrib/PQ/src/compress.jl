@@ -10,6 +10,19 @@ function η(t, x::GraphANN.MaybePtr{SVector{N}}) where {N}
     return (v / (1 - v)) * (N - 1)
 end
 
+η(t, x::AbstractVector{<:SVector}) = η(Float32, t, x)
+function η(::Type{T}, t, x::AbstractVector{<:SVector{N}}) where {T,N}
+    vals = zeros(T, length(x))
+    for i in eachindex(vals, x)
+        vals[i] = η(t, pointer(x, i))
+    end
+    return vals
+end
+
+#####
+##### Utils
+#####
+
 zero!(x) = (x .= zero(eltype(x)))
 
 function ansitropic_loss_ref(
@@ -50,6 +63,10 @@ function initialize!(
         setslice!(xbar, centroids[i, j], j)
     end
 end
+
+#####
+##### Coordinate-Descent Optimization
+#####
 
 function optimize!(
     assignments::AbstractVector{I},
@@ -101,12 +118,17 @@ Base.@propagate_inbounds function setslice!(
     end
 end
 
-Base.@propagate_inbounds function getslice(::Type{SVector{N,Float32}}, y::SVector, index::Integer) where {N}
+Base.@propagate_inbounds function getslice(
+    ::Type{SVector{N,Float32}}, y::SVector, index::Integer
+) where {N}
     base = N * (index - 1)
     return SVector(ntuple(i -> Float32(y[base + i]), Val(N)))
 end
 
-function pass!(
+maybe_getindex(x::AbstractVector, i) = x[i]
+maybe_getindex(x, _) = x
+
+function pass(
     data::AbstractVector{SVector{N1,T}},
     centroids::AbstractMatrix{SVector{N2,Float32}};
     η = one(Float32),
@@ -124,7 +146,7 @@ function pass!(
         local_counts = counts[]
         for i in range
             va = view(assignments, :, i)
-            losses[i] = optimize!(va, centroids, data[i], x̄[]; η)
+            losses[i] = optimize!(va, centroids, data[i], x̄[]; η = maybe_getindex(η, i))
             for i in eachindex(va)
                 local_counts[va[i], i] += 1
             end
@@ -146,9 +168,26 @@ function accum!(C::AbstractMatrix, A::AbstractMatrix, B::Vector{Int})
     end
 end
 
+function outerproduct!(C, A::AbstractVector)
+    LoopVectorization.@turbo for n in axes(A, 1), m in axes(A, 1)
+        C[m, n] = A[m] * A[n]
+    end
+end
+
+# The `UpdateRunner` is a struct that independantly accumulates partial updates
+# for the final PQ update.
+#
+# Update to the large final matrix are stored as a vector of the "PendingUpdate" below
+# which can be periodically committed to the actual matrix in a parallel way.
+struct PendingUpdate
+    row::Int
+    col::Int
+    val::Float32
+end
+
 struct UpdateRunner
     # Left and Right Accumulation
-    left_accum::Matrix{Float32}
+    updates::Vector{PendingUpdate}
     right_accum::Vector{Float32}
 
     # Scratch space
@@ -167,22 +206,17 @@ function UpdateRunner(
     right_accum = zeros(Float32, flatsize)
     scratch = zeros(Float32, vector_dim, vector_dim)
     columns = Int[]
-    return UpdateRunner(left_accum, right_accum, scratch, columns)
+    return UpdateRunner(PendingUpdate[], right_accum, scratch, columns)
 end
 
 function reset!(runner::UpdateRunner)
-    zero!(runner.left_accum)
+    empty!(runner.updates)
     zero!(runner.right_accum)
     zero!(runner.scratch)
     return nothing
 end
 
-function outerproduct!(C, A::AbstractVector)
-    LoopVectorization.@turbo for n in axes(A, 1), m in axes(A, 1)
-        C[m, n] = A[m] * A[n]
-    end
-end
-
+# Process
 function process!(
     runner::UpdateRunner,
     x::SVector{N},
@@ -206,7 +240,7 @@ function process!(
     end
 
     # Step 2 - Compute the inner matrix for the left accumulation
-    scratch, left_accum = runner.scratch, runner.left_accum
+    scratch = runner.scratch
     zero!(scratch)
     outerproduct!(scratch, x)
     scalar = (h₌ - h₊) / GraphANN._Base.norm_square(x)
@@ -220,7 +254,12 @@ function process!(
     end
 
     # Step 3 - Perform the operation `Bᵀ * A * B` operation
-    accum!(left_accum, scratch, columns)
+    updates = runner.updates
+    @inbounds for j in axes(scratch, 2), i in axes(scratch, 1)
+        row = columns[i]
+        col = columns[j]
+        push!(updates, PendingUpdate(row, col, scratch[i, j]))
+    end
 
     # Step 4 - Complete the right accumulation
     right_accum = runner.right_accum
@@ -232,12 +271,79 @@ function process!(
     return nothing
 end
 
-function go!(runner, data, assignments; η = one(Float32))
-    reset!(runner)
-    ProgressMeter.@showprogress 1 for i in eachindex(data)
-        process!(runner, data[i], view(assignments, :, i), η, one(Float32))
+# The coordinator wraps around a collection of `UpdateRunners` (one per thread) and
+# controls the merging process.
+struct RunnerCoordinator
+    runners::GraphANN.ThreadLocal{UpdateRunner}
+    left_accum::Matrix{Float32}
+    right_accum::Vector{Float32}
+end
+
+function RunnerCoordinator(
+    vector_dim::Integer, num_partitions, centroids_per_partition, centroid_dim
+)
+    runners = GraphANN.ThreadLocal(
+        UpdateRunner(vector_dim, num_partitions, centroids_per_partition, centroid_dim)
+    )
+    flatsize = num_partitions * centroids_per_partition * centroid_dim
+    left_accum = zeros(Float32, flatsize, flatsize)
+    right_accum = zeros(Float32, flatsize)
+    return RunnerCoordinator(runners, left_accum, right_accum)
+end
+
+function reset_runners!(coordinator::RunnerCoordinator)
+    return foreach(reset!, GraphANN.getall(coordinator.runners))
+end
+
+function reset!(coordinator::RunnerCoordinator)
+    reset_runners!(coordinator)
+    zero!(coordinator.left_accum)
+    zero!(coordinator.right_accum)
+    return nothing
+end
+
+function process!(
+    coordinator::RunnerCoordinator,
+    data,
+    assignments,
+    η = one(Float32);
+    batchsize = 1000 * Threads.nthreads(),
+)
+    ProgressMeter.@showprogress 1 for range in GraphANN.batched(eachindex(data), batchsize)
+        # Step 1 - let each runner process some items.
+        reset_runners!(coordinator)
+        runners = coordinator.runners
+        GraphANN.dynamic_thread(range, 128) do i
+            process!(
+                runners[],
+                data[i],
+                view(assignments, :, i),
+                maybe_getindex(η, i),
+                one(Float32),
+            )
+        end
+
+        # Step 2 - update the master data `left_accum` matrix.
+        # First - we need to partition ranges of the matrix.
+        left_accum = coordinator.left_accum
+        update_partition_size = GraphANN.cdiv(size(left_accum, 2), Threads.nthreads())
+        all_updates = [runner.updates for runner in GraphANN.getall(runners)]
+        GraphANN.dynamic_thread(
+            GraphANN.batched(axes(left_accum, 2), update_partition_size)
+        ) do subrange
+            # Only update columns in our specified range.
+            # This ensures that no threads are tromping on eachother.
+            for pending_update in Iterators.flatten(all_updates)
+                in(pending_update.col, subrange) || continue
+                row, col, val = pending_update.row, pending_update.col, pending_update.val
+                left_accum[row, col] += val
+            end
+        end
+
+        # Step 3 - update the RHS of the system of equations.
+        right_accum = coordinator.right_accum
+        right_accum .+= sum(runner.right_accum for runner in GraphANN.getall(runners))
     end
-    return runner
 end
 
 #####
@@ -312,3 +418,87 @@ function repick!(
     return length(inds)
 end
 
+#####
+##### Top Level Entry Point
+#####
+
+function ansitropic_pq(
+    dataset::AbstractVector{SVector{N,T}},
+    centroid_dim::Int,
+    ncentroids::Int;
+    magnitude_threshold = 0.2,
+    relative_loss_threshold = 0.05,
+    maxiters = 10,
+) where {N,T}
+    if !iszero(mod(N, centroid_dim))
+        msg = """
+        For now, the centroid dimension `$centroid_dim` must evenly divide the data point
+        dimension `$N`
+        """
+        throw(ArgumentError(msg))
+    end
+
+    # Lift the centroid dimension into the type domain for type stability.
+    return _ansitropic_pq(
+        dataset,
+        Val(centroid_dim),
+        ncentroids,
+        Float32(magnitude_threshold);
+        relative_loss_threshold,
+        maxiters,
+    )
+end
+
+function _ansitropic_pq(
+    dataset::AbstractVector{SVector{N,T}},
+    ::Val{K},
+    ncentroids,
+    magnitude_threshold;
+    relative_loss_threshold,
+    maxiters,
+) where {N,T,K}
+    @info "Calculating η for each data point"
+    eta = η(Float32, magnitude_threshold, dataset)
+    runner = RunnerCoordinator(N, div(N, K), ncentroids, K)
+
+    @info "Picking Initial Centroids"
+    centroids =
+        convert.(
+            SVector{K,Float32},
+            reshape(reinterpret(SVector{K,T}, rand(dataset, ncentroids)), ncentroids, :),
+        )
+
+    total_loss = Inf32
+    local assignments, losses, total_counts
+    for i in Base.OneTo(maxiters)
+        @info "Beginning iteration $i"
+        assignments, losses, total_counts = pass(dataset, centroids; η = eta)
+
+        this_loss = sum(losses)
+        relative_change = abs(this_loss - total_loss) / this_loss
+
+        @info """
+        Clustering Done.
+        Total Loss: $(this_loss)
+        Change since last iteration: $(relative_change)
+
+        Min Centroid Assigments: $(map(minimum, eachcol(total_counts)))
+        Max Centroid Assigments: $(map(maximum, eachcol(total_counts)))
+
+        """
+
+        relative_change <= relative_loss_threshold && break
+
+        @info "Computing Centroid updates"
+        process!(runner, dataset, assignments, eta)
+        update_centroids!(centroids, squish(runner.left_accum, runner.right_accum))
+        num_repicked = repick!(centroids, dataset, total_counts)
+
+        @info """
+        Centroid update done.
+        Had to repick $(num_repicked) centroids.
+        """
+        total_loss = this_loss
+    end
+    return (; centroids, assignments, losses, total_counts)
+end
