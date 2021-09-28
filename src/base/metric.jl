@@ -197,7 +197,7 @@ distance_type(::Type{A}, ::Type{B}) where {A,B} = nothing
 
 # Hijack short ints to allow emission of VNNI instructions.
 const SMALL_INTS = Union{Int8,UInt8,Int16}
-distance_type(::Type{A}, ::Type{B}) where {A<:SMALL_INTS,B<:SMALL_INTS} = Int16
+distance_type(::Type{<:SMALL_INTS}, ::Type{<:SMALL_INTS}) = Int16
 
 """
     accum_type(x)
