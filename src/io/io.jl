@@ -4,13 +4,13 @@ module _IO
 export DiskANN, SPTAG
 
 # Functions
-export load_graph, save_graph
-export load_vecs, save_vecs
+export load_graph, load_bin
+export load_vecs, save_vecs, save_as_superflat
 
 # local deps
-import .._Base: MetaGraph, stdallocator, medioid, dynamic_thread
+import .._Base: MetaGraph, stdallocator, medioid, dynamic_thread, batched
 import .._Graphs: _Graphs, UniDirectedGraph
-import .._Graphs: DefaultAdjacencyList, DenseAdjacencyList
+import .._Graphs: AbstractAdjacencyList, DefaultAdjacencyList, DenseAdjacencyList
 import .._Graphs: AbstractFlatAdjacencyList, FlatAdjacencyList, SuperFlatAdjacencyList
 import .._Trees: TreeNode, Tree, rootindices
 import ..Algorithms: DiskANNIndex

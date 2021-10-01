@@ -96,7 +96,7 @@ end
 
 function load(
     ::Type{U}, io::IO; pad_to = nothing, allocator = stdallocator
-) where {T, U <: AbstractFlatAdjacencyList{T}}
+) where {T,U<:AbstractFlatAdjacencyList{T}}
     @unpack elsize, nv, ne, max_degree = read_header(io)
     @assert elsize == sizeof(T)
 
@@ -105,7 +105,11 @@ function load(
     if pad_to !== nothing
         num_elements = div(pad_to, sizeof(T))
         if num_elements * sizeof(T) != pad_to
-            throw(ArgumentError("Requested padding bytes of $pad_to is not evenly divisible by elements of type $T"))
+            throw(
+                ArgumentError(
+                    "Requested padding bytes of $pad_to is not evenly divisible by elements of type $T",
+                ),
+            )
         end
         max_degree = cdiv(max_degree, num_elements) * num_elements
     end
@@ -203,11 +207,17 @@ function save_bin(
     return bytes_written
 end
 
+# Convenience function
+function load_bin(path::AbstractString, ::Type{A}) where {T,A<:AbstractAdjacencyList{T}}
+    return load_bin(path, UniDirectedGraph{T,A})
+end
+
 """
-    load_bin(dir::AbstractString, GraphANN.UniDirectedGraph{T, GraphANN.DenseAdjacencyList{T}})
+    load_bin(dir::AbstractString, GraphANN.DenseAdjacencyList{T})
 
 Perform a fast load of a graph using the [`DenseAdjacencyList`](@ref) that was saved as
-multiple files in `dir` using the [`save_bin`](@ref save_bin(::AbstractString, ::UniDirectedGraph{T, _Graphs.DenseAdjacencyList{T}}) where {T}) function.
+multiple files in `dir` using the
+[`save_bin`](@ref save_bin(::AbstractString, ::UniDirectedGraph{T, _Graphs.DenseAdjacencyList{T}}) where {T}) function.
 
 ## Implementation Detail
 
@@ -224,3 +234,65 @@ function load_bin(
     return UniDirectedGraph{T}(_Graphs.DenseAdjacencyList{T}(storage, offsets))
 end
 
+function load_bin(
+    path::AbstractString,
+    ::Type{UniDirectedGraph{T,_Graphs.SuperFlatAdjacencyList{T}}};
+    writable = false,
+) where {T}
+    storage = open(path; read = true, write = writable) do io
+        elsize, nv, _, maxdegree = read_header(io)
+        if elsize != sizeof(T)
+            msg = """
+            Trying to load a graph that was saved with an elements sized $elsize bytes.
+            The passed data type was $T which has a size of $(sizeof(T)) bytes.
+            """
+            error(msg)
+        end
+        # Compute the offset consumed by the header.
+        # Memory map from this offset on.
+        offset = elsize * (maxdegree + 1)
+        return Mmap.mmap(io, Matrix{T}, (maxdegree + 1, nv), offset)
+    end
+    return UniDirectedGraph{T}(SuperFlatAdjacencyList{T}(storage))
+end
+
+#####
+##### Save to Mmap
+#####
+
+"""
+    save_as_superflat(path, graph; [batchsize]) -> newgraph
+
+Save `graph` in a superflat format to `path`.
+This format is quickly loadable via
+[`load_bin(path, GraphANN.UniDirectedGraph{T,GraphANN.SuperFlatAdjacencyList{T}})`]
+
+NOTE: The graph should be loaded through the `load_bin` function instead of directly
+memory mapping because the saved format contains metadata regarding the number of
+vertices and max degree.
+"""
+function save_as_superflat(
+    path::AbstractString, graph::UniDirectedGraph{T}; batchsize = 2048
+) where {T}
+    # Compute how much space we are going to need
+    max_degree = maximum(LightGraphs.outdegree(graph))
+    elements_per_vertex = max_degree + 1
+    storage = open(path; read = true, write = true, create = true) do io
+        write_header(io, graph)
+        offset = sizeof(T) * elements_per_vertex
+        return Mmap.mmap(
+            io, Matrix{T}, (elements_per_vertex, LightGraphs.nv(graph)), offset
+        )
+    end
+    newgraph = UniDirectedGraph{T}(SuperFlatAdjacencyList{T}(storage))
+
+    iter = batched(Base.OneTo(LightGraphs.nv(graph)), batchsize)
+    progress = ProgressMeter.Progress(length(iter), 1)
+    dynamic_thread(iter) do range
+        for v in range
+            copyto!(newgraph, v, LightGraphs.outneighbors(graph, v))
+        end
+        ProgressMeter.next!(progress)
+    end
+    return newgraph
+end
