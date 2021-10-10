@@ -13,7 +13,8 @@ end
 η(t, x::AbstractVector{<:SVector}) = η(Float32, t, x)
 function η(::Type{T}, t, x::AbstractVector{<:SVector{N}}) where {T,N}
     vals = zeros(T, length(x))
-    for i in eachindex(vals, x)
+    #for i in eachindex(vals, x)
+    GraphANN.dynamic_thread(eachindex(vals, x), 2048) do i
         vals[i] = η(t, pointer(x, i))
     end
     return vals
@@ -25,30 +26,33 @@ end
 
 zero!(x) = (x .= zero(eltype(x)))
 
-function ansitropic_loss_ref(
-    x::StaticVector{N,Float32}, x̄::StaticVector{N,T}, η
+function anisotropic_loss_ref(
+    x::StaticVector{N,Float32}, xbar::StaticVector{N,T}, η
 ) where {N,T}
     # Compute the parallel and perpendicular losses.
     norm = GraphANN._Base.norm_square(x)
-    error = x - x̄
+    error = x - xbar
 
-    error₌ = -GraphANN._Base.evaluate(GraphANN.InnerProduct(), error, x) * x / norm
+    error₌ = GraphANN._Base.evaluate(GraphANN.InnerProduct(), error, x) * x / norm
     error₊ = error - error₌
     loss₌ = GraphANN._Base.norm_square(error₌)
     loss₊ = GraphANN._Base.norm_square(error₊)
     return η * loss₌ + loss₊
 end
 
-function ansitropic_loss(
-    x::StaticVector{N,Float32}, x̄::StaticVector{N,T}, η::Float32
-) where {N,T}
-    error = x - x̄
+function anisotropic_loss(
+    x::StaticVector{N,Float32},
+    xbar::StaticVector{N,T},
+    η::Float32,
     norm = GraphANN._Base.norm_square(x)
-    c = -GraphANN._Base.evaluate(GraphANN.InnerProduct(), error, x)
+) where {N,T}
+    Base.@_inline_meta
+    error = x - xbar
+    c = GraphANN._Base.evaluate(GraphANN.InnerProduct(), error, x)
     v = c / norm
     loss₌ = v * c
 
-    loss₊ = GraphANN._Base.norm_square((1 - v) * x - x̄)
+    loss₊ = GraphANN._Base.norm_square((1 - v) * x - xbar)
     return η * loss₌ + loss₊
 end
 
@@ -78,9 +82,10 @@ function optimize!(
     initialize!(xbar, assignments, centroids)
 
     # Coordinate Descent
-    maxiters = 10
+    maxiters = 20
     iter = 0
     minloss = typemax(Float32)
+    xnorm = GraphANN._Base.norm_square(x)
     while true
         changed = false
         @inbounds for partition in Base.OneTo(size(centroids, 2))
@@ -89,7 +94,7 @@ function optimize!(
 
             for centroid_index in Base.OneTo(size(centroids, 1))
                 setslice!(xbar, centroids[centroid_index, partition], partition)
-                loss = ansitropic_loss(x, xbar, η)
+                loss = anisotropic_loss(x, xbar, η, xnorm)
                 if loss < minloss
                     minloss = loss
                     minindex = centroid_index
@@ -134,19 +139,19 @@ function pass(
     η = one(Float32),
 ) where {N1,N2,T}
     # TODO: Validate sizes of data and centroids
-    x̄ = GraphANN.ThreadLocal(zero(MVector{N1,Float32}))
+    xbar = GraphANN.ThreadLocal(zero(MVector{N1,Float32}))
     counts = GraphANN.ThreadLocal(zeros(Int, size(centroids)))
 
     assignments = ones(UInt32, size(centroids, 2), length(data))
     losses = zeros(Float32, length(data))
 
     meter = ProgressMeter.Progress(length(data), 1)
-    iter = GraphANN.batched(eachindex(data), 256)
+    iter = GraphANN.batched(eachindex(data), 1024)
     GraphANN.dynamic_thread(iter) do range
         local_counts = counts[]
         for i in range
             va = view(assignments, :, i)
-            losses[i] = optimize!(va, centroids, data[i], x̄[]; η = maybe_getindex(η, i))
+            losses[i] = optimize!(va, centroids, data[i], xbar[]; η = maybe_getindex(η, i))
             for i in eachindex(va)
                 local_counts[va[i], i] += 1
             end
@@ -273,8 +278,8 @@ end
 
 # The coordinator wraps around a collection of `UpdateRunners` (one per thread) and
 # controls the merging process.
-struct RunnerCoordinator
-    runners::GraphANN.ThreadLocal{UpdateRunner}
+struct RunnerCoordinator{U}
+    runners::GraphANN.ThreadLocal{UpdateRunner, U}
     left_accum::Matrix{Float32}
     right_accum::Vector{Float32}
 end
@@ -307,8 +312,8 @@ function process!(
     data,
     assignments,
     η = one(Float32);
-    batchsize = 1000 * Threads.nthreads(),
 )
+    batchsize = 100 * Threads.nthreads()
     ProgressMeter.@showprogress 1 for range in GraphANN.batched(eachindex(data), batchsize)
         # Step 1 - let each runner process some items.
         reset_runners!(coordinator)
@@ -422,7 +427,7 @@ end
 ##### Top Level Entry Point
 #####
 
-function ansitropic_pq(
+function anisotropic_pq(
     dataset::AbstractVector{SVector{N,T}},
     centroid_dim::Int,
     ncentroids::Int;
@@ -439,7 +444,7 @@ function ansitropic_pq(
     end
 
     # Lift the centroid dimension into the type domain for type stability.
-    return _ansitropic_pq(
+    return _anisotropic_pq(
         dataset,
         Val(centroid_dim),
         ncentroids,
@@ -449,7 +454,7 @@ function ansitropic_pq(
     )
 end
 
-function _ansitropic_pq(
+function _anisotropic_pq(
     dataset::AbstractVector{SVector{N,T}},
     ::Val{K},
     ncentroids,
@@ -491,6 +496,8 @@ function _ansitropic_pq(
 
         @info "Computing Centroid updates"
         process!(runner, dataset, assignments, eta)
+
+        @info "Solving system of Linear Equations"
         update_centroids!(centroids, squish(runner.left_accum, runner.right_accum))
         num_repicked = repick!(centroids, dataset, total_counts)
 

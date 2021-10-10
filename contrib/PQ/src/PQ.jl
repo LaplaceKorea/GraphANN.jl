@@ -7,14 +7,19 @@ using LinearAlgebra
 using Statistics
 
 # deps
-import LoopVectorization
+# import LoopVectorization
 import SIMD
 import StaticArrays: StaticVector, SVector, MVector, MMatrix
+import LoopVectorization
 using ProgressMeter: ProgressMeter
 import UnPack: @unpack
 
 include("distancetable.jl")
 include("compress.jl")
 include("fast.jl")
+
+function __init__()
+    LinearAlgebra.BLAS.set_num_threads(Threads.nthreads())
+end
 
 end # module
