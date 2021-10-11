@@ -4,6 +4,7 @@ import GraphANN: GraphANN, MaybeThreadLocal
 
 # stdlib
 using LinearAlgebra
+using Serialization
 using Statistics
 
 # deps
@@ -14,6 +15,7 @@ import LoopVectorization
 using ProgressMeter: ProgressMeter
 import UnPack: @unpack
 
+include("atomic.jl")
 include("distancetable.jl")
 include("compress.jl")
 include("fast.jl")

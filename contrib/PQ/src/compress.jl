@@ -141,6 +141,7 @@ function pass(
     # TODO: Validate sizes of data and centroids
     xbar = GraphANN.ThreadLocal(zero(MVector{N1,Float32}))
     counts = GraphANN.ThreadLocal(zeros(Int, size(centroids)))
+    localassignments = GraphANN.ThreadLocal(zeros(UInt32, size(centroids, 2)))
 
     assignments = ones(UInt32, size(centroids, 2), length(data))
     losses = zeros(Float32, length(data))
@@ -148,10 +149,21 @@ function pass(
     meter = ProgressMeter.Progress(length(data), 1)
     iter = GraphANN.batched(eachindex(data), 1024)
     GraphANN.dynamic_thread(iter) do range
+    #for range in iter
         local_counts = counts[]
+
         for i in range
+            # Copy assignments sub-vector into a local buffer to avoid cache
+            # confliction between threads.
             va = view(assignments, :, i)
-            losses[i] = optimize!(va, centroids, data[i], xbar[]; η = maybe_getindex(η, i))
+            losses[i] = optimize!(
+                va,
+                centroids,
+                data[i],
+                xbar[];
+                η = maybe_getindex(η, i),
+            )
+
             for i in eachindex(va)
                 local_counts[va[i], i] += 1
             end
@@ -311,14 +323,14 @@ function process!(
     coordinator::RunnerCoordinator,
     data,
     assignments,
-    η = one(Float32);
+    η = one(Float32),
 )
-    batchsize = 100 * Threads.nthreads()
+    batchsize = 1000 * Threads.nthreads()
     ProgressMeter.@showprogress 1 for range in GraphANN.batched(eachindex(data), batchsize)
         # Step 1 - let each runner process some items.
         reset_runners!(coordinator)
         runners = coordinator.runners
-        GraphANN.dynamic_thread(range, 128) do i
+        @time GraphANN.dynamic_thread(range, 1024) do i
             process!(
                 runners[],
                 data[i],
@@ -333,21 +345,31 @@ function process!(
         left_accum = coordinator.left_accum
         update_partition_size = GraphANN.cdiv(size(left_accum, 2), Threads.nthreads())
         all_updates = [runner.updates for runner in GraphANN.getall(runners)]
-        GraphANN.dynamic_thread(
-            GraphANN.batched(axes(left_accum, 2), update_partition_size)
-        ) do subrange
-            # Only update columns in our specified range.
-            # This ensures that no threads are tromping on eachother.
-            for pending_update in Iterators.flatten(all_updates)
-                in(pending_update.col, subrange) || continue
+        @time GraphANN.dynamic_thread(eachindex(all_updates)) do i
+            updates = all_updates[i]
+            for pending_update in updates
                 row, col, val = pending_update.row, pending_update.col, pending_update.val
-                left_accum[row, col] += val
+                ind = size(left_accum, 1) * (col - 1) + row
+                atomic_ptr_add!(pointer(left_accum, ind), val)
+                #left_accum[row, col] += val
             end
         end
+        # GraphANN.dynamic_thread(
+        #     GraphANN.batched(axes(left_accum, 2), update_partition_size)
+        # ) do subrange
+        #     # Only update columns in our specified range.
+        #     # This ensures that no threads are tromping on eachother.
+        #     for vec in all_updates, pending_update in vec
+        #         in(pending_update.col, subrange) || continue
+        #         row, col, val = pending_update.row, pending_update.col, pending_update.val
+        #         left_accum[row, col] += val
+        #     end
+        # end
 
         # Step 3 - update the RHS of the system of equations.
         right_accum = coordinator.right_accum
-        right_accum .+= sum(runner.right_accum for runner in GraphANN.getall(runners))
+        @time right_accum .+= sum(runner.right_accum for runner in GraphANN.getall(runners))
+        println()
     end
 end
 
@@ -434,6 +456,7 @@ function anisotropic_pq(
     magnitude_threshold = 0.2,
     relative_loss_threshold = 0.05,
     maxiters = 10,
+    savedir = nothing
 ) where {N,T}
     if !iszero(mod(N, centroid_dim))
         msg = """
@@ -451,6 +474,7 @@ function anisotropic_pq(
         Float32(magnitude_threshold);
         relative_loss_threshold,
         maxiters,
+        savedir,
     )
 end
 
@@ -461,6 +485,7 @@ function _anisotropic_pq(
     magnitude_threshold;
     relative_loss_threshold,
     maxiters,
+    savedir = nothing,
 ) where {N,T,K}
     @info "Calculating η for each data point"
     eta = η(Float32, magnitude_threshold, dataset)
@@ -473,11 +498,20 @@ function _anisotropic_pq(
             reshape(reinterpret(SVector{K,T}, rand(dataset, ncentroids)), ncentroids, :),
         )
 
+
+
+    if savedir !== nothing && !isdir(savedir)
+        mkdir(savedir)
+    end
     total_loss = Inf32
     local assignments, losses, total_counts
     for i in Base.OneTo(maxiters)
         @info "Beginning iteration $i"
         assignments, losses, total_counts = pass(dataset, centroids; η = eta)
+        if savedir !== nothing
+            serialize(joinpath(savedir, "assignments_$i.jls"), assignments)
+            serialize(joinpath(savedir, "centroids_$i.jls"), centroids)
+        end
 
         this_loss = sum(losses)
         relative_change = abs(this_loss - total_loss) / this_loss

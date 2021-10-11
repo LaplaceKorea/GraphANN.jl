@@ -162,9 +162,10 @@ function load_bin(
     path::AbstractString;
     allocator = stdallocator,
     groundtruth = false,
+    maxlines = nothing,
 ) where {T}
     return open(path) do io
-        load_bin(diskann, T, io; allocator, groundtruth)
+        load_bin(diskann, T, io; allocator, groundtruth, maxlines)
     end
 end
 
@@ -174,6 +175,7 @@ function load_bin(
     io::IO;
     allocator = stdallocator,
     groundtruth = false,
+    maxlines = nothing,
 ) where {N,T,U <: Union{SVector{N,T},NTuple{N,T}}}
     num_points = read(io, Cuint)
     point_dim = read(io, Cuint)
@@ -182,6 +184,9 @@ function load_bin(
         Point dimension mismatch. Expected dataset with $N dimensions. Instead, found $point_dim
         """
         throw(ArgumentError(msg))
+    end
+    if maxlines !== nothing
+        num_points = min(maxlines, num_points)
     end
     data = allocator(U, num_points)
     read!(io, data)
@@ -195,9 +200,12 @@ function load_bin(
 end
 
 function load_bin(
-    diskann::DiskANN, ::Type{T}, io::IO; allocator = stdallocator, groundtruth = false
+    diskann::DiskANN, ::Type{T}, io::IO; allocator = stdallocator, groundtruth = false, maxlines = nothing
 ) where {T}
     num_points = read(io, Cuint)
+    if maxlines !== nothing
+        num_points = min(maxlines, num_points)
+    end
     point_dim = read(io, Cuint)
     data = allocator(T, point_dim, num_points)
     read!(io, data)
