@@ -126,7 +126,7 @@ function DiskANNRunner{I,D}(
     runner = DiskANNRunner{I,D,O}(convert(Int, search_list_size), buffer, visited)
     return threadlocal_wrap(executor, runner)
 end
-Base.lt(o::AbstractDiskANNRunner, x, y) = Base.lt(o.buffer, x, y)
+@inline Base.lt(o::AbstractDiskANNRunner, x, y) = Base.lt(o.buffer, x, y)
 
 function Base.resize!(runner::AbstractDiskANNRunner, val::Integer)
     runner.search_list_size = val

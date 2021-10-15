@@ -407,7 +407,7 @@ function norm_square(x::MaybePtr{T}) where {T<:SVector}
     return norm_square(wrap(V, x))
 end
 
-norm(x::AbstractWrap) = sqrt(norm_square(x))
+@inline norm(x::AbstractWrap) = sqrt(norm_square(x))
 function norm_square(x::AbstractWrap{V,K}) where {V,K}
     Base.@_inline_meta
     s = zero(accum_type(V))

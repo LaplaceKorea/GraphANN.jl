@@ -84,7 +84,7 @@ mutable struct BestBuffer{T,I,D,O <: Base.Ordering}
     bestunvisited::Int
     ordering::O
 end
-Base.lt(o::BestBuffer, x, y) = Base.lt(o.ordering, x, y)
+@inline Base.lt(o::BestBuffer, x, y) = Base.lt(o.ordering, x, y)
 
 function BestBuffer{T,I,D}(maxlen::Integer, ordering::O) where {T,I,D,O}
     entries = Vector{MaskWrap{T,I,D}}(undef, maxlen)

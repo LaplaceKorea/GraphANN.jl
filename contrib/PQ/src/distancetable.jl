@@ -43,8 +43,8 @@ GraphANN.costtype(::MaybeThreadLocal{DistanceTable}, ::AbstractVector) = Float32
 GraphANN.costtype(::MaybeThreadLocal{DistanceTable}, ::Type{<:Any}) = Float32
 GraphANN.costtype(::MaybeThreadLocal{DistanceTable}, ::Type{<:Any}, ::Type{<:Any}) = Float32
 
-GraphANN.ordering(x::DistanceTable) = GraphANN.ordering(x.metric)
-function GraphANN.ordering(x::GraphANN.ThreadLocal{DistanceTable})
+@inline GraphANN.ordering(x::DistanceTable) = GraphANN.ordering(x.metric)
+@inline function GraphANN.ordering(x::GraphANN.ThreadLocal{DistanceTable})
     return GraphANN.ordering(first(GraphANN.getall(x)))
 end
 
@@ -84,9 +84,6 @@ force_load(::Type{T}, ptr::Ptr) where {T} = unsafe_load(Ptr{T}(ptr))
 #
 # These invariants must be maintained within the top level `DistanceTable`.
 @inline op(::GraphANN.Euclidean, x, y) = (x .- y) .^ 2
-
-# Remember - since we're trying to maximize inner product, but use minimization in the
-# internal implementation, we need to negate the result of the inner product.
 @inline op(::GraphANN.InnerProduct, x, y) = (x .* y)
 
 @inline function store_distances!( # Not a safe function
@@ -241,7 +238,7 @@ function encode(
             # Iterating over partitions
             for j in Base.OneTo(tuple_dim)
                 # Iterating down distances to centroids within the partition.
-                _, min_ind = _findmin(view(distances, :, j), ordering(table))
+                _, min_ind = _findmin(view(distances, :, j), GraphANN.ordering(table))
                 force_store!(ptr, convert(I, min_ind - one(min_ind)))
                 ptr += sizeof(I)
             end

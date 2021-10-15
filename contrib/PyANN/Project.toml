@@ -1,0 +1,4 @@
+name = "PyANN"
+uuid = "6ff01e85-b529-4fa0-80ed-6710a7ecc6b6"
+authors = ["Mark Hildebrand <mhildebrand@ucdavis.edu>"]
+version = "0.1.0"
