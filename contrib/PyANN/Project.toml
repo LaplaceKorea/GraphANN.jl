@@ -2,3 +2,11 @@ name = "PyANN"
 uuid = "6ff01e85-b529-4fa0-80ed-6710a7ecc6b6"
 authors = ["Mark Hildebrand <mhildebrand@ucdavis.edu>"]
 version = "0.1.0"
+
+[deps]
+GraphANN = "38438e65-754f-449b-9041-06b96401f6e7"
+HugepageMmap = "ee95d29b-bb10-4127-aa09-5a5a9fa6956a"
+PQ = "7e810420-ccc1-4918-9984-932c0a062e79"
+PyCall = "438e738f-606a-5dbb-bf0a-cddfbfd45ab0"
+Reexport = "189a3867-3050-52da-a836-e630ba90ab69"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
