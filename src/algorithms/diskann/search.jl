@@ -254,7 +254,6 @@ function _Base.search(
 
         callbacks.postdistance(runner, p, neighbors)
     end
-
     return nothing
 end
 
@@ -287,7 +286,7 @@ function _Base.search(
     kw...,
 ) where {T<:AbstractVector}
     num_queries = length(queries)
-    dest = Array{eltype(index.graph),2}(undef, num_neighbors, num_queries)
+    dest = similar(queries, eltype(index.graph), (num_neighbors, num_queries))
     return search!(dest, runner, index, queries; num_neighbors, kw...)
 end
 

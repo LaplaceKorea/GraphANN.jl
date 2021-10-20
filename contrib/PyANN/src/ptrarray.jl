@@ -6,6 +6,8 @@ end
 Base.size(x::PtrVector) = (x.length,)
 Base.IndexStyle(::PtrVector) = Base.IndexLinear()
 
+Base.unsafe_convert(::Type{Ptr{T}}, A::PtrVector{T}) where {T} = A.ptr
+Base.elsize(::Type{PtrVector{T}}) where {T} = sizeof(T)
 Base.@propagate_inbounds function Base.getindex(x::PtrVector, i::Int)
     @boundscheck checkbounds(x, i)
     return unsafe_load(pointer(x), i)

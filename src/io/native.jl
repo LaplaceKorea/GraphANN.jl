@@ -208,8 +208,8 @@ function save_bin(
 end
 
 # Convenience function
-function load_bin(path::AbstractString, ::Type{A}) where {T,A<:AbstractAdjacencyList{T}}
-    return load_bin(path, UniDirectedGraph{T,A})
+function load_bin(path::AbstractString, ::Type{A}; kw...) where {T,A<:AbstractAdjacencyList{T}}
+    return load_bin(path, UniDirectedGraph{T,A}; kw...)
 end
 
 """

@@ -1,7 +1,5 @@
 module GraphANN
 
-#import Statistics
-
 const SRCDIR = @__DIR__
 const PKGDIR = dirname(SRCDIR)
 const DATADIR = joinpath(PKGDIR, "data")

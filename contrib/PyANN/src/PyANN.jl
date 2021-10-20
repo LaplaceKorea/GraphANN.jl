@@ -26,15 +26,14 @@ import StaticArrays
 ##### Forwards
 #####
 
+# implementation
+include("ptrarray.jl")
+
+
 # constant mappings
 const Euclidean = GraphANN.Euclidean
 const InnerProduct = GraphANN.InnerProduct
 include("forwards.jl")
-
-
-# implementation
-include("ptrarray.jl")
-
 
 #####
 ##### API
