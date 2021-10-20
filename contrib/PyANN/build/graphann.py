@@ -1,4 +1,5 @@
 import os
+import psutil
 
 from benchmark.algorithms.base import BaseANN
 from benchmark.datasets import DATASETS, download_accelerated
@@ -13,6 +14,9 @@ class GraphANN(BaseANN):
     def __init__(self, metric, index_params):
         self.name = "GraphANN"
         self._index_params = index_params
+
+        # unpack params
+        self._search_window_size = index_params.get("search_window_size")
 
         # Manually instantiate the metric
         if metric == "euclidean":
@@ -30,7 +34,7 @@ class GraphANN(BaseANN):
     #####
 
     def track(self):
-        return "T1"
+        return "T3"
 
     def fit(self, dataset):
         raise NotImplementedError()
@@ -59,19 +63,33 @@ class GraphANN(BaseANN):
 
         # Dimensionality
         self._dims = ds.d
+
+        # Load the index and query runner
         self._index = PyANN.loadindex(
             self.create_index_dir(ds),
             self._dtype,
             self._dims,
             self._metric,
         )
+        self._runner = PyANN.make_runner(
+            self._index,
+            self._search_window_size,
+        )
+        # TODO: warm up compilation and runner
+
         return True
 
     def index_files_to_store(self, dataset):
         raise NotImplementedError()
 
     def query(self, X, k):
-        raise NotImplementedError()
+        self.res = PyANN.search(
+            self._runner,
+            self._index,
+            X,
+            k,
+        )
+        return True
 
     def range_query(self, X, radius):
         raise NotImplementedError()
@@ -102,16 +120,18 @@ class GraphANN(BaseANN):
         return "generic_index"
 
     def create_index_dir(self, dataset):
-        index_dir = os.path.join(os.getcwd(), "data", "indices")
+        # index_dir = "/mnt/pm0/public"
+        index_dir = os.path.join(os.getcwd(), "indices")
         os.makedirs(index_dir, mode=0o777, exist_ok=True)
-        index_dir = os.path.join(index_dir, "T2")
-        os.makedirs(index_dir, mode=0o777, exist_ok=True)
-        index_dir = os.path.join(index_dir, self.__str__())
-        os.makedirs(index_dir, mode=0o777, exist_ok=True)
-        index_dir = os.path.join(index_dir, dataset.short_name())
-        os.makedirs(index_dir, mode=0o777, exist_ok=True)
-        index_dir = os.path.join(index_dir, self.index_name())
-        os.makedirs(index_dir, mode=0o777, exist_ok=True)
+        # index_dir = os.path.join(index_dir, self.track())
+        # os.makedirs(index_dir, mode=0o777, exist_ok=True)
+        # index_dir = os.path.join(index_dir, self.__str__())
+        # os.makedirs(index_dir, mode=0o777, exist_ok=True)
+        # index_dir = os.path.join(index_dir, dataset.short_name())
+        # os.makedirs(index_dir, mode=0o777, exist_ok=True)
+        # index_dir = os.path.join(index_dir, "public")
+        # os.makedirs(index_dir, mode=0o777, exist_ok=True)
+        print("Index Path: ", index_dir)
         return index_dir
 
 
