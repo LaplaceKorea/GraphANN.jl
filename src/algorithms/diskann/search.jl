@@ -299,6 +299,7 @@ function _Base.search!(
     num_neighbors = 10,
     callbacks = DiskANNCallbacks(),
     postprocess!::F = getresults!,
+    idmodifier = identity,
 ) where {T<:AbstractVector,F}
     metric = getlocal(index.metric)
     for col in eachindex(queries)
@@ -312,7 +313,7 @@ function _Base.search!(
         # Copy over the results to the destination
         results = postprocess!(runner, num_neighbors, query)
         for i in 1:num_neighbors
-            @inbounds dest[i, col] = getid(results[i])
+            @inbounds dest[i, col] = idmodifier(getid(results[i]))
         end
 
         # -- optional telemetry
@@ -330,6 +331,7 @@ function _Base.search!(
     num_neighbors = 10,
     callbacks = DiskANNCallbacks(),
     postprocess!::F = getresults!,
+    idmodifier = identity,
 ) where {F}
     dynamic_thread(getpool(tls), eachindex(queries), 64) do col
         #_metric = _Base.distribute_distance(metric)
@@ -346,7 +348,7 @@ function _Base.search!(
         # Copy over the results to the destination
         results = postprocess!(runner, num_neighbors, query)
         for i in 1:num_neighbors
-            @inbounds dest[i, col] = getid(results[i])
+            @inbounds dest[i, col] = idmodifier(getid(results[i]))
         end
 
         # -- optional telemetry

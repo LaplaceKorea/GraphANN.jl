@@ -6,10 +6,10 @@ module PyANN
 
 # re-exports
 export Euclidean, InnerProduct
-export stdallocator, pmallocator, hugepage_1gib_allocator, hugepage_2mib_allocator
+export stdallocator, pmallocator, hugepage_1gib_allocator, hugepage_2mib_allocator, direct_mmap
 
 # pyann implementstions
-export loadindex, search
+export loadindex, search, resize
 
 #####
 ##### Deps
@@ -28,6 +28,8 @@ import StaticArrays
 #####
 
 # implementation
+resize(args...) = Base.resize!(args...)
+
 include("ptrarray.jl")
 include("forwards.jl")
 

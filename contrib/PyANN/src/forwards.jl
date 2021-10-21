@@ -2,11 +2,15 @@
 ##### Load Index
 #####
 
-function loaddata(path, ::Type{T}, dim::Integer; allocator = GraphANN.stdallocator) where {T}
-    eltyp = StaticArrays.SVector{dim,T}
-    _data = GraphANN.load_bin(path, Vector{eltyp})
+struct DirectMmap end
+const direct_mmap = DirectMmap()
 
-    if !isa(allocator, GraphANN._Base.PMAllocator)
+function loaddata(
+    path, ::Type{T}, dim::Integer; allocator = direct_mmap, diskann_format = false
+) where {T}
+    eltyp = StaticArrays.SVector{dim,T}
+    _data = GraphANN.load_bin(path, Vector{eltyp}; offset = diskann_format ? 8 : 0)
+    if allocator !== direct_mmap
         data = allocator(eltyp, length(_data))
         GraphANN.dynamic_thread(eachindex(_data, data), 2048) do i
             @inbounds(data[i] = _data[i])
@@ -17,14 +21,47 @@ function loaddata(path, ::Type{T}, dim::Integer; allocator = GraphANN.stdallocat
     return data
 end
 
-function loadindex(dir, ::Type{T}, dim, metric; allocator = GraphANN.stdallocator, datapath = joinpath(dir, "data.bin")) where {T}
+"""
+    loadindex(dir::AbstractString, ::Type{T}, dim::Integer, metric; kw...) -> Index
+
+Load an index stored in `dir`. Data points within the index's dataset should have type `T`
+(where `T` is some machine native type like `Float33`, `UInt8` etc.) and length `dim` such
+that the elements of the loaded dataset are a `SVector{dim,T}`. The `metric` to use for
+the dataset is passed as the final argument.
+
+It is assumed that the graph will live in `joinpath(dir, "graph.bin")` and the data will
+be at `joinpath(dir, "data.bin")`, though the full path for the dataset may be passed as
+explicitly as a keyword argument. Furthermore, it is assumed that the graph will live
+entirely in Persistent Memory and is encoded using a `GraphANN.SuperFlatAdjacencyList{UInt32}`.
+
+Keywords
+--------
+* `datapath` - Full path to the dataset file. Default: `joinpath(dir, "data.bin")`
+* `allocator` - The allocator to use for the dataset portion of the index. If this argument
+    is `direct_mmap`, then the dataset will be directly memory mapped instead.
+    Default: `direct_mmap`.
+* `diskann_format::Bool` - Set to `true` is the dataset is in the DiskANN binary format
+    (i.e., has an 8 byte header that should be ignored). Default: `false`.
+"""
+function loadindex(
+    dir,
+    ::Type{T},
+    dim,
+    metric;
+    datapath = joinpath(dir, "data.bin"),
+    allocator = direct_mmap,
+    diskann_format = false,
+    # use_pq = false,
+    # centroids_path = joinpath(dir, "centroids.bin"),
+    # assignments_path = joinpath(dir, "assignments.bin"),
+) where {T}
     graph = GraphANN.load_bin(
         joinpath(dir, "graph.bin"),
         GraphANN.SuperFlatAdjacencyList{UInt32};
         writable = false,
     )
 
-    data = loaddata(datapath, T, dim; allocator)
+    data = loaddata(datapath, T, dim; allocator, diskann_format)
     index = GraphANN.DiskANNIndex(graph, data, metric)
     return index
 end
@@ -75,8 +112,13 @@ function search(runner, index, queries::PyCall.PyObject, num_neighbors)
 end
 
 function search(runner, index, queries::PtrVector, num_neighbors)
-    results = GraphANN.search(runner, index, queries; num_neighbors = num_neighbors)
-    results .-= one(eltype(results))
+    results = GraphANN.search(
+        runner,
+        index,
+        queries;
+        num_neighbors = num_neighbors,
+        idmodifier = x -> (x - one(x)),
+    )
     return results
 end
 

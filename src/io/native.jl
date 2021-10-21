@@ -172,11 +172,18 @@ Memory map `io` as a vector with eltype `T`.
 """
 function load_bin(path::AbstractString, ::Type{Vector{T}}; write = true, kw...) where {T}
     return open(path; read = true, write = write) do io
-        load_bin(io, Vector{T}; kw...)
+        load_bin(io, Vector{T}; path, kw...)
     end
 end
 
-load_bin(io::IO, ::Type{Vector{T}}) where {T} = Mmap.mmap(io, Vector{T})
+function load_bin(io::IO, ::Type{Vector{T}}; path = "", offset = 0) where {T}
+    if !iszero(offset)
+        # How many elements are in this vector?
+        len = div(filesize(path), sizeof(T))
+        return Mmap.mmap(io, Vector{T}, len, offset)
+    end
+    return Mmap.mmap(io, Vector{T})
+end
 
 # Graphs
 """
