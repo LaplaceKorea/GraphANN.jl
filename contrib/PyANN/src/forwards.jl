@@ -2,25 +2,29 @@
 ##### Load Index
 #####
 
-function loadgraph(path)
-    return GraphANN.load_bin(
-        path, GraphANN.SuperFlatAdjacencyList{UInt32}; writable = false
-    )
+function loaddata(path, ::Type{T}, dim::Integer; allocator = GraphANN.stdallocator) where {T}
+    eltyp = StaticArrays.SVector{dim,T}
+    _data = GraphANN.load_bin(path, Vector{eltyp})
+
+    if !isa(allocator, GraphANN._Base.PMAllocator)
+        data = allocator(eltyp, length(_data))
+        GraphANN.dynamic_thread(eachindex(_data, data), 2048) do i
+            @inbounds(data[i] = _data[i])
+        end
+    else
+        data = _data
+    end
+    return data
 end
 
-function loaddata(path, ::Type{T}, dim::Integer) where {T}
-    return GraphANN.load_bin(path, Vector{StaticArrays.SVector{dim,T}})
-end
-
-function loadindex(dir, ::Type{T}, dim, metric) where {T}
+function loadindex(dir, ::Type{T}, dim, metric; allocator = GraphANN.stdallocator, datapath = joinpath(dir, "data.bin")) where {T}
     graph = GraphANN.load_bin(
         joinpath(dir, "graph.bin"),
         GraphANN.SuperFlatAdjacencyList{UInt32};
         writable = false,
     )
 
-    data = GraphANN.load_bin(joinpath(dir, "data.bin"), Vector{StaticArrays.SVector{dim,T}})
-
+    data = loaddata(datapath, T, dim; allocator)
     index = GraphANN.DiskANNIndex(graph, data, metric)
     return index
 end
