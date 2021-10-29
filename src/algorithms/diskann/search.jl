@@ -139,7 +139,7 @@ end
 
 function DiskANNRunner(
     index::DiskANNIndex, search_list_size; executor::F = single_thread
-) where {F,U}
+) where {F}
     I = eltype(index.graph)
     D = costtype(index.metric, index.data)
     return DiskANNRunner{I,D}(search_list_size, ordering(index.metric); executor)
@@ -334,14 +334,12 @@ function _Base.search!(
     idmodifier = identity,
 ) where {F}
     dynamic_thread(getpool(tls), eachindex(queries), 64) do col
-        #_metric = _Base.distribute_distance(metric)
         metric = getlocal(index.metric)
         query = pointer(queries, col)
         runner = tls[]
 
         # -- optional telemetry
         callbacks.prequery()
-
         _Base.prehook(metric, query)
         search(runner, index, query; callbacks = callbacks)
 

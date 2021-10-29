@@ -1,5 +1,6 @@
 # Conversion of SVectors to SIMD sized chunks
 const SIMDType{N,T} = Union{SVector{N,T},SIMD.Vec{N,T}}
+const TupleSIMDType{N,T} = Union{SIMDType{N,T},NTuple{N,T}}
 abstract type AbstractWrap{V<:SIMDType,K} end
 
 # Ideally, the generated code for this should be a no-op, it's just awkward because
@@ -24,7 +25,7 @@ function _cast_impl(f, N::Integer, S::Integer, ::Type{T}) where {T}
     return :(($(exprs...),))
 end
 
-@generated function cast(::Type{E}, x::SIMDType{N,T}) where {N,T,S,E<:SIMDType{S,T}}
+@generated function cast(::Type{E}, x::SIMDType{N,T}) where {N,T,S,E<:TupleSIMDType{S,T}}
     return _cast_impl(E, N, S, T)
 end
 
@@ -62,20 +63,24 @@ julia> y[2]
 ```
 """
 struct ValueWrap{V<:SIMDType,K,N,T} <: AbstractWrap{V,K}
-    vectors::NTuple{K,SIMD.Vec{N,T}}
+    vectors::NTuple{K,NTuple{N,T}}
 end
-ValueWrap{V}(x::NTuple{K,SIMD.Vec{N,T}}) where {V,K,N,T} = ValueWrap{V,K,N,T}(x)
+ValueWrap{V}(x::NTuple{K,NTuple{N,T}}) where {V,K,N,T} = ValueWrap{V,K,N,T}(x)
 
 # Implementation note - even though the `cast` function looks like is should spew out
 # a bunch of garbage, we're depending on LLVM to convert this into a series of bitcasts
 # and ultimately a no-op.
 function ValueWrap{SIMD.Vec{N1,T1}}(x::SVector{N2,T2}) where {N1,T1,N2,T2}
-    vectors = cast(SIMD.Vec{N1,T2}, x)
+    vectors = cast(NTuple{N1,T2}, x)
     return ValueWrap{SIMD.Vec{N1,T1}}(vectors)
 end
 
+simdconvert(::Type{V}, x::SIMD.Vec) where {V<:SIMD.Vec} = convert(V, x)
+simdconvert(::Type{SIMD.Vec{N,T1}}, x::NTuple{N,T2}) where {N,T1,T2} = SIMD.Vec{N,T1}(x)
+simdconvert(::Type{SIMD.Vec{16,Float32}}, x::NTuple{16,Float16}) = cvt_f16_to_f32(x)
+
 Base.@propagate_inbounds function Base.getindex(x::ValueWrap{V}, i) where {V}
-    return convert(V, x.vectors[i])
+    return simdconvert(V, x.vectors[i])
 end
 
 # Non-converting indexing.
@@ -83,7 +88,7 @@ end
 Base.@propagate_inbounds function Base.getindex(
     x::ValueWrap{SIMD.Vec{N,T},<:Any,N,T}
 ) where {N,T}
-    return x.vectors[i]
+    return SIMD.Vec{N,T}(x.vectors[i])
 end
 
 Base.length(::ValueWrap{V,K}) where {V,K} = K
@@ -103,7 +108,7 @@ case that the original `SVector` was an odd size. If no masking is required, thi
 will be `0`.
 """
 struct PtrWrap{V<:SIMDType,K,N,T,P} <: AbstractWrap{V,K}
-    ptr::Ptr{SIMD.Vec{N,T}}
+    ptr::Ptr{NTuple{N,T}}
 end
 unwrap(x::PtrWrap) = x.ptr
 
@@ -112,13 +117,24 @@ function PtrWrap{SIMD.Vec{N1,T1}}(ptr::Ptr{SVector{N2,T2}}) where {N1,T1,N2,T2}
     K = cdiv(N2, N1)
     # Number of unpadded bits for the last load
     P = mod(N2, N1)
-    return PtrWrap{SIMD.Vec{N1,T1},K,N1,T2,P}(convert(Ptr{SIMD.Vec{N1,T2}}, ptr))
+    return PtrWrap{SIMD.Vec{N1,T1},K,N1,T2,P}(convert(Ptr{NTuple{N1,T2}}, ptr))
 end
 
 # No masks required
 function Base.getindex(x::PtrWrap{V,K,N,T,0}, i) where {V,K,N,T}
-    return convert(
+    return simdconvert(
         V, SIMD.vload(SIMD.Vec{N,T}, Ptr{T}(unwrap(x) + (i - 1) * sizeof(SIMD.Vec{N,T})))
+    )
+end
+
+# treat Float16 specially in because of limitations in SIMD.jl
+function Base.getindex(x::PtrWrap{SIMD.Vec{16,Float32},K,16,Float16,0}, i) where {K}
+    Base.@_inline_meta
+    return cvt_f16_to_f32(
+        SIMD.vload(
+            SIMD.Vec{16,Int16},
+            Ptr{Int16}(unwrap(x) + (i - 1) * sizeof(SIMD.Vec{16,Int16})),
+        ),
     )
 end
 
@@ -137,6 +153,17 @@ function Base.getindex(x::PtrWrap{V,K,N,T,P}, i) where {V,K,N,T,P}
         SIMD.Vec{N,T}, Ptr{T}(unwrap(x) + (i - 1) * sizeof(SIMD.Vec{N,T})), mask
     )
     return convert(V, vec)
+end
+
+function Base.getindex(x::PtrWrap{V,K,16,Float16,P}, i) where {V,K,P}
+    Base.@_inline_meta
+    mask = ifelse(i == K, __mask(x), SIMD.Vec{16,Bool}(true))
+    vec = SIMD.vload(
+        SIMD.Vec{16,Int16},
+        Ptr{Int16}(unwrap(x) + (i - 1) * sizeof(NTuple{16,Float16})),
+        mask,
+    )
+    return convert(V, Tuple(vec))
 end
 
 Base.length(::PtrWrap{V,K}) where {V,K} = K
@@ -198,6 +225,9 @@ distance_type(::Type{A}, ::Type{B}) where {A,B} = nothing
 # Hijack short ints to allow emission of VNNI instructions.
 const SMALL_INTS = Union{Int8,UInt8,Int16}
 distance_type(::Type{<:SMALL_INTS}, ::Type{<:SMALL_INTS}) = Int16
+distance_type(::Type{Float16}, ::Type{Float16}) = Float32
+distance_type(::Type{Float16}, ::Type{Float32}) = Float32
+distance_type(::Type{Float16}, ::Type{Float64}) = Float64
 
 """
     accum_type(x)
@@ -389,6 +419,29 @@ function vnni_accumulate(
     )
 
     return SIMD.Vec(x)
+end
+
+cvt_f16_to_f32(x::NTuple{16,Float16}) = cvt_f16_to_f32(reinterpret.(Int16, x))
+cvt_f16_to_f32(x::NTuple{16,Int16}) = cvt_f16_to_f32(SIMD.Vec(x))
+function cvt_f16_to_f32(x::SIMD.Vec{16,Int16})
+    Base.@_inline_meta
+    s = """
+        declare <16 x float> @llvm.x86.vcvtph2ps.512(<16 x i16>) #0
+        define <16 x float> @entry(<16 x i16>) #0 {
+            %val = tail call <16 x float> @llvm.x86.vcvtph2ps.512(<16 x i16> %0)
+            ret <16 x float> %val
+        }
+
+        attributes #0 = { alwaysinline }
+    """
+
+    y = Base.llvmcall(
+        (s, "entry"),
+        SIMD.LVec{16,Float32},
+        Tuple{SIMD.LVec{16,Int16}},
+        x.data,
+    )
+    return SIMD.Vec(y)
 end
 
 #####

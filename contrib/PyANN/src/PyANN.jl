@@ -6,9 +6,10 @@ module PyANN
 
 # re-exports
 export Euclidean, InnerProduct
-export stdallocator, pmallocator, hugepage_1gib_allocator, hugepage_2mib_allocator, direct_mmap
+export stdallocator, pmallocator, hugepage_1gib_allocator, hugepage_2mib_allocator
 
 # pyann implementstions
+export direct_mmap
 export loadindex, search, resize
 
 #####
