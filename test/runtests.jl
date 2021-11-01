@@ -3,6 +3,7 @@ using Test
 
 # Extra stdlib imports
 using CRC32c    # for checking file checksums
+using InteractiveUtils
 using Random
 using Serialization
 using Statistics

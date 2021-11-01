@@ -17,6 +17,37 @@ function reference(::GraphANN.InnerProduct, A, B)
     return s
 end
 
+"""
+    nocalls(f, args...)
+
+Test that the native code generated for `f(args...)` does not contain the `call` x86
+instruction.
+
+In other words - everything gets inlined.
+"""
+function nocalls(f, args...)
+    io = IOBuffer()
+    code_native(io, f, Tuple{map(typeof, args)...}; syntax = :intel, debuginfo = :none)
+    seekstart(io)
+    str = read(io, String)
+    return !occursin("call", str)
+end
+
+"""
+    nojumpa(f, args...)
+
+Test that the native code generated for `f(args...)` does not contain any jumps.
+
+In other words - everything gets completely unrolled.
+"""
+function nojumps(f, args...)
+    io = IOBuffer()
+    code_native(io, f, Tuple{map(typeof, args)...}; syntax = :intel, debuginfo = :none)
+    seekstart(io)
+    str = read(io, String)
+    return !any(occursin(str), ("jmp", "jne", "je"))
+end
+
 @testset "Testing SIMD" begin
     #####
     ##### SIMD schenangans
@@ -28,10 +59,6 @@ end
     # Test Casting - underlying data should be preserved
     a, b, c, d = ntuple(_ -> rand(SVector{32,UInt8}), 4)
     x = SVector(_merge(a, b, c, d))
-
-    t = GraphANN._Base.cast(SVector{32,UInt8}, x)
-    @test isa(t, NTuple{4,SVector{32,UInt8}})
-    @test t == (a, b, c, d)
 
     # For comparison with SIMD.Vec, convert both to Tuples
     t = GraphANN._Base.cast(SIMD.Vec{32,UInt8}, x)
@@ -45,11 +72,6 @@ end
     a = ntuple(_ -> rand(UInt8), 30)
     x = SVector(a)
     @test isa(x, SVector{30,UInt8})
-    t = GraphANN._Base.cast(SVector{32,UInt8}, x)
-    @test isa(t, Tuple{SVector{32,UInt8}})
-    @test Tuple(t[1])[1:30] == a
-    @test iszero(t[1][31])
-    @test iszero(t[1][32])
 
     t = GraphANN._Base.cast(SIMD.Vec{32,UInt8}, x)
     @test isa(t, Tuple{SIMD.Vec{32,UInt8}})
@@ -64,14 +86,14 @@ end
     # 2. Splat the tuples together to create a SVector
     # 3. SIMD wrap promoting to Float32
     # 4. Compare equality.
-    a, b, c, d = ntuple(_ -> rand(SVector{32,UInt8}), 4)
+    a, b, c, d = ntuple(_ -> rand(SVector{16,UInt8}), 4)
     x = SVector(_merge(a, b, c, d))
-    @test isa(x, SVector{128,UInt8})
+    @test isa(x, SVector{64,UInt8})
 
-    sx = GraphANN._Base.ValueWrap{SIMD.Vec{32,Float32}}(x)
+    sx = GraphANN._Base.ValueWrap{16,Float32}(x)
     @test isa(sx, GraphANN._Base.ValueWrap)
-    @test length(sx) == div(128, 32)
-    @test length(sx[1]) == 32
+    @test length(sx) == div(64, 16)
+    @test length(sx[1]) == 16
     @test eltype(sx[1]) == Float32
 
     # Elements should remain equal after wrapping.
@@ -97,6 +119,10 @@ end
     @test find_distance_type(Int8, Int16) == Int16
     @test find_distance_type(Int16, UInt8) == Int16
     @test find_distance_type(Int16, Int8) == Int16
+
+    @test find_distance_type(Float16, Float16) == Float32
+    @test find_distance_type(Float16, Float32) == Float32
+    @test find_distance_type(Float16, UInt8) == Float32
 
     # Manually try out some promotions - especially check for inference.
     simd_type = GraphANN._Base.simd_type
@@ -141,13 +167,34 @@ function test_metric(A::Vector, B::Vector; kw...)
     return test_metric(A[1], B[1], pointer(A, 1), pointer(B, 1); kw...)
 end
 
-function test_metric(a, b, pa::Ptr, pb::Ptr; metric = Euclidean, rtol = sqrt(eps(Float32)))
+function test_metric(
+    a,
+    b,
+    pa::Ptr,
+    pb::Ptr;
+    metric = Euclidean,
+    test_codegen = false,
+    rtol = sqrt(eps(Float32)),
+)
     ref = reference(metric, a, b)
     # Try all pointer/value pairs
     @test isapprox(GraphANN.evaluate(metric, a, b), ref; rtol)
     @test isapprox(GraphANN.evaluate(metric, pa, pb), ref; rtol)
     @test isapprox(GraphANN.evaluate(metric, pa, b), ref; rtol)
     @test isapprox(GraphANN.evaluate(metric, a, pb), ref; rtol)
+
+    # Generated Code Tests
+    if test_codegen
+        @test nocalls(GraphANN.evaluate, metric, a, b)
+        @test nocalls(GraphANN.evaluate, metric, pa, pb)
+        @test nocalls(GraphANN.evaluate, metric, pa, b)
+        @test nocalls(GraphANN.evaluate, metric, a, pb)
+
+        @test nojumps(GraphANN.evaluate, metric, a, b)
+        @test nojumps(GraphANN.evaluate, metric, pa, pb)
+        @test nojumps(GraphANN.evaluate, metric, pa, b)
+        @test nojumps(GraphANN.evaluate, metric, a, pb)
+    end
 
     passed = true
     passed &= isapprox(GraphANN.evaluate(metric, a, b), ref; rtol)
@@ -164,18 +211,19 @@ end
 @testset "Testing Euclidean Calculations" begin
     # Lets do some distance calculations
     lengths = [100, 128]
-    left_types = [Float32, UInt8, Int8]
-    right_types = [Float32, UInt8, Int8]
-    #scale = 100
+    left_types = [Float32, Float16, UInt8, Int8]
+    right_types = [Float32, Float16, UInt8, Int8]
     metric = GraphANN.Euclidean()
 
     for (left, right, len) in Iterators.product(left_types, right_types, lengths)
         x = Vector{SVector{len,left}}(undef, 1)
         y = Vector{SVector{len,right}}(undef, 1)
-        for i in 1:10000
+        test_codegen = true
+        for i in 1:2000
             x[1] = rand(SVector{len,left})
             y[1] = rand(SVector{len,right})
-            test_metric(x, y; metric)
+            test_metric(x, y; metric, test_codegen)
+            test_codegen = false
         end
     end
 
@@ -196,18 +244,20 @@ maybescale(x::SVector, scale) = x
 @testset "Testing InnerProduct Calculations" begin
     # Lets do some distance calculations
     lengths = [100, 128]
-    left_types = [Float32, UInt8, Int8]
-    right_types = [Float32, UInt8, Int8]
+    left_types = [Float32, Float16, UInt8, Int8]
+    right_types = [Float32, Float16, UInt8, Int8]
     scale = 100
     metric = GraphANN.InnerProduct()
 
     for (left, right, len) in Iterators.product(left_types, right_types, lengths)
         x = Vector{SVector{len,left}}(undef, 1)
         y = Vector{SVector{len,right}}(undef, 1)
-        for i in 1:10000
+        test_codegen = true
+        for i in 1:2000
             x[1] = maybescale(rand(SVector{len,left}), scale)
             y[1] = maybescale(rand(SVector{len,right}), scale)
-            test_metric(x, y; metric, rtol = 0.03)
+            test_metric(x, y; metric, test_codegen, rtol = 0.03)
+            test_codegen = false
         end
     end
 

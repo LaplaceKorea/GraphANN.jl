@@ -3,6 +3,10 @@ const SIMDType{N,T} = Union{SVector{N,T},SIMD.Vec{N,T}}
 const TupleSIMDType{N,T} = Union{SIMDType{N,T},NTuple{N,T}}
 abstract type AbstractWrap{V<:SIMDType,K} end
 
+simdconvert(::Type{V}, x::SIMD.Vec) where {V<:SIMD.Vec} = convert(V, x)
+simdconvert(::Type{SIMD.Vec{N,T1}}, x::NTuple{N,T2}) where {N,T1,T2} = SIMD.Vec{N,T1}(x)
+simdconvert(::Type{SIMD.Vec{16,Float32}}, x::NTuple{16,Float16}) = cvt_f16_to_f32(x)
+
 # Ideally, the generated code for this should be a no-op, it's just awkward because
 # Julia doesn't really have a "bitcast" function ...
 # This also has the benefit of allowing us to do lazy zero padding if necessary,
@@ -20,13 +24,16 @@ function _cast_impl(f, N::Integer, S::Integer, ::Type{T}) where {T}
             index = (i - 1) * S + j
             return index <= N ? :(x[$index]) : :(zero($T))
         end
-        return :($f(($(inds...),)))
+        return :(simdconvert($f, (($(inds...),))))
     end
-    return :(($(exprs...),))
+    return quote
+        Base.@_inline_meta
+        return ($(exprs...),)
+    end
 end
 
-@generated function cast(::Type{E}, x::SIMDType{N,T}) where {N,T,S,E<:TupleSIMDType{S,T}}
-    return _cast_impl(E, N, S, T)
+@generated function cast(::Type{SIMD.Vec{N,T}}, x::SVector{N0,T0}) where {N,T,N0,T0}
+    return _cast_impl(SIMD.Vec{N,T}, N0, N, T0)
 end
 
 """
@@ -62,36 +69,18 @@ julia> y[2]
 <4 x Float32>[8.0, -121.0, 19.0, 103.0]
 ```
 """
-struct ValueWrap{V<:SIMDType,K,N,T} <: AbstractWrap{V,K}
-    vectors::NTuple{K,NTuple{N,T}}
-end
-ValueWrap{V}(x::NTuple{K,NTuple{N,T}}) where {V,K,N,T} = ValueWrap{V,K,N,T}(x)
-
-# Implementation note - even though the `cast` function looks like is should spew out
-# a bunch of garbage, we're depending on LLVM to convert this into a series of bitcasts
-# and ultimately a no-op.
-function ValueWrap{SIMD.Vec{N1,T1}}(x::SVector{N2,T2}) where {N1,T1,N2,T2}
-    vectors = cast(NTuple{N1,T2}, x)
-    return ValueWrap{SIMD.Vec{N1,T1}}(vectors)
+struct ValueWrap{N,T,K} <: AbstractWrap{SIMD.Vec{N,T},K}
+    vectors::NTuple{K,SIMD.Vec{N,T}}
 end
 
-simdconvert(::Type{V}, x::SIMD.Vec) where {V<:SIMD.Vec} = convert(V, x)
-simdconvert(::Type{SIMD.Vec{N,T1}}, x::NTuple{N,T2}) where {N,T1,T2} = SIMD.Vec{N,T1}(x)
-simdconvert(::Type{SIMD.Vec{16,Float32}}, x::NTuple{16,Float16}) = cvt_f16_to_f32(x)
-
-Base.@propagate_inbounds function Base.getindex(x::ValueWrap{V}, i) where {V}
-    return simdconvert(V, x.vectors[i])
+function ValueWrap{N,T}(x::SVector) where {N,T}
+    Base.@_inline_meta
+    vectors = cast(SIMD.Vec{N,T}, x)
+    return ValueWrap(vectors)
 end
 
-# Non-converting indexing.
-# Probably don't need this ...
-Base.@propagate_inbounds function Base.getindex(
-    x::ValueWrap{SIMD.Vec{N,T},<:Any,N,T}
-) where {N,T}
-    return SIMD.Vec{N,T}(x.vectors[i])
-end
-
-Base.length(::ValueWrap{V,K}) where {V,K} = K
+@inline Base.getindex(x::ValueWrap, i) = @inbounds(x.vectors[i])
+Base.length(::ValueWrap{<:Any,<:Any,K}) where {K} = K
 
 #####
 ##### PtrWrap
@@ -120,24 +109,6 @@ function PtrWrap{SIMD.Vec{N1,T1}}(ptr::Ptr{SVector{N2,T2}}) where {N1,T1,N2,T2}
     return PtrWrap{SIMD.Vec{N1,T1},K,N1,T2,P}(convert(Ptr{NTuple{N1,T2}}, ptr))
 end
 
-# No masks required
-function Base.getindex(x::PtrWrap{V,K,N,T,0}, i) where {V,K,N,T}
-    return simdconvert(
-        V, SIMD.vload(SIMD.Vec{N,T}, Ptr{T}(unwrap(x) + (i - 1) * sizeof(SIMD.Vec{N,T})))
-    )
-end
-
-# treat Float16 specially in because of limitations in SIMD.jl
-function Base.getindex(x::PtrWrap{SIMD.Vec{16,Float32},K,16,Float16,0}, i) where {K}
-    Base.@_inline_meta
-    return cvt_f16_to_f32(
-        SIMD.vload(
-            SIMD.Vec{16,Int16},
-            Ptr{Int16}(unwrap(x) + (i - 1) * sizeof(SIMD.Vec{16,Int16})),
-        ),
-    )
-end
-
 # Maybe mask the the last load
 # This may not need to be `@generated`, but I don't really want to have to rely on
 # constant propagation for this.
@@ -147,15 +118,19 @@ end
     return :(SIMD.Vec($tup))
 end
 
+function __mask(::PtrWrap{V,K,N,T,0}) where {V,K,N,T}
+    return SIMD.Vec(ntuple(_ -> true, Val(N)))
+end
+
 function Base.getindex(x::PtrWrap{V,K,N,T,P}, i) where {V,K,N,T,P}
     mask = ifelse(i == K, __mask(x), SIMD.Vec{N,Bool}(true))
     vec = SIMD.vload(
         SIMD.Vec{N,T}, Ptr{T}(unwrap(x) + (i - 1) * sizeof(SIMD.Vec{N,T})), mask
     )
-    return convert(V, vec)
+    return simdconvert(V, vec)
 end
 
-function Base.getindex(x::PtrWrap{V,K,16,Float16,P}, i) where {V,K,P}
+function Base.getindex(x::PtrWrap{SIMD.Vec{16,Float32},K,16,Float16,P}, i) where {K,P}
     Base.@_inline_meta
     mask = ifelse(i == K, __mask(x), SIMD.Vec{16,Bool}(true))
     vec = SIMD.vload(
@@ -163,7 +138,7 @@ function Base.getindex(x::PtrWrap{V,K,16,Float16,P}, i) where {V,K,P}
         Ptr{Int16}(unwrap(x) + (i - 1) * sizeof(NTuple{16,Float16})),
         mask,
     )
-    return convert(V, Tuple(vec))
+    return cvt_f16_to_f32(vec)
 end
 
 Base.length(::PtrWrap{V,K}) where {V,K} = K
@@ -172,8 +147,8 @@ Base.length(::PtrWrap{V,K}) where {V,K} = K
 ##### Wrapping
 #####
 
-wrap(::Type{V}, x::SVector) where {V} = ValueWrap{V}(x)
-wrap(::Type{V}, x::Ptr{<:SVector}) where {V} = PtrWrap{V}(x)
+@inline wrap(::Type{SIMD.Vec{N,T}}, x::SVector) where {N,T} = ValueWrap{N,T}(x)
+@inline wrap(::Type{V}, x::Ptr{<:SVector}) where {V} = PtrWrap{V}(x)
 
 #####
 ##### SIMD Promotion and Stuff
@@ -225,6 +200,9 @@ distance_type(::Type{A}, ::Type{B}) where {A,B} = nothing
 # Hijack short ints to allow emission of VNNI instructions.
 const SMALL_INTS = Union{Int8,UInt8,Int16}
 distance_type(::Type{<:SMALL_INTS}, ::Type{<:SMALL_INTS}) = Int16
+
+# Float16
+distance_type(::Type{Float16}, ::Type{<:Integer}) = Float32
 distance_type(::Type{Float16}, ::Type{Float16}) = Float32
 distance_type(::Type{Float16}, ::Type{Float32}) = Float32
 distance_type(::Type{Float16}, ::Type{Float64}) = Float64
