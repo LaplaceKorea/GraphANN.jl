@@ -1,8 +1,8 @@
 # Conversion of SVectors to SIMD sized chunks
 const SIMDType{N,T} = Union{SVector{N,T},SIMD.Vec{N,T}}
-const TupleSIMDType{N,T} = Union{SIMDType{N,T},NTuple{N,T}}
 abstract type AbstractWrap{V<:SIMDType,K} end
 
+simdconvert(::Type{V}, x::V) where {V} = x
 simdconvert(::Type{V}, x::SIMD.Vec) where {V<:SIMD.Vec} = convert(V, x)
 simdconvert(::Type{SIMD.Vec{N,T1}}, x::NTuple{N,T2}) where {N,T1,T2} = SIMD.Vec{N,T1}(x)
 simdconvert(::Type{SIMD.Vec{16,Float32}}, x::NTuple{16,Float16}) = cvt_f16_to_f32(x)
@@ -112,14 +112,11 @@ end
 # Maybe mask the the last load
 # This may not need to be `@generated`, but I don't really want to have to rely on
 # constant propagation for this.
+__mask(::PtrWrap{V,K,N,T,0}) where {V,K,N,T} = SIMD.Vec(ntuple(_ -> true, Val(N)))
 @generated function __mask(::PtrWrap{V,K,N,T,P}) where {V,K,N,T,P}
     # Only load the lower entries
     tup = ntuple(i -> i <= P ? true : false, N)
     return :(SIMD.Vec($tup))
-end
-
-function __mask(::PtrWrap{V,K,N,T,0}) where {V,K,N,T}
-    return SIMD.Vec(ntuple(_ -> true, Val(N)))
 end
 
 function Base.getindex(x::PtrWrap{V,K,N,T,P}, i) where {V,K,N,T,P}
@@ -130,6 +127,7 @@ function Base.getindex(x::PtrWrap{V,K,N,T,P}, i) where {V,K,N,T,P}
     return simdconvert(V, vec)
 end
 
+# Special case Float16
 function Base.getindex(x::PtrWrap{SIMD.Vec{16,Float32},K,16,Float16,P}, i) where {K,P}
     Base.@_inline_meta
     mask = ifelse(i == K, __mask(x), SIMD.Vec{16,Bool}(true))
@@ -399,8 +397,8 @@ function vnni_accumulate(
     return SIMD.Vec(x)
 end
 
-cvt_f16_to_f32(x::NTuple{16,Float16}) = cvt_f16_to_f32(reinterpret.(Int16, x))
-cvt_f16_to_f32(x::NTuple{16,Int16}) = cvt_f16_to_f32(SIMD.Vec(x))
+@inline cvt_f16_to_f32(x::NTuple{16,Float16}) = cvt_f16_to_f32(reinterpret.(Int16, x))
+@inline cvt_f16_to_f32(x::NTuple{16,Int16}) = cvt_f16_to_f32(SIMD.Vec(x))
 function cvt_f16_to_f32(x::SIMD.Vec{16,Int16})
     Base.@_inline_meta
     s = """
