@@ -128,7 +128,7 @@ end
 _npoints(x::AbstractMatrix) = size(x, 2)
 _npoints(x::AbstractVector{<:SVector}) = length(x)
 _pointdim(x::AbstractMatrix) = size(x, 1)
-_pointdim(::AbstractVector{SVector{N,<:Any}}) where {N} = N
+_pointdim(::AbstractVector{<:SVector{N,<:Any}}) where {N} = N
 
 function save_bin(
     ::DiskANN,
