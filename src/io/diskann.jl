@@ -119,18 +119,23 @@ end
 
 Save `data` to `path` in a form compatible with DiskANN's `load_bin` function.
 """
-function save_bin(diskann::DiskANN, path::AbstractString, data::AbstractMatrix)
+function save_bin(diskann::DiskANN, path::AbstractString, data::Union{AbstractMatrix, AbstractVector{<:SVector}})
     return open(path; write = true) do io
         save_bin(diskann, io, data)
     end
 end
 
+_npoints(x::AbstractMatrix) = size(x, 2)
+_npoints(x::AbstractVector{<:SVector}) = length(x)
+_pointdim(x::AbstractMatrix) = size(x, 1)
+_pointdim(::AbstractVector{SVector{N,<:Any}}) where {N} = N
+
 function save_bin(
     ::DiskANN,
     io::IO,
-    data::AbstractMatrix,
-    num_points = size(data, 2),
-    point_dim = size(data, 1),
+    data::Union{AbstractMatrix, AbstractVector{<:SVector}},
+    num_points = _npoints(data),
+    point_dim = _pointdim(data),
 )
     write(io, Cuint(num_points))
     write(io, Cuint(point_dim))
