@@ -57,11 +57,8 @@ struct DiskANNIndex{G,D<:MaybeNumaAware{AbstractVector},S<:StartNode,M}
     metric::M
 end
 
-localize(x) = x
-localize(x::NumaAware) = x[]
-
-getgraph(index::DiskANNIndex) = localize(index.graph)
-getdata(index::DiskANNIndex) = localize(index.data)
+getgraph(index::DiskANNIndex) = numalocal(index.graph)
+getdata(index::DiskANNIndex) = numalocal(index.data)
 
 # constructor
 _forward(_, x::StartNode) = x
@@ -70,9 +67,9 @@ function DiskANNIndex(
     graph,
     data::MaybeNumaAware{AbstractVector},
     metric = Euclidean();
-    startnode = StartNode(localize(data); metric),
+    startnode = StartNode(numalocal(data); metric),
 )
-    return DiskANNIndex(graph, data, _forward(localize(data), startnode), metric)
+    return DiskANNIndex(graph, data, _forward(numalocal(data), startnode), metric)
 end
 _Base.Neighbor(::DiskANNIndex, id::T, distance::D) where {T,D} = Neighbor{T,D}(id, distance)
 

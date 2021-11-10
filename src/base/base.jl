@@ -37,6 +37,10 @@ function __init__()
     end
 end
 
+#####
+##### Timing
+#####
+
 export @withtimer, gettimer, resettimer!
 const timer = TimerOutputs.TimerOutput()
 macro withtimer(description, expr)
@@ -163,7 +167,7 @@ export safe_maximum,
     donothing, printlnstyled, always_false, zero!, typemax!, cdiv, toeltype, clog2
 export Neighbor, getid, getdistance, idtype, costtype
 export RobinSet, ifmissing!
-export zeroas, medioid, nearest_neighbor
+export medioid, nearest_neighbor
 export recall
 export prefetch, prefetch_llc, unsafe_prefetch
 export BatchedRange, batched
@@ -196,7 +200,7 @@ include("fastset.jl")
 ##### numa
 #####
 
-export NumaAware, @numalocal, MaybeNumaAware
+export NumaAware, @numacopy, MaybeNumaAware, numalocal
 include("numa.jl")
 
 end

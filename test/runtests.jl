@@ -61,6 +61,12 @@ include("base/metric.jl")
 include("base/partition.jl")
 include("base/fastset.jl")
 
+# Testing the exclusive features requires additional setup prior to running and thus
+# shouldn't be tested all the time.
+if ENV["JULIA_EXCLUSIVE"]
+    include("base/numa.jl")
+end
+
 # Graphs
 include("graphs/adjacency.jl")
 include("graphs/graphs.jl")
