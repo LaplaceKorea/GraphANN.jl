@@ -38,7 +38,7 @@ Run the function `f` on a thread running on numa node `node`.
 Keyword `indexzero` indicates whether `node` should be interpreted as an index-zero
 number or not.
 """
-function onnode(f::F, node; indexzero = false) where {F}
+function onnode(f::F, node; indexzero = false, strict = true) where {F}
     # Find a thread to run this on.
     node_adjusted = node + Int(indexzero)
     node_zero = node_adjusted - 1
@@ -48,8 +48,10 @@ function onnode(f::F, node; indexzero = false) where {F}
     on_threads(ThreadPool(tid:tid)) do
         # Bind to local node
         ptr = @ccall libnuma.numa_allocate_nodemask()::Ptr{Cvoid}
-        @ccall libnuma.numa_bitmask_setbit(ptr::Ptr{Cvoid}, node_zero::Cint)::Ptr{Cvoid}
-        @ccall libnuma.numa_bind(ptr::Ptr{Cvoid})::Cvoid
+        if strict
+            @ccall libnuma.numa_bitmask_setbit(ptr::Ptr{Cvoid}, node_zero::Cint)::Ptr{Cvoid}
+            @ccall libnuma.numa_bind(ptr::Ptr{Cvoid})::Cvoid
+        end
         try
             # perform call
             retval = f()
@@ -65,8 +67,9 @@ end
 struct OnNode{F}
     f::F
     node::Int
+    strict::Bool
 end
-(f::OnNode)(args...) = onnode(() -> f.f(args...), f.node)
+(f::OnNode)(args...) = onnode(() -> f.f(args...), f.node; strict = f.strict)
 
 #####
 ##### NumaAware
@@ -89,19 +92,22 @@ end
 _alloc_wrap(x, len) = [x for _ in Base.OneTo(len)]
 
 function NumaAware(
-    f::F; nodes = Base.OneTo(NUM_NUMA_NODES[]), allocator = stdallocator
+    f::F; nodes = Base.OneTo(NUM_NUMA_NODES[]), allocator = stdallocator, strict = true
 ) where {F}
     allocators = _alloc_wrap(allocator, length(nodes))
     copies = map(eachindex(nodes, allocators)) do i
-        return f(OnNode(allocators[i], nodes[i]))
+        return f(OnNode(allocators[i], nodes[i], strict))
     end
     return NumaAware(copies)
 end
 
 const MaybeNumaAware{T} = Union{T, NumaAware{<:T}}
 
+maybe_escape(x::Union{Symbol,Expr}) = esc(x)
+maybe_escape(x) = x
+
 """
-    @numalocal expr
+    @numalocal [kw] expr
 
 Convert the function call `expr` into an anonymout function taking an allocator.
 Note, the expression `expr` must contain the keyword `__allocator__` for the location
@@ -118,20 +124,23 @@ GraphANN._Base.NumaAware{Vector{StaticArrays.SVector{128, Float32}}}
 ```
 """
 macro numalocal(expr...)
-    if length(expr) > 2
-        error("Macro @numalocal takes at most 2 arguments")
-    elseif length(expr) == 2
-        keywords = [expr[1]]
-        fcall = expr[2]
+    kwmap = Dict{Symbol,Any}(
+        :allocator => stdallocator,
+        :strict => true,
+    )
+    nargs = length(kwmap) + 1
+
+    if length(expr) > nargs
+        error("Macro @numalocal takes at most $nargs arguments")
+    elseif length(expr) == 1
+        keywords = Any[]
+        fcall = expr
     else
-        keywords = Expr[]
-        fcall = expr[1]
+        keywords = expr[1:end-1]
+        fcall = expr[end]
     end
 
     # Process keywords
-    kwmap = Dict{Symbol,Any}(
-        :allocator => stdallocator
-    )
     for kw in keywords
         @assert kw.head == :(=) && length(kw.args) == 2
         name = kw.args[1]
@@ -153,9 +162,14 @@ macro numalocal(expr...)
     end
 
     # Construct final expression
-    allocators = kwmap[:allocator]
+    allocators = maybe_escape(kwmap[:allocator])
+    strict = maybe_escape(kwmap[:strict])
     return quote
-        NumaAware($(esc(sym)) -> $(esc(fcall)); allocator = $(esc(allocators)))
+        NumaAware(
+            $(esc(sym)) -> $(esc(fcall));
+            allocator = $allocators,
+            strict = $strict,
+        )
     end
 end
 
