@@ -41,10 +41,23 @@ number or not.
 function onnode(f::F, node; indexzero = false) where {F}
     # Find a thread to run this on.
     node_adjusted = node + Int(indexzero)
+    node_zero = node_adjusted - 1
+
     tid = findfirst(isequal(node_adjusted), NUMAMAP)
     local retval
     on_threads(ThreadPool(tid:tid)) do
-        retval = f()
+        # Bind to local node
+        ptr = @ccall libnuma.numa_allocate_nodemask()::Ptr{Cvoid}
+        @ccall libnuma.numa_bitmask_setbit(ptr::Ptr{Cvoid}, node_zero::Cint)::Ptr{Cvoid}
+        @ccall libnuma.numa_bind(ptr::Ptr{Cvoid})::Cvoid
+        try
+            # perform call
+            retval = f()
+        finally
+            # set policy back to "preferred"
+            @ccall libnuma.numa_set_preferred(node_zero::Cint)::Cvoid
+            @ccall libnuma.numa_bitmask_free(ptr::Ptr{Cvoid})::Cvoid
+        end
     end
     return retval
 end
