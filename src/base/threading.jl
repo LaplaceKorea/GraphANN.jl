@@ -262,7 +262,15 @@ threadcopy(x) = deepcopy(x)
 end
 
 function ThreadLocal(pool::ThreadPool, values::T) where {T}
-    return ThreadLocal{T}([threadcopy(values) for _ in pool], pool)
+    # Perform each copy on its own thread to ensure that if we're doing any kind of NUMA
+    # scheduling that thread-local memory gets allocated on the correct numa node.
+    copies = Vector{T}()
+    foreach(pool) do tid
+        on_threads(ThreadPool(tid:tid)) do
+            push!(copies, threadcopy(values))
+        end
+    end
+    return ThreadLocal{T}(copies, pool)
 end
 
 Base.getindex(t::ThreadLocal, i::Integer = Threads.threadid()) = t.values[t.translation[i]]

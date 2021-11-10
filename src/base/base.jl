@@ -3,16 +3,39 @@
 module _Base
 
 # stdlib
-using Mmap: Mmap
+import Libdl
+import Mmap
 
 # deps
-using DataStructures: DataStructures
-using HugepageMmap: HugepageMmap
-using ProgressMeter: ProgressMeter
-using SIMD: SIMD
+import DataStructures
+import HugepageMmap
+import MacroTools
+import ProgressMeter
+import SIMD
 import StaticArrays: SVector
-using TimerOutputs: TimerOutputs
+import TimerOutputs
 import UnPack: @unpack
+
+#####
+##### Initialization
+#####
+
+function __init__()
+    if get(ENV, "JULIA_EXCLUSIVE", 0) != 0
+        @info "Running in an exclusive environment. Populating thread affinities."
+
+        # Assign thread ids to NUMA nodes
+        resize!(NUMAMAP, Threads.nthreads())
+        on_threads(allthreads()) do
+            tid = Threads.threadid()
+            node = @ccall libnuma.numa_node_of_cpu((tid - 1)::Cint)::Cint
+            NUMAMAP[tid] = node + 1
+        end
+
+        # Find the number of NUMA nodes
+        NUM_NUMA_NODES[] = length(unique(NUMAMAP))
+    end
+end
 
 export @withtimer, gettimer, resettimer!
 const timer = TimerOutputs.TimerOutput()
@@ -35,7 +58,6 @@ macro _interleave_meta(n)
         (Symbol("llvm.loop.unroll.disable"), 2),
     )
 end
-
 
 #####
 ##### Generic Distance
@@ -169,5 +191,12 @@ end
 
 export FastSet
 include("fastset.jl")
+
+#####
+##### numa
+#####
+
+export NumaAware, @numalocal, MaybeNumaAware
+include("numa.jl")
 
 end

@@ -29,8 +29,10 @@ using ._IO
 
 # For examples
 const VECSDIR = joinpath(DATADIR, "vecs")
-function sample_dataset()
-    return load_vecs(SVector{128,Float32}, joinpath(VECSDIR, "siftsmall_base.fvecs"))
+function sample_dataset(; allocator = stdallocator)
+    return load_vecs(
+        SVector{128,Float32}, joinpath(VECSDIR, "siftsmall_base.fvecs"); allocator
+    )
 end
 function sample_queries()
     return load_vecs(SVector{128,Float32}, joinpath(VECSDIR, "siftsmall_query.fvecs"))
@@ -38,9 +40,12 @@ end
 function sample_groundtruth()
     return load_vecs(joinpath(VECSDIR, "siftsmall_groundtruth.ivecs"); groundtruth = true)
 end
-function sample_graph()
+function sample_graph(; allocator = stdallocator)
     return load_graph(
-        DiskANN(), joinpath(DATADIR, "diskann", "siftsmall_base_20_20_1.2.index"), 10000
+        DiskANN(),
+        joinpath(DATADIR, "diskann", "siftsmall_base_20_20_1.2.index"),
+        10000;
+        allocator,
     )
 end
 

@@ -50,25 +50,34 @@ Index for DiskANN style similarity search.
 * `startnode::S` - The entry point for queries.
 * `metric::M` - Metric to use when performing similarity search.
 """
-struct DiskANNIndex{G,D<:AbstractVector,S<:StartNode,M}
+struct DiskANNIndex{G,D<:MaybeNumaAware{AbstractVector},S<:StartNode,M}
     graph::G
     data::D
     startnode::S
     metric::M
 end
 
+localize(x) = x
+localize(x::NumaAware) = x[]
+
+getgraph(index::DiskANNIndex) = localize(index.graph)
+getdata(index::DiskANNIndex) = localize(index.data)
+
 # constructor
 _forward(_, x::StartNode) = x
 _forward(data, index::Integer) = StartNode(index, data[index])
 function DiskANNIndex(
-    graph, data::AbstractVector, metric = Euclidean(); startnode = StartNode(data; metric)
+    graph,
+    data::MaybeNumaAware{AbstractVector},
+    metric = Euclidean();
+    startnode = StartNode(localize(data); metric),
 )
-    return DiskANNIndex(graph, data, _forward(data, startnode), metric)
+    return DiskANNIndex(graph, data, _forward(localize(data), startnode), metric)
 end
 _Base.Neighbor(::DiskANNIndex, id::T, distance::D) where {T,D} = Neighbor{T,D}(id, distance)
 
 function Base.show(io::IO, index::DiskANNIndex)
-    print(io, "DiskANNIndex(", length(index.data), " data points. ")
+    print(io, "DiskANNIndex(", length(getdata(index)), " data points. ")
     return print(io, "Entry point index: ", index.startnode.index, ")")
 end
 
@@ -140,8 +149,8 @@ end
 function DiskANNRunner(
     index::DiskANNIndex, search_list_size; executor::F = single_thread
 ) where {F}
-    I = eltype(index.graph)
-    D = costtype(index.metric, index.data)
+    I = eltype(getgraph(index))
+    D = costtype(index.metric, getdata(index))
     return DiskANNRunner{I,D}(search_list_size, ordering(index.metric); executor)
 end
 
@@ -216,7 +225,8 @@ function _Base.search(
     empty!(runner)
 
     # Destructure argument
-    @unpack graph, data = index
+    graph = getgraph(index)
+    data = getdata(index)
     initial_distance = evaluate(metric, query, start.value)
     pushcandidate!(runner, Neighbor(runner, start.index, initial_distance))
 
@@ -286,7 +296,7 @@ function _Base.search(
     kw...,
 ) where {T<:AbstractVector}
     num_queries = length(queries)
-    dest = similar(queries, eltype(index.graph), (num_neighbors, num_queries))
+    dest = similar(queries, eltype(getgraph(index)), (num_neighbors, num_queries))
     return search!(dest, runner, index, queries; num_neighbors, kw...)
 end
 
