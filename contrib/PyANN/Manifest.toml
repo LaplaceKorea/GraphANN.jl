@@ -135,7 +135,7 @@ deps = ["Random"]
 uuid = "9fa8497b-333b-5362-9e8d-4d0656e87820"
 
 [[GraphANN]]
-deps = ["DataStructures", "HugepageMmap", "LightGraphs", "LinearAlgebra", "Mmap", "ProgressMeter", "Random", "SIMD", "Setfield", "StaticArrays", "Statistics", "TimerOutputs", "UnPack"]
+deps = ["DataStructures", "HugepageMmap", "Libdl", "LightGraphs", "LinearAlgebra", "MacroTools", "Mmap", "ProgressMeter", "Random", "SIMD", "Setfield", "StaticArrays", "Statistics", "TimerOutputs", "UnPack"]
 path = "../.."
 uuid = "38438e65-754f-449b-9041-06b96401f6e7"
 version = "0.1.0"

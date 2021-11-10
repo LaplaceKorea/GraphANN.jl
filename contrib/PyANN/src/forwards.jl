@@ -6,14 +6,33 @@ struct DirectMmap end
 const direct_mmap = DirectMmap()
 
 function loaddata(
-    path, ::Type{T}, dim::Integer; allocator = direct_mmap, diskann_format = false
+    path,
+    ::Type{T},
+    dim::Integer;
+    allocator = direct_mmap,
+    diskann_format = false,
+    numacopy = false,
 ) where {T}
     eltyp = StaticArrays.SVector{dim,T}
     _data = GraphANN.load_bin(path, Vector{eltyp}; offset = diskann_format ? 8 : 0)
     if allocator !== direct_mmap
-        data = allocator(eltyp, length(_data))
-        GraphANN.dynamic_thread(eachindex(_data, data), 2048) do i
-            @inbounds(data[i] = _data[i])
+        # Do the happy little dance when assigining copies to each NUMA node.
+        if numacopy
+            data = GraphANN.@numacopy allocator=allocator strict=true begin
+                __allocator__(eltyp, length(_data))
+            end
+
+            for j in Base.OneTo(length(data))
+                local_version = data[j]
+                GraphANN.dynamic_thread(eachindex(_data, local_version), 2048) do i
+                    @inbounds(local_version[i] = _data[i])
+                end
+            end
+        else
+            data = allocator(eltyp, length(_data))
+            GraphANN.dynamic_thread(eachindex(_data, data), 2048) do i
+                @inbounds(data[i] = _data[i])
+            end
         end
     else
         data = _data
@@ -21,13 +40,18 @@ function loaddata(
     return data
 end
 
+_prefix(x::AbstractString) = x
+_prefix(x::AbstractArray) = _prefix(x[1])
+
 """
-    loadindex(dir::AbstractString, ::Type{T}, dim::Integer, metric; kw...) -> Index
+    loadindex(dir, ::Type{T}, dim::Integer, metric; kw...) -> Index
 
 Load an index stored in `dir`. Data points within the index's dataset should have type `T`
 (where `T` is some machine native type like `Float33`, `UInt8` etc.) and length `dim` such
 that the elements of the loaded dataset are a `SVector{dim,T}`. The `metric` to use for
-the dataset is passed as the final argument.
+the dataset is passed as the final argument. If `dir` is a vector of strings, than it is
+assumed that each directory belongs to a copy of the graph and each will be loaded and
+bundled into a `NumaAware` struct.
 
 It is assumed that the graph will live in `joinpath(dir, "graph.bin")` and the data will
 be at `joinpath(dir, "data.bin")`, though the full path for the dataset may be passed as
@@ -42,26 +66,38 @@ Keywords
     Default: `direct_mmap`.
 * `diskann_format::Bool` - Set to `true` is the dataset is in the DiskANN binary format
     (i.e., has an 8 byte header that should be ignored). Default: `false`.
+* `numacopy::Bool` - Set to `true` to make NUMA local copies of the data. Default: `false`.
 """
 function loadindex(
     dir,
     ::Type{T},
     dim,
     metric;
-    datapath = joinpath(dir, "data.bin"),
+    datapath = joinpath(_prefix(dir), "data.bin"),
     allocator = direct_mmap,
     diskann_format = false,
+    numacopy = false,
     # use_pq = false,
     # centroids_path = joinpath(dir, "centroids.bin"),
     # assignments_path = joinpath(dir, "assignments.bin"),
 ) where {T}
-    graph = GraphANN.load_bin(
-        joinpath(dir, "graph.bin"),
-        GraphANN.SuperFlatAdjacencyList{UInt32};
-        writable = false,
-    )
+    if isa(dir, AbstractString)
+        graph = GraphANN.load_bin(
+            joinpath(dir, "graph.bin"),
+            GraphANN.SuperFlatAdjacencyList{UInt32};
+            writable = false,
+        )
+    elseif isa(dir, AbstractArray)
+        graph = GraphANN.NumaAware(map(dir) do _dir
+            GraphANN.load_bin(
+                joinpath(_dir, "graph.bin"),
+                GraphANN.SuperFlatAdjacencyList{UInt32};
+                writable = false,
+            )
+        end)
+    end
 
-    data = loaddata(datapath, T, dim; allocator, diskann_format)
+    data = loaddata(datapath, T, dim; allocator, diskann_format, numacopy)
     index = GraphANN.DiskANNIndex(graph, data, metric)
     return index
 end

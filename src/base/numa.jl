@@ -120,6 +120,7 @@ struct NumaAware{T}
 end
 Base.getindex(x::NumaAware) = x.copies[getnode()]
 Base.getindex(x::NumaAware, i::Integer) = x.copies[i]
+Base.length(x::NumaAware) = length(x.copies)
 
 """
     numalocal(x)
