@@ -308,10 +308,18 @@ function evaluate(
     return evaluate(metric, wrap(V, a), wrap(V, b))
 end
 
+# SIMD Patch
+#Base.FastMath.sub_fast(x::SIMD.Vec{N,T}, y::SIMD.Vec{N,T}) where {N,T <: Integer} = x - y
+function SIMD.Intrinsics.sub(
+    x::SIMD.LVec{N,T}, y::SIMD.LVec{N,T}, ::SIMD.Intrinsics.FastMathFlags
+) where {N,T<:Integer}
+    return SIMD.Vec(x) - SIMD.Vec(y)
+end
+
 function evaluate(::Euclidean, a::AbstractWrap{V,K}, b::AbstractWrap{V,K}) where {V,K}
     Base.@_inline_meta
     s = zero(accum_type(V))
-    for i in Base.OneTo(K)
+    @fastmath for i in Base.OneTo(K)
         z = @inbounds(a[i] - b[i])
         s = muladd(z, z, s)
     end
@@ -328,7 +336,7 @@ end
 function _evaluate(::InnerProduct, a::AbstractWrap{V,K}, b::AbstractWrap{V,K}) where {V,K}
     Base.@_inline_meta
     s = zero(accum_type(V))
-    for i in Base.OneTo(K)
+    @fastmath for i in Base.OneTo(K)
         s = muladd(@inbounds(a[i]), @inbounds(b[i]), s)
     end
     return _sum(s)
@@ -341,7 +349,7 @@ end
 # faster ...
 function _sum(x::SIMD.Vec{N,T}) where {N,T}
     s = zero(T)
-    @inbounds for i in 1:N
+    @inbounds @fastmath for i in Base.OneTo(N)
         s += x[i]
     end
     return s
@@ -412,10 +420,7 @@ function cvt_f16_to_f32(x::SIMD.Vec{16,Int16})
     """
 
     y = Base.llvmcall(
-        (s, "entry"),
-        SIMD.LVec{16,Float32},
-        Tuple{SIMD.LVec{16,Int16}},
-        x.data,
+        (s, "entry"), SIMD.LVec{16,Float32}, Tuple{SIMD.LVec{16,Int16}}, x.data
     )
     return SIMD.Vec(y)
 end

@@ -230,6 +230,7 @@ function _Base.search(
     @inbounds while !done(runner)
         p = getid(unsafe_peek(runner))
         neighbors = LightGraphs.outneighbors(graph, p)
+        len = length(neighbors)
 
         # Prefetch all new datapoints.
         # IMPORTANT: This is critical for performance!
@@ -246,11 +247,12 @@ function _Base.search(
         !done(runner) && unsafe_prefetch(graph, getid(unsafe_peek(runner)))
 
         # Distance computations
-        for v in neighbors
+        for i in Base.OneTo(len)
+            v = neighbors[i]
             # Perform distance query, and try to trefetch the next datapoint.
             # NOTE: Checking if a vertex has been visited here is actually SLOWER than
             # deferring until after the distance comparison.
-            @inbounds d = evaluate(metric, query, pointer(data, v))
+            d = evaluate(metric, query, pointer(data, v))
 
             ## only bother to add if it's better than the worst currently tracked.
             if Base.lt(runner, d, algmax) || !isfull(runner)

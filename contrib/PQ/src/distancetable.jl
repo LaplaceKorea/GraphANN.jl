@@ -186,7 +186,7 @@ function lookup_generic(table::DistanceTable, inds::NTuple{K}) where {K}
     s2 = zero(Float32)
     s3 = zero(Float32)
     s4 = zero(Float32)
-    @inbounds while i <= (K - 3)
+    @inbounds @fastmath while i <= (K - 3)
         a1 = UInt(inds[i + 0]) + one(UInt)
         a2 = UInt(inds[i + 1]) + one(UInt)
         a3 = UInt(inds[i + 2]) + one(UInt)
@@ -199,7 +199,7 @@ function lookup_generic(table::DistanceTable, inds::NTuple{K}) where {K}
     end
 
     # Get any leftovers
-    @inbounds while i <= K
+    @inbounds @fastmath while i <= K
         s1 += distances[UInt(inds[i]) + one(UInt), i]
         i += 1
     end

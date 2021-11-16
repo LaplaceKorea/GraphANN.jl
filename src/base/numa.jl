@@ -1,7 +1,7 @@
 const libnuma = "libnuma"
 Libdl.dlopen(libnuma)
 
-# Initialize map of Thread-ID to NUMA node.
+#Initialize map of Thread-ID to NUMA node.
 # Will only be populated if `JULIA_EXCLUSIVE` is set.
 const NUMAMAP = fill(1, Threads.nthreads())
 const NUM_NUMA_NODES = Ref{Int}(1)

@@ -63,7 +63,7 @@ include("base/fastset.jl")
 
 # Testing the exclusive features requires additional setup prior to running and thus
 # shouldn't be tested all the time.
-if ENV["JULIA_EXCLUSIVE"]
+if get(ENV, "JULIA_EXCLUSIVE", "0") != "0"
     include("base/numa.jl")
 end
 

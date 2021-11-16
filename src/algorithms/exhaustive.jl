@@ -66,6 +66,7 @@ function exhaustive_search(
         executor = executor,
         costtype = D,
         max_groupsize = groupsize,
+        metric = metric,
     )
     search!(runner, queries, dataset; groupsize, metric, kw...)
     return runner.groundtruth
@@ -106,6 +107,7 @@ function ExhaustiveRunner(
     executor::F = single_thread,
     costtype::Type{D} = Float32,
     max_groupsize = 32,
+    metric = Euclidean(),
 ) where {ID<:IntOrNeighbor,U<:Union{Integer,typeof(one)},F,D}
     # Preallocate destination.
     if isa(num_neighbors, Integer)
@@ -116,7 +118,7 @@ function ExhaustiveRunner(
 
     # Create thread local storage.
     heaps = [
-        KeepSmallest{Neighbor{inttype(ID),D}}(_num_neighbors(num_neighbors))
+         Keeper{Neighbor{inttype(ID),D}}(Base.ReverseOrdering(ordering(metric)), _num_neighbors(num_neighbors))
         for _ in 1:max_groupsize
     ]
     exhaustive_local = threadlocal_wrap(executor, heaps)
@@ -195,7 +197,7 @@ end
 # Define there to help out inference in the "exhaustive_search!" closure.
 Base.@propagate_inbounds function _nearest_neighbors!(
     ::QueryMajor,
-    heaps::AbstractVector{KeepSmallest{T}},
+    heaps::AbstractVector{<:Keeper{T}},
     dataset::AbstractVector,
     queries::AbstractVector,
     range,
@@ -217,7 +219,7 @@ end
 
 Base.@propagate_inbounds function _nearest_neighbors!(
     ::DataMajor,
-    heaps::AbstractVector{KeepSmallest{T}},
+    heaps::AbstractVector{<:Keeper{T}},
     dataset::AbstractVector,
     queries::AbstractVector,
     range,

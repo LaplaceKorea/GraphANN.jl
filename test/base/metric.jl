@@ -256,7 +256,7 @@ maybescale(x::SVector, scale) = x
         for i in 1:2000
             x[1] = maybescale(rand(SVector{len,left}), scale)
             y[1] = maybescale(rand(SVector{len,right}), scale)
-            test_metric(x, y; metric, test_codegen, rtol = 0.03)
+            test_metric(x, y; metric, test_codegen, rtol = 0.1)
             test_codegen = false
         end
     end
