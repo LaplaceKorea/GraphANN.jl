@@ -234,7 +234,7 @@ end
     metric = GraphANN.Euclidean()
     d = GraphANN.evaluate.(metric, x, y)
     for i in eachindex(x, y)
-        @test d[i] == GraphANN.evaluate(metric, x[i], y[i])
+        @test isapprox(d[i], GraphANN.evaluate(metric, x[i], y[i]))
     end
 end
 
@@ -268,7 +268,7 @@ maybescale(x::SVector, scale) = x
     metric = GraphANN.InnerProduct()
     d = GraphANN.evaluate.(metric, x, y)
     for i in eachindex(x, y)
-        @test d[i] == GraphANN.evaluate(metric, x[i], y[i])
+        @test isapprox(d[i], GraphANN.evaluate(metric, x[i], y[i]))
     end
 end
 

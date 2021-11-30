@@ -319,7 +319,7 @@ end
 function evaluate(::Euclidean, a::AbstractWrap{V,K}, b::AbstractWrap{V,K}) where {V,K}
     Base.@_inline_meta
     s = zero(accum_type(V))
-    @fastmath for i in Base.OneTo(K)
+    @inbounds @fastmath for i in Base.OneTo(K)
         z = @inbounds(a[i] - b[i])
         s = muladd(z, z, s)
     end

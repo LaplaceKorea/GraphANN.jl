@@ -141,7 +141,7 @@ function pass(
     # TODO: Validate sizes of data and centroids
     xbar = GraphANN.ThreadLocal(zero(MVector{N1,Float32}))
     counts = GraphANN.ThreadLocal(zeros(Int, size(centroids)))
-    localassignments = GraphANN.ThreadLocal(zeros(UInt32, size(centroids, 2)))
+#    localassignments = GraphANN.ThreadLocal(zeros(UInt32, size(centroids, 2)))
 
     assignments = ones(UInt32, size(centroids, 2), length(data))
     losses = zeros(Float32, length(data))

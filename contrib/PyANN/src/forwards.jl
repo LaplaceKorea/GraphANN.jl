@@ -107,9 +107,19 @@ end
 #####
 
 function make_runner(index::GraphANN.DiskANNIndex, search_window_size)
-    return GraphANN.DiskANNRunner(
+    runner = GraphANN.DiskANNRunner(
         index, search_window_size; executor = GraphANN.dynamic_thread
     )
+
+    @info "Triggering JIT Compilation"
+    data = GraphANN.numalocal(index.data)
+    ptrvector = PtrVector{eltype(data)}(pointer(data), 100_000)
+    resize!(runner, 200)
+    search(runner, index, ptrvector, 100)
+    resize!(runner, search_window_size)
+    @info "Done Compiling"
+
+    return runner
 end
 
 #####
@@ -144,7 +154,7 @@ function search(runner, index, queries::PyCall.PyObject, num_neighbors)
     ptrvector = PtrVector{StaticArrays.SVector{size(pyarray, 2),eltype(pyarray)}}(
         pointer(pyarray), size(pyarray, 1)
     )
-    return PyCall.PyReverseDims(search(runner, index, ptrvector, num_neighbors))
+    return @time PyCall.PyReverseDims(search(runner, index, ptrvector, num_neighbors))
 end
 
 function search(runner, index, queries::PtrVector, num_neighbors)
